@@ -21,6 +21,8 @@ from astrill_lazy.launcher import parse_command
 from astrill_lazy.router import RouterError
 from astrill_lazy.store import ConfigStore, default_uu_rule
 
+ROUTER_VERSION = (find_router_root() / "VERSION").read_text(encoding="ascii").strip()
+
 
 def test_router_package_is_deterministic_and_contains_only_runtime_files() -> None:
     root = find_router_root()
@@ -89,7 +91,7 @@ def test_router_reconcile_skips_current_runtime() -> None:
     class CurrentClient:
         def status(self) -> dict[str, object]:
             return {
-                "version": "0.1.0",
+                "version": ROUTER_VERSION,
                 "jump_installed": True,
                 "watchdog": True,
             }
@@ -105,7 +107,7 @@ def test_router_reconcile_repairs_runtime_before_reinstalling() -> None:
 
         def status(self) -> dict[str, object]:
             return {
-                "version": "0.1.0",
+                "version": ROUTER_VERSION,
                 "jump_installed": self.repaired,
                 "watchdog": self.repaired,
             }
@@ -133,7 +135,7 @@ def test_router_reconcile_reconstructs_current_stored_package(
             if not self.reconstructed:
                 raise RouterError("runtime is not ready")
             return {
-                "version": "0.1.0",
+                "version": ROUTER_VERSION,
                 "jump_installed": True,
                 "watchdog": True,
             }
@@ -145,7 +147,7 @@ def test_router_reconcile_reconstructs_current_stored_package(
             assert timeout is None
             values = {
                 "astrill_lazy_installed": "1",
-                "astrill_lazy_version": "0.1.0",
+                "astrill_lazy_version": ROUTER_VERSION,
                 "astrill_lazy_pkg_md5": self.expected_md5,
             }
             return values[arguments[-1]]
@@ -174,7 +176,7 @@ def test_router_reconcile_does_not_rewrite_identical_broken_package(
 
         def status(self) -> dict[str, object]:
             return {
-                "version": "0.1.0",
+                "version": ROUTER_VERSION,
                 "jump_installed": False,
                 "watchdog": False,
             }
@@ -186,7 +188,7 @@ def test_router_reconcile_does_not_rewrite_identical_broken_package(
             assert timeout is None
             values = {
                 "astrill_lazy_installed": "1",
-                "astrill_lazy_version": "0.1.0",
+                "astrill_lazy_version": ROUTER_VERSION,
                 "astrill_lazy_pkg_md5": self.expected_md5,
             }
             return values[arguments[-1]]

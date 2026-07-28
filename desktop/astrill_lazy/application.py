@@ -13,7 +13,12 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
-from .astrill import AstrillServer, group_by_region, parse_applet
+from .astrill import (
+    ASTRILL_PROTOCOL_NAMES,
+    AstrillServer,
+    group_by_region,
+    parse_applet,
+)
 from .autostart import (
     disable_autostart,
     enable_autostart,
@@ -96,8 +101,10 @@ class MainWindow(Adw.ApplicationWindow):
     PAGE_DEFINITIONS = (
         ("policies", "Policies", "view-list-symbolic"),
         ("services", "Services", "view-app-grid-symbolic"),
+        ("countries", "Countries", "mark-location-symbolic"),
         ("devices", "Devices", "network-workgroup-symbolic"),
-        ("locations", "Locations", "find-location-symbolic"),
+        ("locations", "Endpoints", "network-server-symbolic"),
+        ("router", "Router", "network-server-symbolic"),
         ("extensions", "Extensions", "application-x-addon-symbolic"),
     )
 
@@ -115,11 +122,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.servers: tuple[AstrillServer, ...] | None = None
         self.servers_loading = False
         self.server_groups: dict[str, tuple[AstrillServer, ...]] = {}
-        self.clients: list[dict[str, str]] = []
+        self.clients: list[dict[str, Any]] = []
         self.busy_count = 0
         self.dirty = False
         self._region_filter = "all"
         self._updating_autostart = False
+        self._updating_protocol = False
+        self._protocol_user_selected = False
 
         self._install_css()
         self.toast_overlay = Adw.ToastOverlay()
@@ -130,6 +139,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._build_content()
         self._render_rules()
         self._render_services()
+        self._render_countries()
         self._render_extensions()
         self.ensure_router_companion(quiet=False)
         self.load_servers()
@@ -229,8 +239,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.stack.add_named(self._build_policies_page(), "policies")
         self.stack.add_named(self._build_services_page(), "services")
+        self.stack.add_named(self._build_countries_page(), "countries")
         self.stack.add_named(self._build_devices_page(), "devices")
         self.stack.add_named(self._build_locations_page(), "locations")
+        self.stack.add_named(self._build_router_page(), "router")
         self.stack.add_named(self._build_extensions_page(), "extensions")
         toolbar.set_content(self.stack)
         self.split_view.set_content(Adw.NavigationPage.new(toolbar, "Content"))
@@ -257,7 +269,7 @@ class MainWindow(Adw.ApplicationWindow):
         for key, label in (
             ("health", "Controller"),
             ("tunnel", "Astrill tunnel"),
-            ("location", "Active location"),
+            ("location", "Active endpoint"),
             ("rules", "Enabled policies"),
         ):
             metric = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
@@ -357,11 +369,36 @@ class MainWindow(Adw.ApplicationWindow):
         content.append(_vertical_spacer())
         return _scroll_page(content)
 
+    def _build_countries_page(self) -> Gtk.Widget:
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.add_css_class("page-content")
+        self.country_banner = Adw.Banner()
+        self.country_banner.set_revealed(False)
+        content.append(self.country_banner)
+
+        heading = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title = Gtk.Label(label="Country Routes")
+        title.set_xalign(0)
+        title.set_hexpand(True)
+        title.add_css_class("section-title")
+        heading.append(title)
+        self.country_result_count = Gtk.Label()
+        self.country_result_count.add_css_class("catalog-count")
+        heading.append(self.country_result_count)
+        content.append(heading)
+
+        self.country_list = Gtk.ListBox()
+        self.country_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.country_list.add_css_class("catalog-list")
+        content.append(self.country_list)
+        content.append(_vertical_spacer())
+        return _scroll_page(content)
+
     def _build_devices_page(self) -> Gtk.Widget:
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         content.add_css_class("page-content")
         heading = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        title = Gtk.Label(label="Router Devices")
+        title = Gtk.Label(label="LAN Devices")
         title.set_xalign(0)
         title.set_hexpand(True)
         title.add_css_class("section-title")
@@ -371,7 +408,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         heading.append(manual)
         refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        refresh.set_tooltip_text("Reload DHCP clients")
+        refresh.set_tooltip_text("Reload observed LAN devices")
         refresh.connect("clicked", lambda _button: self.refresh_clients())
         heading.append(refresh)
         content.append(heading)
@@ -387,13 +424,13 @@ class MainWindow(Adw.ApplicationWindow):
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         content.add_css_class("page-content")
         banner = Adw.Banner(
-            title="One Astrill tunnel is available; all VPN policies share the active location."
+            title="One Astrill tunnel is available; all VPN policies share the active endpoint."
         )
         banner.set_revealed(True)
         content.append(banner)
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.location_search = Gtk.SearchEntry()
-        self.location_search.set_placeholder_text("Search Astrill locations")
+        self.location_search.set_placeholder_text("Search Astrill endpoints")
         self.location_search.set_hexpand(True)
         self.location_search.connect(
             "search-changed", lambda _entry: self._render_locations()
@@ -410,6 +447,15 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.location_filter.connect("notify::selected", self._on_location_filter)
         controls.append(self.location_filter)
+        self.protocol_dropdown = Gtk.DropDown.new_from_strings(
+            list(ASTRILL_PROTOCOL_NAMES)
+        )
+        self.protocol_dropdown.set_size_request(180, -1)
+        self.protocol_dropdown.set_tooltip_text(
+            "Protocol for the next Astrill connection"
+        )
+        self.protocol_dropdown.connect("notify::selected", self._on_protocol_selected)
+        controls.append(self.protocol_dropdown)
         content.append(controls)
         self.location_list = Gtk.ListBox()
         self.location_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -417,6 +463,116 @@ class MainWindow(Adw.ApplicationWindow):
         content.append(self.location_list)
         content.append(_vertical_spacer())
         self._render_locations()
+        return _scroll_page(content)
+
+    def _build_router_page(self) -> Gtk.Widget:
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.add_css_class("page-content")
+
+        astrill_heading = Gtk.Label(label="Astrill Connection")
+        astrill_heading.set_xalign(0)
+        astrill_heading.add_css_class("section-title")
+        content.append(astrill_heading)
+        self.router_astrill_row = Adw.ActionRow(
+            title="Shared tunnel",
+            subtitle="Checking Astrill",
+        )
+        self.router_astrill_row.set_use_markup(False)
+        self.router_astrill_icon = Gtk.Image.new_from_icon_name(
+            "network-offline-symbolic"
+        )
+        self.router_astrill_row.add_prefix(self.router_astrill_icon)
+        choose_location = _button_with_icon(
+            "Choose",
+            "find-location-symbolic",
+            lambda _button: self._show_locations(),
+        )
+        choose_location.set_valign(Gtk.Align.CENTER)
+        self.router_astrill_row.add_suffix(choose_location)
+        astrill_list = Gtk.ListBox()
+        astrill_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        astrill_list.add_css_class("catalog-list")
+        astrill_list.append(self.router_astrill_row)
+        content.append(astrill_list)
+
+        companion_heading = Gtk.Label(label="Router Companion")
+        companion_heading.set_xalign(0)
+        companion_heading.add_css_class("section-title")
+        companion_heading.add_css_class("toolbar-section")
+        content.append(companion_heading)
+        companion_list = Gtk.ListBox()
+        companion_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        companion_list.add_css_class("catalog-list")
+
+        self.router_runtime_row = Adw.ActionRow(
+            title="Policy runtime",
+            subtitle="Checking companion",
+        )
+        self.router_runtime_row.set_use_markup(False)
+        self.router_runtime_icon = Gtk.Image.new_from_icon_name(
+            "network-offline-symbolic"
+        )
+        self.router_runtime_row.add_prefix(self.router_runtime_icon)
+        repair = _button_with_icon(
+            "Repair",
+            "system-run-symbolic",
+            self.reconcile_router,
+        )
+        repair.set_valign(Gtk.Align.CENTER)
+        self.router_runtime_row.add_suffix(repair)
+        companion_list.append(self.router_runtime_row)
+
+        self.router_domain_row = Adw.ActionRow(
+            title="Domain routes",
+            subtitle="No resolution status",
+        )
+        self.router_domain_row.set_use_markup(False)
+        self.router_domain_row.add_prefix(
+            Gtk.Image.new_from_icon_name("network-workgroup-symbolic")
+        )
+        refresh_domains = _button_with_icon(
+            "Refresh",
+            "view-refresh-symbolic",
+            self.refresh_domains,
+        )
+        refresh_domains.set_valign(Gtk.Align.CENTER)
+        self.router_domain_row.add_suffix(refresh_domains)
+        companion_list.append(self.router_domain_row)
+
+        rollback_row = Adw.ActionRow(
+            title="Previous policy",
+            subtitle="Last successful router document",
+        )
+        rollback_row.set_use_markup(False)
+        rollback_row.add_prefix(Gtk.Image.new_from_icon_name("edit-undo-symbolic"))
+        rollback = _button_with_icon(
+            "Roll Back",
+            "edit-undo-symbolic",
+            self.confirm_rollback,
+        )
+        rollback.set_valign(Gtk.Align.CENTER)
+        rollback_row.add_suffix(rollback)
+        companion_list.append(rollback_row)
+
+        package_row = Adw.ActionRow(
+            title="Companion package",
+            subtitle=f"Expected version {RouterInstaller(self.router).expected_version}",
+        )
+        package_row.set_use_markup(False)
+        package_row.add_prefix(
+            Gtk.Image.new_from_icon_name("package-x-generic-symbolic")
+        )
+        install = _button_with_icon(
+            "Install / Upgrade",
+            "software-update-available-symbolic",
+            self.install_router,
+        )
+        install.set_valign(Gtk.Align.CENTER)
+        package_row.add_suffix(install)
+        companion_list.append(package_row)
+
+        content.append(companion_list)
+        content.append(_vertical_spacer())
         return _scroll_page(content)
 
     def _build_extensions_page(self) -> Gtk.Widget:
@@ -491,8 +647,10 @@ class MainWindow(Adw.ApplicationWindow):
         subtitles = {
             "policies": "Direct or current Astrill routing",
             "services": f"{len(self.catalog.services)} service profiles",
-            "devices": "DHCP clients and fixed addresses",
-            "locations": "Choose the shared Astrill country",
+            "countries": "Policy countries on one shared tunnel",
+            "devices": "Observed LAN clients and fixed addresses",
+            "locations": "Choose the shared Astrill server",
+            "router": "Runtime status and recovery",
             "extensions": "Catalog and router components",
         }
         self.window_title.set_title(title)
@@ -507,6 +665,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_devices(self) -> None:
         self.nav_list.select_row(self.nav_rows["devices"])
+
+    def _show_locations(self) -> None:
+        self.nav_list.select_row(self.nav_rows["locations"])
 
     def _render_rules(self) -> None:
         _clear_list(self.policy_list)
@@ -706,17 +867,39 @@ class MainWindow(Adw.ApplicationWindow):
         _clear_list(self.device_list)
         if not self.clients:
             self.device_list.append(
-                _empty_row("No clients loaded", "Refresh to read current DHCP leases.")
+                _empty_row(
+                    "No devices found",
+                    "No DHCP lease, active LAN neighbor, or static reservation was found.",
+                )
             )
             return
         for client in sorted(
             self.clients, key=lambda item: (item.get("hostname", ""), item["address"])
         ):
-            hostname = client.get("hostname") or "Unknown device"
+            raw_hostname = str(client.get("hostname", "")).strip()
+            hostname = (
+                "Unknown device"
+                if raw_hostname.casefold() in {"", "*", "unknown"}
+                else raw_hostname
+            )
             row = Adw.ActionRow()
             row.set_use_markup(False)
-            row.set_title(hostname if hostname != "*" else "Unknown device")
-            row.set_subtitle(f"{client['address']} · {client['mac']}")
+            row.set_title(hostname)
+            sources = {
+                "dhcp": "DHCP lease",
+                "arp": "LAN neighbor",
+                "static": "Static reservation",
+            }
+            source_labels = [
+                sources.get(source, source.title())
+                for source in str(client.get("source", "")).split(",")
+                if source
+            ]
+            details = [str(client["address"]), str(client["mac"])]
+            if client.get("active") is True:
+                details.append("Online")
+            details.extend(source_labels)
+            row.set_subtitle(" · ".join(details))
             row.add_prefix(Gtk.Image.new_from_icon_name("network-computer-symbolic"))
             for target, label in (
                 (RouteTarget.DIRECT, "Direct"),
@@ -734,6 +917,104 @@ class MainWindow(Adw.ApplicationWindow):
                 row.add_suffix(button)
             self.device_list.append(row)
 
+    def _render_countries(self) -> None:
+        if not hasattr(self, "country_list"):
+            return
+        _clear_list(self.country_list)
+        enabled_rules = [rule for rule in self.store.rules if rule.enabled]
+        rules_by_region = {
+            region.id: [rule for rule in enabled_rules if rule.region == region.id]
+            for region in self.catalog.regions
+        }
+        requested = {
+            rule.region
+            for rule in enabled_rules
+            if rule.target is RouteTarget.VPN
+            and rule.region not in {"direct", "active-astrill"}
+        }
+        region_names = self.catalog.regions_by_id
+        tunnel_connected = self.router_status.get("vpn_state") == "up"
+        server = self._server_by_id(int(self.router_status.get("astrill_server_id", 0)))
+        active_region = (
+            self._region_for_server(server)
+            if tunnel_connected and server is not None
+            else None
+        )
+
+        if len(requested) > 1:
+            names = ", ".join(
+                region_names[region_id].name for region_id in sorted(requested)
+            )
+            self.country_banner.set_title(
+                f"Country conflict: {names} cannot be active on one tunnel."
+            )
+            self.country_banner.set_revealed(True)
+        elif requested and active_region not in requested:
+            requested_id = next(iter(requested))
+            requested_name = region_names[requested_id].name
+            active_name = (
+                region_names[active_region].name
+                if active_region in region_names
+                else "no connected endpoint"
+            )
+            self.country_banner.set_title(
+                f"Policies request {requested_name}; active country is {active_name}."
+            )
+            self.country_banner.set_revealed(True)
+        else:
+            self.country_banner.set_revealed(False)
+
+        assigned_count = 0
+        for region in self.catalog.regions:
+            policies = rules_by_region[region.id]
+            assigned_count += len(policies)
+            row = Adw.ActionRow()
+            row.set_use_markup(False)
+            row.set_title(region.name)
+            policy_text = _policy_summary(policies)
+            if region.kind == "direct":
+                endpoint_text = "WAN gateway"
+                icon_name = "network-wired-symbolic"
+            elif region.id == "active-astrill":
+                endpoint_text = "Selected Astrill endpoint"
+                icon_name = "network-vpn-symbolic"
+            else:
+                endpoint_count = len(self.server_groups.get(region.id, ()))
+                endpoint_text = (
+                    f"{endpoint_count} "
+                    f"{'endpoint' if endpoint_count == 1 else 'endpoints'}"
+                    if self.servers is not None
+                    else "Loading endpoints"
+                )
+                icon_name = "mark-location-symbolic"
+            row.set_subtitle(f"{policy_text} · {endpoint_text}")
+            row.add_prefix(Gtk.Image.new_from_icon_name(icon_name))
+
+            if region.id == active_region:
+                active = Gtk.Label(label="ACTIVE")
+                active.add_css_class("catalog-route")
+                active.add_css_class("catalog-vpn")
+                active.set_valign(Gtk.Align.CENTER)
+                row.add_suffix(active)
+
+            if region.kind != "direct":
+                endpoints = Gtk.Button.new_from_icon_name("go-next-symbolic")
+                endpoints.set_tooltip_text(f"Show {region.name} endpoints")
+                endpoints.set_valign(Gtk.Align.CENTER)
+                endpoints.connect(
+                    "clicked",
+                    lambda _button, region_id=region.id: self._open_region_endpoints(
+                        region_id
+                    ),
+                )
+                row.add_suffix(endpoints)
+            self.country_list.append(row)
+
+        self.country_result_count.set_label(
+            f"{assigned_count} enabled "
+            f"{'policy' if assigned_count == 1 else 'policies'}"
+        )
+
     def _render_locations(self) -> None:
         if not hasattr(self, "location_list"):
             return
@@ -741,7 +1022,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self.servers is None:
             self.location_list.append(
                 _empty_row(
-                    "Locations not loaded", "Open this page to read the Astrill applet."
+                    "Endpoints not loaded", "Open this page to read the Astrill applet."
                 )
             )
             return
@@ -772,14 +1053,14 @@ class MainWindow(Adw.ApplicationWindow):
             if connected:
                 row.add_css_class("location-current")
                 current = Gtk.Image.new_from_icon_name("object-select-symbolic")
-                current.set_tooltip_text("Current Astrill location")
+                current.set_tooltip_text("Current Astrill endpoint")
                 row.add_prefix(current)
             elif configured:
                 configured_icon = Gtk.Image.new_from_icon_name(
                     "network-offline-symbolic"
                 )
                 configured_icon.set_tooltip_text(
-                    "Configured location; Astrill is disconnected"
+                    "Configured endpoint; Astrill is disconnected"
                 )
                 row.add_prefix(configured_icon)
             else:
@@ -796,7 +1077,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.location_list.append(row)
         if not visible:
             self.location_list.append(
-                _empty_row("No matching locations", "Change the region or search text.")
+                _empty_row(
+                    "No matching endpoints", "Change the country or search text."
+                )
             )
 
     def _render_extensions(self) -> None:
@@ -877,6 +1160,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_service_filters()
         self._render_rules()
         self._render_services()
+        self._render_countries()
         self._render_locations()
         self._render_extensions()
         self.toast("Extension settings updated")
@@ -934,6 +1218,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.save()
         self.dirty = True
         self.window_title.set_subtitle("Changes ready to apply")
+        self._render_countries()
 
     def _add_service(self, service_id: str) -> None:
         service = self.catalog.services_by_id[service_id]
@@ -1230,6 +1515,52 @@ class MainWindow(Adw.ApplicationWindow):
             quiet=True,
         )
 
+    def refresh_domains(self, _button: Gtk.Button | None = None) -> None:
+        self._run_task(
+            self.router.refresh,
+            self._domains_refreshed,
+            "Could not refresh domain routes",
+        )
+
+    def _domains_refreshed(self, status: dict[str, Any]) -> None:
+        self._router_refreshed(status)
+        self.toast(f"Refreshed {status.get('resolved_addresses', 0)} domain addresses")
+
+    def confirm_rollback(self, _button: Gtk.Button | None = None) -> None:
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Restore the previous router policy?",
+            "The desktop policy remains unchanged. Apply sends it to the router again.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("rollback", "Roll Back")
+        dialog.set_response_appearance("rollback", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect(
+            "response",
+            lambda _dialog, response: (
+                response == "rollback" and self._rollback_router()
+            ),
+        )
+        dialog.present()
+
+    def _rollback_router(self) -> None:
+        def success(status: dict[str, Any]) -> None:
+            self.dirty = True
+            self._router_refreshed(status)
+            self.policy_banner.set_title(
+                "Router is using the previous policy. Apply restores the desktop policy."
+            )
+            self.policy_banner.set_revealed(True)
+            self.toast("Restored the previous router policy")
+
+        self._run_task(
+            self.router.rollback,
+            success,
+            "Could not roll back router policy",
+        )
+
     def ensure_router_companion(self, *, quiet: bool = True) -> None:
         self._run_task(
             lambda: RouterInstaller(self.router).ensure(),
@@ -1237,6 +1568,18 @@ class MainWindow(Adw.ApplicationWindow):
             "Could not reconcile the router companion",
             quiet=quiet,
         )
+
+    def reconcile_router(self, _button: Gtk.Button | None = None) -> None:
+        self._run_task(
+            lambda: RouterInstaller(self.router).ensure(),
+            self._manual_companion_ensured,
+            "Could not repair the router companion",
+        )
+
+    def _manual_companion_ensured(self, result: EnsureResult) -> None:
+        self._router_companion_ensured(result)
+        if result.action == "none":
+            self.toast("Router companion is already current")
 
     def _router_companion_ensured(self, result: EnsureResult) -> None:
         self._router_refreshed(result.status)
@@ -1253,6 +1596,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _router_refreshed(self, status: dict[str, Any]) -> None:
         self.router_status = status
         self._update_status()
+        self._render_countries()
         self._render_locations()
 
     def _update_status(self) -> None:
@@ -1265,6 +1609,13 @@ class MainWindow(Adw.ApplicationWindow):
         _set_status_class(self.metrics["tunnel"], tunnel)
         server_id = int(status.get("astrill_server_id", 0))
         server = self._server_by_id(server_id)
+        protocol = int(status.get("astrill_protocol", 0))
+        if not self._protocol_user_selected and 0 <= protocol < len(
+            ASTRILL_PROTOCOL_NAMES
+        ):
+            self._updating_protocol = True
+            self.protocol_dropdown.set_selected(protocol)
+            self._updating_protocol = False
         self.metrics["location"].set_label(
             (server.name if server else f"Server {server_id}")
             if tunnel
@@ -1293,6 +1644,35 @@ class MainWindow(Adw.ApplicationWindow):
         self.router_companion_icon.set_from_icon_name(
             "object-select-symbolic" if installed else "network-offline-symbolic"
         )
+        runtime_healthy = (
+            status.get("jump_installed") is True and status.get("watchdog") is True
+        )
+        self.router_runtime_icon.set_from_icon_name(
+            "object-select-symbolic" if runtime_healthy else "network-offline-symbolic"
+        )
+        watchdog = "Watchdog active" if status.get("watchdog") else "Watchdog stopped"
+        self.router_runtime_row.set_subtitle(
+            f"Version {status.get('version', 'unknown')} · "
+            f"{status.get('active_chain') or 'No active chain'} · {watchdog}"
+        )
+        self.router_domain_row.set_subtitle(
+            f"{status.get('resolved_addresses', 0)} resolved · "
+            f"{status.get('unresolved_domains', 0)} unresolved · "
+            f"{status.get('origin_count', 0)} policies"
+        )
+        protocol_name = (
+            ASTRILL_PROTOCOL_NAMES[protocol]
+            if 0 <= protocol < len(ASTRILL_PROTOCOL_NAMES)
+            else f"Protocol {protocol}"
+        )
+        location_name = server.name if server else f"Server {server_id}"
+        self.router_astrill_row.set_subtitle(
+            f"{'Connected' if tunnel else 'Disconnected'} · "
+            f"{location_name} · {protocol_name}"
+        )
+        self.router_astrill_icon.set_from_icon_name(
+            "network-vpn-symbolic" if tunnel else "network-offline-symbolic"
+        )
 
     def refresh_clients(self) -> None:
         self._run_task(
@@ -1301,10 +1681,10 @@ class MainWindow(Adw.ApplicationWindow):
             "Could not load router clients",
         )
 
-    def _clients_refreshed(self, clients: list[dict[str, str]]) -> None:
+    def _clients_refreshed(self, clients: list[dict[str, Any]]) -> None:
         self.clients = clients
         self._render_devices()
-        self.toast(f"Loaded {len(clients)} DHCP clients")
+        self.toast(f"Loaded {len(clients)} LAN devices")
 
     def load_servers(self) -> None:
         if self.servers_loading:
@@ -1324,14 +1704,30 @@ class MainWindow(Adw.ApplicationWindow):
         ) -> None:
             self.servers_loading = False
             self.servers, self.server_groups = result
+            self._render_countries()
             self._render_locations()
             self._update_status()
 
-        self._run_task(load, success, "Could not load Astrill locations")
+        self._run_task(load, success, "Could not load Astrill endpoints")
 
     def _on_location_filter(self, dropdown: Gtk.DropDown, _param: Any) -> None:
         self._region_filter = self.location_filter_regions[dropdown.get_selected()].id
         self._render_locations()
+
+    def _open_region_endpoints(self, region_id: str) -> None:
+        selected_id = "all" if region_id == "active-astrill" else region_id
+        region_ids = [region.id for region in self.location_filter_regions]
+        if selected_id in region_ids:
+            self.location_filter.set_selected(region_ids.index(selected_id))
+            self._region_filter = selected_id
+            self._render_locations()
+        self.select_page("locations")
+
+    def _on_protocol_selected(self, dropdown: Gtk.DropDown, _param: Any) -> None:
+        if self._updating_protocol:
+            return
+        current = int(self.router_status.get("astrill_protocol", 0))
+        self._protocol_user_selected = dropdown.get_selected() != current
 
     def _server_by_id(self, server_id: int) -> AstrillServer | None:
         if self.servers is None:
@@ -1339,10 +1735,12 @@ class MainWindow(Adw.ApplicationWindow):
         return next((server for server in self.servers if server.id == server_id), None)
 
     def _confirm_switch_server(self, server: AstrillServer) -> None:
+        protocol = self.protocol_dropdown.get_selected()
         dialog = Adw.MessageDialog.new(
             self,
             f"Connect to {server.name}?",
-            "The shared Astrill tunnel will reconnect, briefly pausing VPN-routed traffic.",
+            f"{ASTRILL_PROTOCOL_NAMES[protocol]} will reconnect the shared tunnel, "
+            "briefly pausing VPN-routed traffic.",
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("connect", "Connect")
@@ -1358,7 +1756,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present()
 
     def _switch_server(self, server: AstrillServer) -> None:
-        protocol = int(self.router_status.get("astrill_protocol", 0))
+        protocol = self.protocol_dropdown.get_selected()
         try:
             sid, endpoint = server.endpoint_for(protocol)
         except ValueError as exc:
@@ -1380,11 +1778,13 @@ class MainWindow(Adw.ApplicationWindow):
             self.router_status = status
             self.store.active_region = self._region_for_server(server)
             self.store.save()
+            self._protocol_user_selected = False
             self._update_status()
+            self._render_countries()
             self._render_locations()
             self.toast(f"Connected to {server.name}")
 
-        self._run_task(switch, success, "Astrill location switch failed")
+        self._run_task(switch, success, "Astrill endpoint switch failed")
 
     def _region_for_server(self, server: AstrillServer) -> str:
         for region_id, servers in self.server_groups.items():
@@ -1458,7 +1858,7 @@ class MainWindow(Adw.ApplicationWindow):
         if prefix == "Could not reach the router":
             self.sidebar_status_icon.set_from_icon_name("network-offline-symbolic")
             self.sidebar_status_label.set_label("Router unavailable")
-        if prefix == "Could not load Astrill locations":
+        if prefix == "Could not load Astrill endpoints":
             self.servers_loading = False
         return GLib.SOURCE_REMOVE
 
@@ -1531,6 +1931,16 @@ def _set_status_class(label: Gtk.Label, good: bool) -> None:
     label.remove_css_class("status-good")
     label.remove_css_class("status-bad")
     label.add_css_class("status-good" if good else "status-bad")
+
+
+def _policy_summary(policies: list[Rule]) -> str:
+    count = len(policies)
+    if not policies:
+        return "No enabled policies"
+    names = ", ".join(rule.name for rule in policies[:2])
+    if count > 2:
+        names = f"{names} +{count - 2}"
+    return f"{count} {'policy' if count == 1 else 'policies'}: {names}"
 
 
 def _kind_label(kind: MatchKind) -> str:

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1 - 2026-07-28
+
+- Separate preferred policy countries from selectable Astrill server endpoints
+  in the native GUI.
+- Add a Countries view with per-country policy counts, endpoint counts,
+  active-country state, and single-tunnel conflict or mismatch warnings.
+- Merge DHCP leases, static reservations, and active LAN neighbors in the
+  companion device inventory while excluding the WAN interface.
+- Add Astrill protocol selection and connection, runtime repair, domain
+  refresh, guarded rollback, and companion upgrade controls to the Router view.
+- Add the Nutstore (Jianguoyun) profile and verified application endpoints.
+- Keep GUI debugging isolated on a dedicated noVNC display.
+
 ## 0.2.0 - 2026-07-28
 
 - Expand the core catalog to 260 company, application, and website profiles

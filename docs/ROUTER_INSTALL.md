@@ -42,6 +42,10 @@ because Astrill is disconnected. That is not an installation failure.
 In-place upgrades stop the old watchdog, replace the tmpfs package, restore the
 same persisted rules, and start a new watchdog process.
 
+The `clients --json` operation is read-only. It merges DHCP leases, static
+reservations, and complete ARP neighbors on the configured LAN bridge,
+deduplicates by MAC address, and excludes WAN-interface neighbors.
+
 The desktop GUI calls a lighter reconciliation path at startup and every 60
 seconds. It performs no NVRAM write when the installed version, active jump,
 and watchdog are current. It attempts `alctl start` before reinstalling a

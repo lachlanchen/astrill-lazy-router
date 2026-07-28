@@ -55,7 +55,7 @@ class RouterClient:
         result = self._run_alctl(["refresh", "--json"])
         return json.loads(_last_json_line(result.stdout))
 
-    def clients(self) -> list[dict[str, str]]:
+    def clients(self) -> list[dict[str, Any]]:
         result = self._run_alctl(["clients", "--json"])
         return list(json.loads(_last_json_line(result.stdout)))
 

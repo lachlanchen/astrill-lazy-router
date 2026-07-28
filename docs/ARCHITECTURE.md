@@ -106,7 +106,8 @@ bus endpoints.
 
 - The current policy engine is IPv4-only because the installed DD-WRT/Astrill
   routing path is IPv4-only.
-- One Astrill tunnel means one active VPN country.
+- One Astrill tunnel means one active VPN country. Policy countries are
+  assignments; Astrill endpoints are the concrete server choices.
 - Domain rules use periodically resolved A records because this firmware has no
   `ipset` support. Catalog seeds improve coverage but cannot identify every
   changing CDN hostname owned by a company.

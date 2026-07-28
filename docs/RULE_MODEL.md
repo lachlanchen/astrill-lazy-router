@@ -72,10 +72,11 @@ domains, and users can add observed domains as explicit rules.
 
 ## Countries
 
-`region` is a preferred Astrill location, not an independent tunnel selector.
+`region` is a preferred Astrill country, not an independent tunnel selector.
 All enabled VPN rules use table `212` and therefore the current `tun0`. The
 compiler warns when enabled rules request more than one specific VPN region.
-The Locations view performs the actual shared-server switch.
+The Countries view reports assignments and conflicts. The Endpoints view
+performs the actual shared-server switch.
 
 ## Default Rule
 

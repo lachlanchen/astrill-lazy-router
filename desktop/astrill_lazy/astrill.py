@@ -7,6 +7,13 @@ from dataclasses import dataclass
 
 from .models import Region
 
+ASTRILL_PROTOCOL_NAMES = (
+    "OpenVPN UDP",
+    "OpenVPN TCP",
+    "RouterPro VPN UDP",
+    "RouterPro VPN TCP",
+)
+
 TAIL_RE = re.compile(rb"tail -c\s+(\d+)")
 SERVER_HEAD_RE = re.compile(r"id:(\d+),name:'((?:\\.|[^'])*)'")
 INNER_SERVER_RE = re.compile(r"\{id:(\d+),lf:(\d+),ips:\[")

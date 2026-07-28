@@ -4,7 +4,7 @@
 
 set -u
 
-BASE=/tmp/astrill-lazy
+BASE=${ASTRILL_LAZY_BASE:-/tmp/astrill-lazy}
 CURRENT=$BASE/rules.tsv
 PREVIOUS=$BASE/rules.previous.tsv
 RESOLVED=$BASE/resolved.tsv
@@ -14,6 +14,8 @@ WATCHDOG_PID=$BASE/watchdog.pid
 LOCK_DIR=$BASE/controller.lock
 LOG_FILE=$BASE/controller.log
 VERSION_FILE=$BASE/VERSION
+LEASES_FILE=${ASTRILL_LAZY_LEASES_FILE:-/tmp/dnsmasq.leases}
+ARP_FILE=${ASTRILL_LAZY_ARP_FILE:-/proc/net/arp}
 
 CHAIN_A=AL_LAZY_A
 CHAIN_B=AL_LAZY_B
@@ -97,6 +99,11 @@ valid_ipv4_network() {
             }
         }
     '
+}
+
+valid_mac() {
+    printf '%s\n' "${1:-}" | grep -Eq \
+        '^[[:xdigit:]]{2}(:[[:xdigit:]]{2}){5}$'
 }
 
 valid_ports() {
@@ -652,20 +659,104 @@ status_json() {
 }
 
 clients_json() {
+    raw=$BASE/clients.$$.raw.tsv
+    merged=$BASE/clients.$$.merged.tsv
+    : > "$raw"
+
+    if [ -f "$LEASES_FILE" ]; then
+        while read -r expires mac address hostname _client_id; do
+            valid_ipv4_network "${address:-}" || continue
+            valid_mac "${mac:-}" || continue
+            is_uint "${expires:-}" || expires=0
+            printf '%s\t%s\t%s\t%s\tdhcp\tfalse\n' \
+                "$address" "$(printf '%s' "$mac" | tr 'A-F' 'a-f')" \
+                "${hostname:-unknown}" "$expires" >> "$raw"
+        done < "$LEASES_FILE"
+    fi
+
+    for key in static_leases dhcp_staticlist dhcpd_static; do
+        static_value=$(nvram get "$key")
+        [ -n "$static_value" ] || continue
+        printf '%s\n' "$static_value" |
+            tr '<>' '\n' |
+            tr ' ' '\n' |
+            while IFS='=' read -r mac hostname address _lease; do
+                valid_ipv4_network "${address:-}" || continue
+                valid_mac "${mac:-}" || continue
+                printf '%s\t%s\t%s\t0\tstatic\tfalse\n' \
+                    "$address" "$(printf '%s' "$mac" | tr 'A-F' 'a-f')" \
+                    "${hostname:-unknown}" >> "$raw"
+            done
+    done
+
+    lan_interface=$(nvram get lan_ifname)
+    [ -n "$lan_interface" ] || lan_interface=br0
+    if [ -f "$ARP_FILE" ]; then
+        awk -v interface="$lan_interface" '
+            NR > 1 && ($3 == "0x2" || $3 == "0X2") && $6 == interface {
+                print $1 "\t" tolower($4) "\tunknown\t0\tarp\ttrue"
+            }
+        ' "$ARP_FILE" >> "$raw"
+    fi
+
+    awk -F '\t' -v OFS='\t' '
+        function known_name(value) {
+            return value != "" && value != "*" && value != "unknown"
+        }
+        {
+            mac = tolower($2)
+            key = mac != "" ? "mac:" mac : "ip:" $1
+            if (!(key in seen)) {
+                seen[key] = 1
+                order[++count] = key
+                addresses[key] = $1
+                macs[key] = mac
+                names[key] = $3
+                expiries[key] = $4 + 0
+                sources[key] = $5
+                active[key] = $6
+                next
+            }
+            if ($6 == "true") {
+                addresses[key] = $1
+                active[key] = "true"
+            }
+            if (($5 == "static" || !known_name(names[key])) && known_name($3)) {
+                names[key] = $3
+            }
+            if (($4 + 0) > expiries[key]) {
+                expiries[key] = $4 + 0
+            }
+            if (index("," sources[key] ",", "," $5 ",") == 0) {
+                sources[key] = sources[key] "," $5
+            }
+        }
+        END {
+            for (position = 1; position <= count; position++) {
+                key = order[position]
+                print addresses[key], macs[key], names[key], expiries[key],
+                    sources[key], active[key]
+            }
+        }
+    ' "$raw" > "$merged" || {
+        rm -f "$raw" "$merged"
+        fail "could not merge LAN device inventory"
+    }
+
     printf '['
     first=true
-    leases=/tmp/dnsmasq.leases
-    if [ -f "$leases" ]; then
-        while read -r expires mac address hostname _client_id; do
-            [ -n "${address:-}" ] || continue
-            [ "$first" = true ] || printf ','
-            first=false
-            printf '{"address":"%s","mac":"%s","hostname":"%s","expires":%s}' \
-                "$(json_escape "$address")" "$(json_escape "$mac")" \
-                "$(json_escape "${hostname:-unknown}")" "${expires:-0}"
-        done < "$leases"
-    fi
+    while IFS="$TAB" read -r address mac hostname expires source active; do
+        [ -n "${address:-}" ] || continue
+        [ "$first" = true ] || printf ','
+        first=false
+        [ "$active" = true ] || active=false
+        printf '{"address":"%s","mac":"%s","hostname":"%s","expires":%s' \
+            "$(json_escape "$address")" "$(json_escape "$mac")" \
+            "$(json_escape "${hostname:-unknown}")" "${expires:-0}"
+        printf ',"source":"%s","active":%s}' "$(json_escape "$source")" "$active"
+    done < "$merged"
     printf ']\n'
+    rm -f "$raw" "$merged"
 }
 
 transform_origin() {

@@ -18,9 +18,9 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-27 tests passed
+29 tests passed
 Ruff: all checks passed
-Catalog: 260 profiles, 602/602 unique seed hosts resolved to IPv4
+Catalog: 261 profiles, 608/608 unique seed hosts resolved to IPv4
 ShellCheck: no findings
 Desktop entry: valid
 AppStream metadata: valid
@@ -42,6 +42,8 @@ Tests cover:
 - private atomic desktop configuration;
 - application command parsing;
 - POSIX shell parsing and the no-`eval` policy contract;
+- DHCP/static/ARP client inventory merging, MAC deduplication, and WAN
+  exclusion;
 - SSH banner error cleanup.
 
 ## Live Router Verification
@@ -70,15 +72,20 @@ The following checks were performed against the Linksys E4200:
 - physical router reboot reconstruction from NVRAM, with one startup entry,
   one watchdog, both policy rules, and retained MyPage commands;
 - direct Internet requests to UU Remote, Cloudflare, and Google after reboot;
+- six deduplicated LAN devices from four leases and five active LAN neighbors,
+  with the WAN neighbor excluded;
 - router MyPage rendering at `1280x900` and `390x844` with loaded status and
   no control/text overlap;
-- native GTK rendering of policies, all 260 services, DHCP devices, Astrill
-  locations, login startup, and extension state.
+- native GTK rendering of policies, all 261 services, country routes, LAN
+  devices, Astrill endpoints, router operations, login startup, and extension
+  state at `1180x760` and `880x600`;
+- isolated GUI debugging through noVNC without opening a window in the active
+  Ubuntu desktop session.
 
 The bootstrap was exercised directly, during multiple upgrades, and through a
-physical reboot. Astrill itself remained disconnected after reboot because its
-pre-existing autostart setting is disabled. An actual server switch was not
-forced, so the plugin did not alter that upstream setting.
+physical reboot. Astrill was later connected using its own upstream state while
+the pre-existing `astrill_autostart=0` setting remained unchanged. No endpoint
+switch was forced during this release verification.
 
 ## Package Verification
 

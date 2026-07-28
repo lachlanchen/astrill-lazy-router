@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import gzip
 
-from astrill_lazy.astrill import group_by_region, parse_applet, unpack_applet
+from astrill_lazy.astrill import (
+    ASTRILL_PROTOCOL_NAMES,
+    group_by_region,
+    parse_applet,
+    unpack_applet,
+)
 from astrill_lazy.models import Region
 
 SCRIPT = (
@@ -45,3 +50,12 @@ def test_servers_group_by_catalog_region_tokens() -> None:
     grouped = group_by_region(servers, regions)
     assert grouped["united-states"] == servers
     assert grouped["other"] == ()
+
+
+def test_protocol_names_match_applet_codes() -> None:
+    assert ASTRILL_PROTOCOL_NAMES == (
+        "OpenVPN UDP",
+        "OpenVPN TCP",
+        "RouterPro VPN UDP",
+        "RouterPro VPN TCP",
+    )

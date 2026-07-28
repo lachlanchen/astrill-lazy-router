@@ -37,7 +37,7 @@ snapshot contains:
 
 The unpacked script is about 369 KB and 6,467 lines. The desktop parser locates
 the server list with bracket-aware scanning and regular expressions. It never
-uses JavaScript `eval`. The installed applet exposes 178 server locations and
+uses JavaScript `eval`. The installed applet exposes 178 server endpoints and
 932 endpoint records.
 
 ## Astrill Routing Behavior

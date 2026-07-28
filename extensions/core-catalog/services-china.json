@@ -757,6 +757,29 @@
       "source": "https://www.alipan.com/"
     },
     {
+      "id": "nutstore",
+      "name": "Nutstore (Jianguoyun)",
+      "company": "Nutstore",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "jianguoyun.com",
+        "www.jianguoyun.com",
+        "app.jianguoyun.com",
+        "comet.jianguoyun.com",
+        "pkg-cdn.jianguoyun.com",
+        "nutstore.net"
+      ],
+      "aliases": [
+        "Jianguoyun",
+        "Jian Guo Yun",
+        "Nutstore Cloud"
+      ],
+      "source": "https://www.jianguoyun.com/"
+    },
+    {
       "id": "weiyun",
       "name": "Tencent Weiyun",
       "company": "Tencent",

@@ -12,12 +12,12 @@ The current deployment provides:
   namespaces;
 - a native GTK 4 and Libadwaita control application;
 - a companion page at DD-WRT `/MyPage.asp?3`;
-- an extension catalog with 260 company, app, and website profiles across 19
+- an extension catalog with 261 company, app, and website profiles across 19
   categories and 14 region groups;
 - guarded A/B policy activation, rollback, watchdog recovery, and fail-closed
   VPN routes;
 - desktop login startup and automatic companion installation or runtime repair;
-- discovery and switching of all 178 locations in the installed Astrill
+- discovery and switching of all 178 server endpoints in the installed Astrill
   applet;
 - an encrypted, round-trip-verified recovery backup.
 
@@ -57,13 +57,13 @@ seconds. A healthy current runtime causes no router write.
 This router has one Astrill tunnel. A rule can select:
 
 - `Direct`, which uses the WAN gateway; or
-- `Astrill`, which uses the one currently active Astrill location.
+- `Astrill`, which uses the one currently active Astrill endpoint.
 
-The GUI stores a preferred region for each VPN policy and reports incompatible
-simultaneous preferences. It does not pretend that one tunnel can provide
-several countries at once. Use the Locations view to switch the shared tunnel.
-A future multi-tunnel provider can extend this model without changing the rule
-schema.
+The GUI stores a preferred country for each VPN policy. The Countries view
+shows assignments, available endpoint counts, the active country, and
+incompatible simultaneous preferences. The Endpoints view selects the actual
+Astrill server for the shared tunnel. One tunnel cannot provide several active
+countries at once.
 
 ## Current Deployment
 
@@ -72,10 +72,10 @@ schema.
 - Astrill applet: `2.9.52`
 - Router runtime: `/tmp/astrill-lazy`
 - DD-WRT pages: policy `3`, status API `4`
-- Desktop/catalog: `0.2.0`
-- Router plugin: `0.1.0`, healthy after a physical reboot
-- Astrill tunnel: disconnected after reboot because its existing autostart
-  setting is disabled
+- Desktop/catalog: `0.2.1`
+- Router plugin: `0.2.0`
+- Astrill tunnel: verified connected; its existing `astrill_autostart=0`
+  setting remains unchanged
 - Active example: `uuyc.163.com` resolved and marked direct
 
 ## Safety

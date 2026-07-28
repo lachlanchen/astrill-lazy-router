@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "core-catalog",
   "name": "Core Service Catalog",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "minimum_app_version": "0.2.0",
   "capabilities": [
     "catalog.services",

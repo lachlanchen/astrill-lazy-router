@@ -41,6 +41,7 @@ jobs:
         run: >-
           shellcheck -x -s sh
           scripts/install-desktop.sh
+          scripts/run-novnc-debug.sh
           scripts/uninstall-desktop.sh
           helpers/astrill-lazy-netns
           router/alctl

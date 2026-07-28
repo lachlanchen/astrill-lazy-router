@@ -35,12 +35,31 @@ The package fingerprint prevents an identical broken package from being
 automatically written on every monitor cycle; the Install/Upgrade action is the
 explicit recovery override.
 
+## Isolated noVNC Debugging
+
+Run visual tests without opening a window in the active Ubuntu session:
+
+```bash
+./scripts/run-novnc-debug.sh
+```
+
+The default local URL is:
+
+```text
+http://127.0.0.1:6086/vnc.html?autoconnect=1&resize=scale
+```
+
+The script uses X display `:44`, VNC port `5926`, and web port `6086`. Override
+them with `ASTRILL_LAZY_NOVNC_DISPLAY`, `ASTRILL_LAZY_VNC_PORT`, and
+`ASTRILL_LAZY_NOVNC_PORT`. Both listeners bind only to loopback, and the
+separate X display cannot move or focus windows in the active desktop session.
+
 ## Views
 
 ### Policies
 
 The first screen shows controller health, tunnel state, active Astrill
-location, and enabled policy count. A configured server is not reported as
+endpoint, and enabled policy count. A configured server is not reported as
 active while the tunnel is disconnected. Each rule has:
 
 - an enable switch;
@@ -54,21 +73,42 @@ transactionally installs the full rule set on DD-WRT.
 
 ### Services
 
-The 260-profile catalog can be searched by service, company, alias, or seed
+The 261-profile catalog can be searched by service, company, alias, or seed
 domain and filtered by category and profile type. It includes Chinese and
 global vendors, AI tools, development services, media, messaging, work, and
 common daily services.
 
+### Countries
+
+Country is a preference attached to each VPN policy. The Countries view
+aggregates enabled policies by preference, shows the number of matching Astrill
+endpoints, identifies the active country, and links directly to its endpoints.
+It warns when policies request several specific countries or when the connected
+endpoint does not satisfy the one requested country.
+
 ### Devices
 
-The app reads current DHCP leases from DD-WRT and can add a direct or Astrill
-source policy with one action. Manual fixed addresses are also supported.
+The companion merges current DHCP leases, configured static reservations, and
+active ARP neighbors on the DD-WRT LAN bridge. Duplicate MAC addresses collapse
+to one device, each source and online state is shown, and WAN neighbors are
+excluded. An entirely offline device with no remaining lease or static
+reservation cannot be discovered; its fixed address can be added manually.
+Every listed device can become a direct or Astrill source policy with one
+action.
 
-### Locations
+### Endpoints
 
 The app reads the installed Astrill applet, groups its servers by configured
-region tokens, identifies the current server, and can switch the shared tunnel.
-A confirmation is required because reconnecting pauses VPN-routed traffic.
+country tokens, identifies the current endpoint, and can reconnect the shared
+tunnel using a selected Astrill protocol. A confirmation is required because
+reconnecting pauses VPN-routed traffic.
+
+### Router
+
+The Router view reports the upstream Astrill connection and companion policy
+runtime. It exposes endpoint selection, runtime repair, domain refresh,
+confirmation-gated policy rollback, and idempotent companion installation or
+upgrade.
 
 ### Extensions
 
@@ -104,7 +144,7 @@ lease.
 It contains:
 
 - the SSH host alias;
-- active location metadata;
+- active country and endpoint metadata;
 - enabled extension IDs;
 - editable source rules;
 - application profile metadata and allocated lease addresses.

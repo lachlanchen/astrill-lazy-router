@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     autostart.add_argument("action", choices=("enable", "disable", "status"))
 
-    servers = subparsers.add_parser("servers", help="list Astrill locations")
+    servers = subparsers.add_parser("servers", help="list Astrill server endpoints")
     servers.add_argument("--json", action="store_true")
 
     switch = subparsers.add_parser("switch", help="switch the active Astrill server")

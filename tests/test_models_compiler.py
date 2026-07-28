@@ -41,6 +41,7 @@ def test_core_catalog_contains_requested_services() -> None:
         "gemini",
         "copilot",
         "github",
+        "nutstore",
     } <= identifiers
     assert len(catalog.services) >= 250
     assert {item.profile_type for item in catalog.services} == {
@@ -49,6 +50,9 @@ def test_core_catalog_contains_requested_services() -> None:
         "website",
     }
     assert all(item.source.startswith("https://") for item in catalog.services)
+    nutstore = catalog.services_by_id["nutstore"]
+    assert nutstore.default_route is RouteTarget.DIRECT
+    assert {"app.jianguoyun.com", "comet.jianguoyun.com"} <= set(nutstore.domains)
 
 
 def test_default_uu_rule_compiles_to_direct_domain() -> None:

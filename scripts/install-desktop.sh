@@ -19,6 +19,9 @@ sed "s|^Exec=.*|Exec=$VENV/bin/astrill-lazy-gui|" \
     "$ROOT/data/io.github.lachlanchen.AstrillLazyRouter.desktop" \
     > "$APPLICATIONS/io.github.lachlanchen.AstrillLazyRouter.desktop"
 cp "$ROOT/data/io.github.lachlanchen.AstrillLazyRouter.metainfo.xml" "$METAINFO/"
+chmod 644 \
+    "$APPLICATIONS/io.github.lachlanchen.AstrillLazyRouter.desktop" \
+    "$METAINFO/io.github.lachlanchen.AstrillLazyRouter.metainfo.xml"
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APPLICATIONS" >/dev/null 2>&1 || true
 fi
