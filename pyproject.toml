@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astrill-lazy-router"
-version = "0.1.0"
+version = "0.2.0"
 description = "Native Ubuntu and DD-WRT policy routing controls for Astrill"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,7 +31,11 @@ where = ["desktop"]
 [tool.setuptools.data-files]
 "share/astrill-lazy/extensions/core-catalog" = [
   "extensions/core-catalog/manifest.json",
-  "extensions/core-catalog/services.json",
+  "extensions/core-catalog/services-core.json",
+  "extensions/core-catalog/services-ai-development.json",
+  "extensions/core-catalog/services-global-communication.json",
+  "extensions/core-catalog/services-global-daily.json",
+  "extensions/core-catalog/services-china.json",
   "extensions/core-catalog/regions.json"
 ]
 "share/astrill-lazy/router" = [

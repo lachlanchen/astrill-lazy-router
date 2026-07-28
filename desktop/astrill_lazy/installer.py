@@ -7,6 +7,7 @@ import re
 import shlex
 import sys
 import tarfile
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from io import BytesIO
@@ -34,16 +35,104 @@ class InstallResult:
     status: dict
 
 
+@dataclass(frozen=True)
+class EnsureResult:
+    status: dict
+    action: str
+
+
 class RouterInstaller:
     def __init__(self, client: RouterClient) -> None:
         self.client = client
         self.router_root = find_router_root()
 
+    @property
+    def expected_version(self) -> str:
+        return (self.router_root / "VERSION").read_text(encoding="ascii").strip()
+
+    @property
+    def expected_package_md5(self) -> str:
+        archive = build_router_package(self.router_root)
+        return hashlib.md5(archive, usedforsecurity=False).hexdigest()
+
+    def ensure(self) -> EnsureResult:
+        try:
+            status = self.client.status()
+        except RouterError:
+            if not self.client.ping():
+                raise
+            time.sleep(5)
+            try:
+                status = self.client.status()
+            except RouterError:
+                if self._stored_package_is_current():
+                    return self._reconstruct_current_package()
+                result = self.install()
+                return EnsureResult(result.status, "installed")
+
+        if self._runtime_is_current(status):
+            return EnsureResult(status, "none")
+        if status.get("version") == self.expected_version:
+            try:
+                self.client.raw(
+                    ["/tmp/astrill-lazy/alctl", "start"],
+                    timeout=30,
+                )
+                repaired = self.client.status()
+            except RouterError:
+                pass
+            else:
+                if self._runtime_is_current(repaired):
+                    return EnsureResult(repaired, "repaired")
+            if self._stored_package_is_current():
+                raise RouterError(
+                    "the current router package is installed but its runtime "
+                    "could not be repaired; use Install / Upgrade for an "
+                    "explicit rewrite"
+                )
+        elif self._stored_package_is_current():
+            return self._reconstruct_current_package()
+        result = self.install()
+        return EnsureResult(result.status, "installed")
+
+    def _reconstruct_current_package(self) -> EnsureResult:
+        try:
+            self.client.run_script(
+                "nvram get astrill_lazy_bootstrap | sh\n",
+                timeout=45,
+            )
+            status = self.client.status()
+        except RouterError as exc:
+            raise RouterError(
+                "the current router package is stored but could not be "
+                "reconstructed; use Install / Upgrade for an explicit rewrite"
+            ) from exc
+        if not self._runtime_is_current(status):
+            raise RouterError(
+                "the current router package was reconstructed but its runtime "
+                "is not healthy"
+            )
+        return EnsureResult(status, "repaired")
+
+    def _stored_package_is_current(self) -> bool:
+        return (
+            self._nvram_get("astrill_lazy_installed") == "1"
+            and self._nvram_get("astrill_lazy_version") == self.expected_version
+            and self._nvram_get("astrill_lazy_pkg_md5") == self.expected_package_md5
+        )
+
+    def _runtime_is_current(self, status: dict) -> bool:
+        return (
+            status.get("version") == self.expected_version
+            and status.get("jump_installed") is True
+            and status.get("watchdog") is True
+        )
+
     def install(self) -> InstallResult:
         archive = build_router_package(self.router_root)
         encoded = base64.b64encode(archive).decode("ascii")
         chunks = tuple(_chunks(encoded, CHUNK_SIZE))
-        version = (self.router_root / "VERSION").read_text(encoding="ascii").strip()
+        version = self.expected_version
         md5 = hashlib.md5(archive, usedforsecurity=False).hexdigest()
         sha256 = hashlib.sha256(archive).hexdigest()
 
@@ -92,14 +181,9 @@ class RouterInstaller:
         )
         self.client.run_script("\n".join(script) + "\n", timeout=90)
         status = self.client.status()
-        if (
-            status.get("version") != version
-            or status.get("health") != "healthy"
-            or not status.get("jump_installed")
-            or not status.get("watchdog")
-        ):
+        if not self._runtime_is_current(status):
             raise RouterError(
-                "router package installed but policy runtime is not healthy"
+                "router package installed but its jump or watchdog is not healthy"
             )
 
         policy_page = pages.index(PAGE_COMMANDS[0]) + 1

@@ -5,6 +5,8 @@ import ipaddress
 from .catalog import Catalog
 from .models import Compilation, CompiledRule, MatchKind, Rule
 
+MAX_COMPILED_BYTES = 6144
+
 
 def compile_rules(rules: list[Rule], catalog: Catalog) -> Compilation:
     services = catalog.services_by_id
@@ -83,7 +85,14 @@ def compile_rules(rules: list[Rule], catalog: Catalog) -> Compilation:
             f"active simultaneously: {names}"
         )
 
-    return Compilation(tuple(compiled), tuple(warnings))
+    compilation = Compilation(tuple(compiled), tuple(warnings))
+    compiled_bytes = len(compilation.to_tsv().encode("ascii"))
+    if compiled_bytes > MAX_COMPILED_BYTES:
+        raise ValueError(
+            f"compiled policy is {compiled_bytes:,} bytes; the router limit is "
+            f"{MAX_COMPILED_BYTES:,}. Use narrower app profiles or remove policies."
+        )
+    return compilation
 
 
 def _unique_id(candidate: str, used: set[str]) -> str:

@@ -1,0 +1,1412 @@
+{
+  "schema_version": 1,
+  "services": [
+    {
+      "id": "netflix",
+      "name": "Netflix",
+      "company": "Netflix",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "netflix.com",
+        "nflxvideo.net",
+        "nflxext.com"
+      ],
+      "aliases": [],
+      "source": "https://www.netflix.com/"
+    },
+    {
+      "id": "disney-plus",
+      "name": "Disney+",
+      "company": "Disney",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "disneyplus.com"
+      ],
+      "aliases": [
+        "Disney Plus"
+      ],
+      "source": "https://www.disneyplus.com/"
+    },
+    {
+      "id": "max",
+      "name": "Max",
+      "company": "Warner Bros. Discovery",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "max.com",
+        "hbomax.com",
+        "hbo.com"
+      ],
+      "aliases": [
+        "HBO Max",
+        "HBO"
+      ],
+      "source": "https://www.max.com/"
+    },
+    {
+      "id": "hulu",
+      "name": "Hulu",
+      "company": "Disney",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "hulu.com",
+        "hulu.tv"
+      ],
+      "aliases": [],
+      "source": "https://www.hulu.com/"
+    },
+    {
+      "id": "peacock",
+      "name": "Peacock",
+      "company": "NBCUniversal",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "peacocktv.com"
+      ],
+      "aliases": [
+        "Peacock TV"
+      ],
+      "source": "https://www.peacocktv.com/"
+    },
+    {
+      "id": "paramount-plus",
+      "name": "Paramount+",
+      "company": "Paramount",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "paramountplus.com",
+        "cbs.com",
+        "cbsi.com"
+      ],
+      "aliases": [
+        "Paramount Plus"
+      ],
+      "source": "https://www.paramountplus.com/"
+    },
+    {
+      "id": "prime-video",
+      "name": "Prime Video",
+      "company": "Amazon",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "primevideo.com",
+        "amazonvideo.com"
+      ],
+      "aliases": [
+        "Amazon Prime Video"
+      ],
+      "source": "https://www.primevideo.com/"
+    },
+    {
+      "id": "apple-tv-plus",
+      "name": "Apple TV+",
+      "company": "Apple",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "tv.apple.com",
+        "itunes.apple.com",
+        "mzstatic.com"
+      ],
+      "aliases": [
+        "Apple TV Plus"
+      ],
+      "source": "https://tv.apple.com/"
+    },
+    {
+      "id": "twitch",
+      "name": "Twitch",
+      "company": "Amazon",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "twitch.tv"
+      ],
+      "aliases": [],
+      "source": "https://www.twitch.tv/"
+    },
+    {
+      "id": "vimeo",
+      "name": "Vimeo",
+      "company": "Vimeo",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "vimeo.com",
+        "vimeocdn.com"
+      ],
+      "aliases": [],
+      "source": "https://vimeo.com/"
+    },
+    {
+      "id": "dailymotion",
+      "name": "Dailymotion",
+      "company": "Canal+",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "dailymotion.com",
+        "dmcdn.net",
+        "dai.ly"
+      ],
+      "aliases": [
+        "Daily Motion"
+      ],
+      "source": "https://www.dailymotion.com/"
+    },
+    {
+      "id": "crunchyroll",
+      "name": "Crunchyroll",
+      "company": "Sony",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "japan",
+      "domains": [
+        "crunchyroll.com",
+        "vrv.co"
+      ],
+      "aliases": [
+        "Crunchy Roll"
+      ],
+      "source": "https://www.crunchyroll.com/"
+    },
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "company": "Spotify",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "spotify.com"
+      ],
+      "aliases": [],
+      "source": "https://www.spotify.com/"
+    },
+    {
+      "id": "apple-music",
+      "name": "Apple Music",
+      "company": "Apple",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "music.apple.com",
+        "applemusic.com",
+        "itunes.apple.com",
+        "mzstatic.com"
+      ],
+      "aliases": [
+        "iTunes Music"
+      ],
+      "source": "https://music.apple.com/"
+    },
+    {
+      "id": "youtube-music",
+      "name": "YouTube Music",
+      "company": "Google",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "music.youtube.com",
+        "googlevideo.com"
+      ],
+      "aliases": [
+        "YT Music"
+      ],
+      "source": "https://music.youtube.com/"
+    },
+    {
+      "id": "soundcloud",
+      "name": "SoundCloud",
+      "company": "SoundCloud",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "soundcloud.com",
+        "sndcdn.com"
+      ],
+      "aliases": [
+        "Sound Cloud"
+      ],
+      "source": "https://soundcloud.com/"
+    },
+    {
+      "id": "tidal",
+      "name": "TIDAL",
+      "company": "Block",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "tidal.com",
+        "tidalhifi.com"
+      ],
+      "aliases": [
+        "Tidal Music"
+      ],
+      "source": "https://tidal.com/"
+    },
+    {
+      "id": "deezer",
+      "name": "Deezer",
+      "company": "Deezer",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "deezer.com"
+      ],
+      "aliases": [],
+      "source": "https://www.deezer.com/"
+    },
+    {
+      "id": "pandora",
+      "name": "Pandora",
+      "company": "SiriusXM",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "pandora.com"
+      ],
+      "aliases": [
+        "Pandora Radio"
+      ],
+      "source": "https://www.pandora.com/"
+    },
+    {
+      "id": "amazon-music",
+      "name": "Amazon Music",
+      "company": "Amazon",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "music.amazon.com",
+        "amazon.com"
+      ],
+      "aliases": [],
+      "source": "https://music.amazon.com/"
+    },
+    {
+      "id": "shazam",
+      "name": "Shazam",
+      "company": "Apple",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "shazam.com",
+        "apple.com"
+      ],
+      "aliases": [],
+      "source": "https://www.shazam.com/"
+    },
+    {
+      "id": "bandcamp",
+      "name": "Bandcamp",
+      "company": "Bandcamp",
+      "category": "Music",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "bandcamp.com"
+      ],
+      "aliases": [
+        "Band Camp"
+      ],
+      "source": "https://bandcamp.com/"
+    },
+    {
+      "id": "ebay",
+      "name": "eBay",
+      "company": "eBay",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "ebay.com"
+      ],
+      "aliases": [],
+      "source": "https://www.ebay.com/"
+    },
+    {
+      "id": "walmart",
+      "name": "Walmart",
+      "company": "Walmart",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "walmart.com"
+      ],
+      "aliases": [],
+      "source": "https://www.walmart.com/"
+    },
+    {
+      "id": "etsy",
+      "name": "Etsy",
+      "company": "Etsy",
+      "category": "Commerce",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "etsy.com"
+      ],
+      "aliases": [],
+      "source": "https://www.etsy.com/"
+    },
+    {
+      "id": "shopify",
+      "name": "Shopify",
+      "company": "Shopify",
+      "category": "Commerce",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "shopify.com",
+        "myshopify.com",
+        "shop.app"
+      ],
+      "aliases": [
+        "Shop Pay"
+      ],
+      "source": "https://www.shopify.com/"
+    },
+    {
+      "id": "temu",
+      "name": "Temu",
+      "company": "PDD Holdings",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "temu.com"
+      ],
+      "aliases": [],
+      "source": "https://www.temu.com/"
+    },
+    {
+      "id": "shein",
+      "name": "SHEIN",
+      "company": "SHEIN",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "shein.com"
+      ],
+      "aliases": [
+        "Shein"
+      ],
+      "source": "https://www.shein.com/"
+    },
+    {
+      "id": "aliexpress",
+      "name": "AliExpress",
+      "company": "Alibaba Group",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "aliexpress.com",
+        "aliexpress.ru",
+        "alicdn.com"
+      ],
+      "aliases": [
+        "Ali Express"
+      ],
+      "source": "https://www.aliexpress.com/"
+    },
+    {
+      "id": "paypal",
+      "name": "PayPal",
+      "company": "PayPal",
+      "category": "Finance",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "paypal.com",
+        "paypalobjects.com",
+        "paypal.me"
+      ],
+      "aliases": [],
+      "source": "https://www.paypal.com/"
+    },
+    {
+      "id": "stripe",
+      "name": "Stripe",
+      "company": "Stripe",
+      "category": "Finance",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "stripe.com",
+        "stripe.network",
+        "stripecdn.com",
+        "link.com"
+      ],
+      "aliases": [
+        "Stripe Payments"
+      ],
+      "source": "https://stripe.com/"
+    },
+    {
+      "id": "wise",
+      "name": "Wise",
+      "company": "Wise",
+      "category": "Finance",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "wise.com",
+        "transferwise.com"
+      ],
+      "aliases": [
+        "TransferWise"
+      ],
+      "source": "https://wise.com/"
+    },
+    {
+      "id": "revolut",
+      "name": "Revolut",
+      "company": "Revolut",
+      "category": "Finance",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "revolut.com"
+      ],
+      "aliases": [],
+      "source": "https://www.revolut.com/"
+    },
+    {
+      "id": "coinbase",
+      "name": "Coinbase",
+      "company": "Coinbase",
+      "category": "Finance",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "coinbase.com"
+      ],
+      "aliases": [],
+      "source": "https://www.coinbase.com/"
+    },
+    {
+      "id": "binance",
+      "name": "Binance",
+      "company": "Binance",
+      "category": "Finance",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "binance.com",
+        "binance.me",
+        "binance.vision"
+      ],
+      "aliases": [],
+      "source": "https://www.binance.com/"
+    },
+    {
+      "id": "kraken",
+      "name": "Kraken",
+      "company": "Kraken",
+      "category": "Finance",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "kraken.com",
+        "kraken.tech"
+      ],
+      "aliases": [],
+      "source": "https://www.kraken.com/"
+    },
+    {
+      "id": "google-maps",
+      "name": "Google Maps",
+      "company": "Google",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "maps.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "aliases": [
+        "Maps"
+      ],
+      "source": "https://maps.google.com/"
+    },
+    {
+      "id": "airbnb",
+      "name": "Airbnb",
+      "company": "Airbnb",
+      "category": "Travel",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "airbnb.com"
+      ],
+      "aliases": [],
+      "source": "https://www.airbnb.com/"
+    },
+    {
+      "id": "booking",
+      "name": "Booking.com",
+      "company": "Booking Holdings",
+      "category": "Travel",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "booking.com",
+        "bstatic.com"
+      ],
+      "aliases": [
+        "Booking"
+      ],
+      "source": "https://www.booking.com/"
+    },
+    {
+      "id": "expedia",
+      "name": "Expedia",
+      "company": "Expedia Group",
+      "category": "Travel",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "expedia.com",
+        "expediagroup.com"
+      ],
+      "aliases": [
+        "Hotels.com"
+      ],
+      "source": "https://www.expedia.com/"
+    },
+    {
+      "id": "uber",
+      "name": "Uber",
+      "company": "Uber",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "uber.com",
+        "uber-assets.com",
+        "ubereats.com"
+      ],
+      "aliases": [
+        "Uber Eats"
+      ],
+      "source": "https://www.uber.com/"
+    },
+    {
+      "id": "lyft",
+      "name": "Lyft",
+      "company": "Lyft",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "lyft.com"
+      ],
+      "aliases": [],
+      "source": "https://www.lyft.com/"
+    },
+    {
+      "id": "tripadvisor",
+      "name": "Tripadvisor",
+      "company": "Tripadvisor",
+      "category": "Travel",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "tripadvisor.com"
+      ],
+      "aliases": [
+        "Trip Advisor"
+      ],
+      "source": "https://www.tripadvisor.com/"
+    },
+    {
+      "id": "doordash",
+      "name": "DoorDash",
+      "company": "DoorDash",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "doordash.com"
+      ],
+      "aliases": [
+        "Door Dash"
+      ],
+      "source": "https://www.doordash.com/"
+    },
+    {
+      "id": "grab",
+      "name": "Grab",
+      "company": "Grab",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "grab.com",
+        "grabtaxi.com"
+      ],
+      "aliases": [
+        "GrabFood"
+      ],
+      "source": "https://www.grab.com/"
+    },
+    {
+      "id": "waze",
+      "name": "Waze",
+      "company": "Google",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "waze.com",
+        "waze.co.il"
+      ],
+      "aliases": [],
+      "source": "https://www.waze.com/"
+    },
+    {
+      "id": "deliveroo",
+      "name": "Deliveroo",
+      "company": "DoorDash",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "deliveroo.com",
+        "deliveroo.co.uk"
+      ],
+      "aliases": [],
+      "source": "https://deliveroo.com/"
+    },
+    {
+      "id": "wikipedia",
+      "name": "Wikipedia",
+      "company": "Wikimedia Foundation",
+      "category": "Reference",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "wikipedia.org",
+        "wikimedia.org",
+        "wikimediafoundation.org"
+      ],
+      "aliases": [
+        "Wikimedia"
+      ],
+      "source": "https://www.wikipedia.org/"
+    },
+    {
+      "id": "bing",
+      "name": "Bing",
+      "company": "Microsoft",
+      "category": "Web",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "bing.com",
+        "bing.net",
+        "msn.com"
+      ],
+      "aliases": [
+        "Microsoft Bing"
+      ],
+      "source": "https://www.bing.com/"
+    },
+    {
+      "id": "duckduckgo",
+      "name": "DuckDuckGo",
+      "company": "DuckDuckGo",
+      "category": "Web",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "duckduckgo.com",
+        "duck.com",
+        "duck.ai",
+        "ddg.gg"
+      ],
+      "aliases": [
+        "DDG"
+      ],
+      "source": "https://duckduckgo.com/"
+    },
+    {
+      "id": "bbc",
+      "name": "BBC",
+      "company": "BBC",
+      "category": "News",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "bbc.com",
+        "bbc.co.uk",
+        "bbci.co.uk"
+      ],
+      "aliases": [
+        "BBC News"
+      ],
+      "source": "https://www.bbc.com/"
+    },
+    {
+      "id": "cnn",
+      "name": "CNN",
+      "company": "Warner Bros. Discovery",
+      "category": "News",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "cnn.com"
+      ],
+      "aliases": [
+        "CNN News"
+      ],
+      "source": "https://www.cnn.com/"
+    },
+    {
+      "id": "reuters",
+      "name": "Reuters",
+      "company": "Thomson Reuters",
+      "category": "News",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "reuters.com",
+        "reut.rs"
+      ],
+      "aliases": [],
+      "source": "https://www.reuters.com/"
+    },
+    {
+      "id": "ap-news",
+      "name": "AP News",
+      "company": "Associated Press",
+      "category": "News",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "apnews.com",
+        "ap.org"
+      ],
+      "aliases": [
+        "Associated Press"
+      ],
+      "source": "https://apnews.com/"
+    },
+    {
+      "id": "nytimes",
+      "name": "The New York Times",
+      "company": "The New York Times",
+      "category": "News",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "nytimes.com",
+        "nyt.com",
+        "nyt.net",
+        "nyti.ms"
+      ],
+      "aliases": [
+        "NYT",
+        "New York Times"
+      ],
+      "source": "https://www.nytimes.com/"
+    },
+    {
+      "id": "guardian",
+      "name": "The Guardian",
+      "company": "Guardian Media Group",
+      "category": "News",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "theguardian.com"
+      ],
+      "aliases": [
+        "Guardian"
+      ],
+      "source": "https://www.theguardian.com/"
+    },
+    {
+      "id": "bloomberg",
+      "name": "Bloomberg",
+      "company": "Bloomberg",
+      "category": "News",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "bloomberg.com",
+        "bloomberg.net",
+        "bloombergmedia.com"
+      ],
+      "aliases": [
+        "Bloomberg News"
+      ],
+      "source": "https://www.bloomberg.com/"
+    },
+    {
+      "id": "wsj",
+      "name": "The Wall Street Journal",
+      "company": "Dow Jones",
+      "category": "News",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "wsj.com",
+        "wsj.net"
+      ],
+      "aliases": [
+        "WSJ",
+        "Wall Street Journal"
+      ],
+      "source": "https://www.wsj.com/"
+    },
+    {
+      "id": "medium",
+      "name": "Medium",
+      "company": "Medium",
+      "category": "Reference",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "medium.com"
+      ],
+      "aliases": [
+        "Medium.com"
+      ],
+      "source": "https://medium.com/"
+    },
+    {
+      "id": "quora",
+      "name": "Quora",
+      "company": "Quora",
+      "category": "Reference",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "quora.com",
+        "quoracdn.net",
+        "qr.ae"
+      ],
+      "aliases": [],
+      "source": "https://www.quora.com/"
+    },
+    {
+      "id": "duolingo",
+      "name": "Duolingo",
+      "company": "Duolingo",
+      "category": "Education",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "duolingo.com"
+      ],
+      "aliases": [
+        "Duo"
+      ],
+      "source": "https://www.duolingo.com/"
+    },
+    {
+      "id": "coursera",
+      "name": "Coursera",
+      "company": "Coursera",
+      "category": "Education",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "coursera.org",
+        "coursera.help"
+      ],
+      "aliases": [],
+      "source": "https://www.coursera.org/"
+    },
+    {
+      "id": "udemy",
+      "name": "Udemy",
+      "company": "Udemy",
+      "category": "Education",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "udemy.com",
+        "udemycdn.com"
+      ],
+      "aliases": [],
+      "source": "https://www.udemy.com/"
+    },
+    {
+      "id": "khan-academy",
+      "name": "Khan Academy",
+      "company": "Khan Academy",
+      "category": "Education",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "khanacademy.org"
+      ],
+      "aliases": [
+        "Khan"
+      ],
+      "source": "https://www.khanacademy.org/"
+    },
+    {
+      "id": "quizlet",
+      "name": "Quizlet",
+      "company": "Quizlet",
+      "category": "Education",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "quizlet.com"
+      ],
+      "aliases": [],
+      "source": "https://quizlet.com/"
+    },
+    {
+      "id": "edx",
+      "name": "edX",
+      "company": "2U",
+      "category": "Education",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "edx.org",
+        "edx-cdn.org"
+      ],
+      "aliases": [
+        "EDX"
+      ],
+      "source": "https://www.edx.org/"
+    },
+    {
+      "id": "google-classroom",
+      "name": "Google Classroom",
+      "company": "Google",
+      "category": "Education",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "classroom.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "aliases": [
+        "Classroom"
+      ],
+      "source": "https://classroom.google.com/"
+    },
+    {
+      "id": "steam",
+      "name": "Steam",
+      "company": "Valve",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "steampowered.com",
+        "steamcommunity.com"
+      ],
+      "aliases": [
+        "Valve"
+      ],
+      "source": "https://store.steampowered.com/"
+    },
+    {
+      "id": "epic-games",
+      "name": "Epic Games",
+      "company": "Epic Games",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "epicgames.com",
+        "fortnite.com"
+      ],
+      "aliases": [
+        "Epic Games Store",
+        "Fortnite"
+      ],
+      "source": "https://store.epicgames.com/"
+    },
+    {
+      "id": "playstation",
+      "name": "PlayStation",
+      "company": "Sony",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "japan",
+      "domains": [
+        "playstation.com",
+        "sonyentertainmentnetwork.com"
+      ],
+      "aliases": [
+        "PSN",
+        "PlayStation Network"
+      ],
+      "source": "https://www.playstation.com/"
+    },
+    {
+      "id": "xbox",
+      "name": "Xbox",
+      "company": "Microsoft",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "xbox.com",
+        "xboxlive.com",
+        "gamepass.com"
+      ],
+      "aliases": [
+        "Game Pass",
+        "Xbox Live"
+      ],
+      "source": "https://www.xbox.com/"
+    },
+    {
+      "id": "nintendo",
+      "name": "Nintendo",
+      "company": "Nintendo",
+      "category": "Gaming",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "japan",
+      "domains": [
+        "nintendo.com",
+        "nintendo.co.jp"
+      ],
+      "aliases": [
+        "Nintendo Switch"
+      ],
+      "source": "https://www.nintendo.com/"
+    },
+    {
+      "id": "battle-net",
+      "name": "Battle.net",
+      "company": "Blizzard Entertainment",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "battle.net",
+        "blizzard.com"
+      ],
+      "aliases": [
+        "Blizzard",
+        "Battle Net"
+      ],
+      "source": "https://battle.net/"
+    },
+    {
+      "id": "riot-games",
+      "name": "Riot Games",
+      "company": "Riot Games",
+      "category": "Gaming",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "riotgames.com",
+        "leagueoflegends.com",
+        "valorant.com"
+      ],
+      "aliases": [
+        "League of Legends",
+        "Valorant"
+      ],
+      "source": "https://www.riotgames.com/"
+    },
+    {
+      "id": "ea-games",
+      "name": "EA",
+      "company": "Electronic Arts",
+      "category": "Gaming",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "ea.com",
+        "origin.com",
+        "eaassets-a.akamaihd.net"
+      ],
+      "aliases": [
+        "Electronic Arts",
+        "EA Sports",
+        "Origin"
+      ],
+      "source": "https://www.ea.com/"
+    },
+    {
+      "id": "ubisoft",
+      "name": "Ubisoft",
+      "company": "Ubisoft",
+      "category": "Gaming",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "ubisoft.com",
+        "ubi.com",
+        "ubisoftconnect.com",
+        "uplay.com"
+      ],
+      "aliases": [
+        "Ubisoft Connect",
+        "Uplay"
+      ],
+      "source": "https://www.ubisoft.com/"
+    },
+    {
+      "id": "gog",
+      "name": "GOG",
+      "company": "CD Projekt",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "gog.com",
+        "gogalaxy.com"
+      ],
+      "aliases": [
+        "Good Old Games",
+        "GOG Galaxy"
+      ],
+      "source": "https://www.gog.com/"
+    },
+    {
+      "id": "roblox",
+      "name": "Roblox",
+      "company": "Roblox",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "roblox.com",
+        "rbx.com"
+      ],
+      "aliases": [],
+      "source": "https://www.roblox.com/"
+    },
+    {
+      "id": "minecraft",
+      "name": "Minecraft",
+      "company": "Microsoft",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "minecraft.net",
+        "mojang.com"
+      ],
+      "aliases": [
+        "Mojang"
+      ],
+      "source": "https://www.minecraft.net/"
+    },
+    {
+      "id": "teamviewer",
+      "name": "TeamViewer",
+      "company": "TeamViewer",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "teamviewer.com",
+        "teamviewer.us"
+      ],
+      "aliases": [
+        "Team Viewer"
+      ],
+      "source": "https://www.teamviewer.com/"
+    },
+    {
+      "id": "anydesk",
+      "name": "AnyDesk",
+      "company": "AnyDesk",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "anydesk.com"
+      ],
+      "aliases": [
+        "Any Desk"
+      ],
+      "source": "https://anydesk.com/"
+    },
+    {
+      "id": "rustdesk",
+      "name": "RustDesk",
+      "company": "RustDesk",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "rustdesk.com"
+      ],
+      "aliases": [
+        "Rust Desk"
+      ],
+      "source": "https://rustdesk.com/"
+    },
+    {
+      "id": "chrome-remote-desktop",
+      "name": "Chrome Remote Desktop",
+      "company": "Google",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "remotedesktop.google.com",
+        "googleapis.com"
+      ],
+      "aliases": [
+        "CRD"
+      ],
+      "source": "https://remotedesktop.google.com/"
+    },
+    {
+      "id": "parsec",
+      "name": "Parsec",
+      "company": "Unity",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "parsec.app",
+        "parsecgaming.com"
+      ],
+      "aliases": [
+        "Parsec Gaming"
+      ],
+      "source": "https://parsec.app/"
+    },
+    {
+      "id": "splashtop",
+      "name": "Splashtop",
+      "company": "Splashtop",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "splashtop.com",
+        "splashtop.eu"
+      ],
+      "aliases": [
+        "Splash Top"
+      ],
+      "source": "https://www.splashtop.com/"
+    }
+  ]
+}

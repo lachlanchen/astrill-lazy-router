@@ -1,0 +1,1007 @@
+{
+  "schema_version": 1,
+  "services": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "company": "OpenAI",
+      "category": "AI",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "openai.com",
+        "oaistatic.com",
+        "oaistatsig.com"
+      ],
+      "aliases": [
+        "OpenAI API",
+        "GPT"
+      ],
+      "source": "https://openai.com/"
+    },
+    {
+      "id": "chatgpt",
+      "name": "ChatGPT",
+      "company": "OpenAI",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "chatgpt.com",
+        "chat.com",
+        "openai.com",
+        "oaistatic.com"
+      ],
+      "aliases": [
+        "GPT",
+        "Chat GPT"
+      ],
+      "source": "https://chatgpt.com/"
+    },
+    {
+      "id": "sora",
+      "name": "Sora",
+      "company": "OpenAI",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "sora.com",
+        "openai.com",
+        "oaistatic.com"
+      ],
+      "aliases": [
+        "OpenAI Sora"
+      ],
+      "source": "https://sora.com/"
+    },
+    {
+      "id": "claude",
+      "name": "Claude",
+      "company": "Anthropic",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "claude.ai",
+        "claude.com",
+        "anthropic.com",
+        "clau.de"
+      ],
+      "aliases": [
+        "Anthropic",
+        "Claude Code"
+      ],
+      "source": "https://claude.ai/"
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini",
+      "company": "Google",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "gemini.google.com",
+        "deepmind.google",
+        "googleapis.com",
+        "gstatic.com",
+        "googleusercontent.com"
+      ],
+      "aliases": [
+        "Google Gemini",
+        "Google AI"
+      ],
+      "source": "https://gemini.google.com/"
+    },
+    {
+      "id": "copilot",
+      "name": "Microsoft Copilot",
+      "company": "Microsoft",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "copilot.microsoft.com",
+        "copilot.com",
+        "bing.com",
+        "microsoft.com"
+      ],
+      "aliases": [
+        "Copilot",
+        "Bing Copilot"
+      ],
+      "source": "https://copilot.microsoft.com/"
+    },
+    {
+      "id": "github-copilot",
+      "name": "GitHub Copilot",
+      "company": "GitHub",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "githubcopilot.com",
+        "github.com"
+      ],
+      "aliases": [
+        "Copilot Coding"
+      ],
+      "source": "https://github.com/features/copilot"
+    },
+    {
+      "id": "perplexity",
+      "name": "Perplexity",
+      "company": "Perplexity AI",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "perplexity.ai",
+        "perplexity.com",
+        "pplx.ai"
+      ],
+      "aliases": [
+        "Perplexity AI"
+      ],
+      "source": "https://www.perplexity.ai/"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "company": "DeepSeek",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "deepseek.com"
+      ],
+      "aliases": [
+        "Deep Seek"
+      ],
+      "source": "https://www.deepseek.com/"
+    },
+    {
+      "id": "grok",
+      "name": "Grok",
+      "company": "xAI",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "grok.com",
+        "x.ai",
+        "grok.x.com"
+      ],
+      "aliases": [
+        "xAI"
+      ],
+      "source": "https://grok.com/"
+    },
+    {
+      "id": "mistral",
+      "name": "Le Chat",
+      "company": "Mistral AI",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "mistral.ai"
+      ],
+      "aliases": [
+        "Mistral",
+        "Mistral AI"
+      ],
+      "source": "https://mistral.ai/"
+    },
+    {
+      "id": "poe",
+      "name": "Poe",
+      "company": "Quora",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "poe.com"
+      ],
+      "aliases": [
+        "Poe AI"
+      ],
+      "source": "https://poe.com/"
+    },
+    {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "company": "Hugging Face",
+      "category": "AI",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "huggingface.co",
+        "hf.co",
+        "hf.space"
+      ],
+      "aliases": [
+        "HuggingFace",
+        "HF"
+      ],
+      "source": "https://huggingface.co/"
+    },
+    {
+      "id": "midjourney",
+      "name": "Midjourney",
+      "company": "Midjourney",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "midjourney.com"
+      ],
+      "aliases": [
+        "Mid Journey"
+      ],
+      "source": "https://www.midjourney.com/"
+    },
+    {
+      "id": "runway",
+      "name": "Runway",
+      "company": "Runway AI",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "runwayml.com"
+      ],
+      "aliases": [
+        "Runway ML"
+      ],
+      "source": "https://runwayml.com/"
+    },
+    {
+      "id": "stability-ai",
+      "name": "Stability AI",
+      "company": "Stability AI",
+      "category": "AI",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "stability.ai",
+        "stabilityai.com"
+      ],
+      "aliases": [
+        "Stable Diffusion",
+        "DreamStudio"
+      ],
+      "source": "https://stability.ai/"
+    },
+    {
+      "id": "meta-ai",
+      "name": "Meta AI",
+      "company": "Meta",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "meta.ai",
+        "meta.com",
+        "fbcdn.net"
+      ],
+      "aliases": [
+        "Llama"
+      ],
+      "source": "https://www.meta.ai/"
+    },
+    {
+      "id": "notebooklm",
+      "name": "NotebookLM",
+      "company": "Google",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "notebooklm.google.com",
+        "googleusercontent.com",
+        "gstatic.com"
+      ],
+      "aliases": [
+        "Notebook LM"
+      ],
+      "source": "https://notebooklm.google.com/"
+    },
+    {
+      "id": "suno",
+      "name": "Suno",
+      "company": "Suno",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "suno.com",
+        "suno.ai"
+      ],
+      "aliases": [
+        "Suno AI Music"
+      ],
+      "source": "https://suno.com/"
+    },
+    {
+      "id": "manus",
+      "name": "Manus",
+      "company": "Manus",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "manus.im"
+      ],
+      "aliases": [
+        "Manus AI"
+      ],
+      "source": "https://manus.im/"
+    },
+    {
+      "id": "doubao",
+      "name": "Doubao",
+      "company": "ByteDance",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "doubao.com"
+      ],
+      "aliases": [
+        "Doubao AI"
+      ],
+      "source": "https://www.doubao.com/"
+    },
+    {
+      "id": "qwen",
+      "name": "Qwen",
+      "company": "Alibaba Cloud",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "qwen.ai",
+        "qwenlm.ai",
+        "qianwen.com",
+        "tongyi.com",
+        "qianwen.aliyun.com"
+      ],
+      "aliases": [
+        "Tongyi Qianwen",
+        "Alibaba Qwen"
+      ],
+      "source": "https://qwen.ai/"
+    },
+    {
+      "id": "wenxin",
+      "name": "Wenxin",
+      "company": "Baidu",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "yiyan.baidu.com",
+        "wenxin.baidu.com"
+      ],
+      "aliases": [
+        "ERNIE Bot",
+        "Wenxin Yiyan"
+      ],
+      "source": "https://yiyan.baidu.com/"
+    },
+    {
+      "id": "yuanbao",
+      "name": "Tencent Yuanbao",
+      "company": "Tencent",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "yuanbao.tencent.com",
+        "hunyuan.tencent.com"
+      ],
+      "aliases": [
+        "Yuanbao",
+        "Tencent Hunyuan"
+      ],
+      "source": "https://yuanbao.tencent.com/"
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi",
+      "company": "Moonshot AI",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "kimi.com",
+        "moonshot.ai",
+        "moonshot.cn"
+      ],
+      "aliases": [
+        "Kimi AI",
+        "Moonshot"
+      ],
+      "source": "https://www.kimi.com/"
+    },
+    {
+      "id": "zhipu",
+      "name": "Zhipu Qingyan",
+      "company": "Zhipu AI",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "z.ai",
+        "zhipuai.cn",
+        "bigmodel.cn",
+        "chatglm.cn"
+      ],
+      "aliases": [
+        "ChatGLM",
+        "Z.ai",
+        "Zhipu AI"
+      ],
+      "source": "https://chatglm.cn/"
+    },
+    {
+      "id": "hailuo",
+      "name": "Hailuo AI",
+      "company": "MiniMax",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "hailuoai.com",
+        "minimaxi.com",
+        "minimax.io"
+      ],
+      "aliases": [
+        "MiniMax",
+        "Hailuo"
+      ],
+      "source": "https://hailuoai.com/"
+    },
+    {
+      "id": "kling",
+      "name": "Kling AI",
+      "company": "Kuaishou",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "klingai.com",
+        "kling-ai.com",
+        "kechuangai.com"
+      ],
+      "aliases": [
+        "Keling",
+        "Kuaishou AI"
+      ],
+      "source": "https://klingai.com/"
+    },
+    {
+      "id": "iflytek-spark",
+      "name": "iFlytek Spark",
+      "company": "iFlytek",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "xinghuo.xfyun.cn",
+        "xfyun.cn"
+      ],
+      "aliases": [
+        "SparkDesk",
+        "Xinghuo"
+      ],
+      "source": "https://xinghuo.xfyun.cn/"
+    },
+    {
+      "id": "coze",
+      "name": "Coze",
+      "company": "ByteDance",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "coze.cn",
+        "coze.com",
+        "cozecdn.com"
+      ],
+      "aliases": [
+        "Coze AI"
+      ],
+      "source": "https://www.coze.cn/"
+    },
+    {
+      "id": "baichuan",
+      "name": "Baichuan AI",
+      "company": "Baichuan",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "baichuan-ai.com"
+      ],
+      "aliases": [
+        "Baichuan Intelligence"
+      ],
+      "source": "https://www.baichuan-ai.com/"
+    },
+    {
+      "id": "tiangong",
+      "name": "Tiangong AI",
+      "company": "Kunlun Tech",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "tiangong.cn"
+      ],
+      "aliases": [
+        "Skywork AI"
+      ],
+      "source": "https://www.tiangong.cn/"
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "company": "Anysphere",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "cursor.com",
+        "cursor.sh",
+        "cursor-cdn.com"
+      ],
+      "aliases": [
+        "Cursor AI"
+      ],
+      "source": "https://www.cursor.com/"
+    },
+    {
+      "id": "windsurf",
+      "name": "Windsurf",
+      "company": "Windsurf",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "windsurf.com",
+        "windsurf.build",
+        "codeium.com"
+      ],
+      "aliases": [
+        "Codeium"
+      ],
+      "source": "https://windsurf.com/"
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "company": "GitHub",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "github.com",
+        "github.io",
+        "ghcr.io"
+      ],
+      "aliases": [
+        "GitHub Container Registry"
+      ],
+      "source": "https://github.com/"
+    },
+    {
+      "id": "gitlab",
+      "name": "GitLab",
+      "company": "GitLab",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "gitlab.com",
+        "gitlab.io"
+      ],
+      "aliases": [
+        "GitLab CI"
+      ],
+      "source": "https://gitlab.com/"
+    },
+    {
+      "id": "bitbucket",
+      "name": "Bitbucket",
+      "company": "Atlassian",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "bitbucket.org",
+        "atlassian.com"
+      ],
+      "aliases": [
+        "Atlassian Bitbucket"
+      ],
+      "source": "https://bitbucket.org/"
+    },
+    {
+      "id": "stack-overflow",
+      "name": "Stack Overflow",
+      "company": "Stack Exchange",
+      "category": "Development",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "stackoverflow.com",
+        "stackexchange.com",
+        "sstatic.net"
+      ],
+      "aliases": [
+        "StackExchange",
+        "SO"
+      ],
+      "source": "https://stackoverflow.com/"
+    },
+    {
+      "id": "npm",
+      "name": "npm",
+      "company": "GitHub",
+      "category": "Development",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "npmjs.com",
+        "npmjs.org"
+      ],
+      "aliases": [
+        "Node Package Manager"
+      ],
+      "source": "https://www.npmjs.com/"
+    },
+    {
+      "id": "pypi",
+      "name": "PyPI",
+      "company": "Python Software Foundation",
+      "category": "Development",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "pypi.org",
+        "pythonhosted.org",
+        "python.org"
+      ],
+      "aliases": [
+        "Python Package Index"
+      ],
+      "source": "https://pypi.org/"
+    },
+    {
+      "id": "docker",
+      "name": "Docker",
+      "company": "Docker",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "docker.com",
+        "docker.io"
+      ],
+      "aliases": [
+        "Docker Hub"
+      ],
+      "source": "https://www.docker.com/"
+    },
+    {
+      "id": "aws",
+      "name": "Amazon Web Services",
+      "company": "Amazon",
+      "category": "Infrastructure",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "aws.amazon.com",
+        "amazonaws.com"
+      ],
+      "aliases": [
+        "AWS"
+      ],
+      "source": "https://aws.amazon.com/"
+    },
+    {
+      "id": "microsoft-azure",
+      "name": "Microsoft Azure",
+      "company": "Microsoft",
+      "category": "Infrastructure",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "azure.com",
+        "azure.net",
+        "windows.net"
+      ],
+      "aliases": [
+        "Azure"
+      ],
+      "source": "https://azure.microsoft.com/"
+    },
+    {
+      "id": "google-cloud",
+      "name": "Google Cloud",
+      "company": "Google",
+      "category": "Infrastructure",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "cloud.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "aliases": [
+        "GCP"
+      ],
+      "source": "https://cloud.google.com/"
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "company": "Cloudflare",
+      "category": "Infrastructure",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "cloudflare.com",
+        "workers.dev",
+        "pages.dev"
+      ],
+      "aliases": [
+        "1.1.1.1",
+        "Cloudflare Workers"
+      ],
+      "source": "https://www.cloudflare.com/"
+    },
+    {
+      "id": "vercel",
+      "name": "Vercel",
+      "company": "Vercel",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "vercel.com",
+        "vercel.app",
+        "vercel-dns.com"
+      ],
+      "aliases": [
+        "Next.js hosting"
+      ],
+      "source": "https://vercel.com/"
+    },
+    {
+      "id": "netlify",
+      "name": "Netlify",
+      "company": "Netlify",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "netlify.com",
+        "netlify.app",
+        "netlifyglobalcdn.com"
+      ],
+      "aliases": [
+        "Netlify hosting"
+      ],
+      "source": "https://www.netlify.com/"
+    },
+    {
+      "id": "digitalocean",
+      "name": "DigitalOcean",
+      "company": "DigitalOcean",
+      "category": "Infrastructure",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "digitalocean.com",
+        "digitaloceanspaces.com"
+      ],
+      "aliases": [
+        "DO",
+        "Droplets"
+      ],
+      "source": "https://www.digitalocean.com/"
+    },
+    {
+      "id": "jetbrains",
+      "name": "JetBrains",
+      "company": "JetBrains",
+      "category": "Development",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "jetbrains.com",
+        "jetbrains.net"
+      ],
+      "aliases": [
+        "IntelliJ",
+        "PyCharm",
+        "WebStorm"
+      ],
+      "source": "https://www.jetbrains.com/"
+    },
+    {
+      "id": "vscode-marketplace",
+      "name": "Visual Studio Marketplace",
+      "company": "Microsoft",
+      "category": "Development",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "marketplace.visualstudio.com",
+        "visualstudio.com",
+        "vscode.dev"
+      ],
+      "aliases": [
+        "VS Code Extensions",
+        "Visual Studio Code"
+      ],
+      "source": "https://marketplace.visualstudio.com/"
+    },
+    {
+      "id": "postman",
+      "name": "Postman",
+      "company": "Postman",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "postman.com",
+        "postman.co"
+      ],
+      "aliases": [
+        "Postman API"
+      ],
+      "source": "https://www.postman.com/"
+    },
+    {
+      "id": "tailscale",
+      "name": "Tailscale",
+      "company": "Tailscale",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "tailscale.com"
+      ],
+      "aliases": [
+        "Tailnet"
+      ],
+      "source": "https://tailscale.com/"
+    },
+    {
+      "id": "replit",
+      "name": "Replit",
+      "company": "Replit",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "replit.com",
+        "repl.co",
+        "replit.dev"
+      ],
+      "aliases": [
+        "Repl.it"
+      ],
+      "source": "https://replit.com/"
+    },
+    {
+      "id": "heroku",
+      "name": "Heroku",
+      "company": "Salesforce",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "heroku.com",
+        "herokuapp.com"
+      ],
+      "aliases": [
+        "Heroku Cloud"
+      ],
+      "source": "https://www.heroku.com/"
+    },
+    {
+      "id": "render",
+      "name": "Render",
+      "company": "Render",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "render.com",
+        "onrender.com"
+      ],
+      "aliases": [
+        "Render Cloud"
+      ],
+      "source": "https://render.com/"
+    },
+    {
+      "id": "railway",
+      "name": "Railway",
+      "company": "Railway",
+      "category": "Development",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "railway.com",
+        "railway.app"
+      ],
+      "aliases": [
+        "Railway Cloud"
+      ],
+      "source": "https://railway.com/"
+    }
+  ]
+}

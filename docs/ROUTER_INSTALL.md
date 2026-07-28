@@ -33,10 +33,22 @@ The installer:
 6. adds policy and status MyPage commands;
 7. commits once;
 8. reconstructs and starts the runtime;
-9. requires a healthy status and installed jump before reporting success.
+9. requires the expected version, installed jump, and watchdog before reporting
+   success.
+
+Overall status can still be degraded when an enabled VPN policy is fail-closed
+because Astrill is disconnected. That is not an installation failure.
 
 In-place upgrades stop the old watchdog, replace the tmpfs package, restore the
 same persisted rules, and start a new watchdog process.
+
+The desktop GUI calls a lighter reconciliation path at startup and every 60
+seconds. It performs no NVRAM write when the installed version, active jump,
+and watchdog are current. It attempts `alctl start` before reinstalling a
+degraded current version and can reconstruct a matching stored package without
+rewriting it. If that identical package still fails, automatic reconciliation
+reports the error instead of repeatedly writing NVRAM; use Install/Upgrade to
+request an explicit rewrite.
 
 Current integration values:
 
@@ -102,6 +114,7 @@ Traffic then returns to Astrill's original behavior. If SSH is unavailable, use
 the retained Telnet recovery path and run the same command. The complete
 pre-plugin integration values are in the encrypted backup.
 
-The bootstrap has been invoked repeatedly and upgrade recovery is verified.
-A physical power-cycle was not performed during development to avoid an
-unnecessary router outage.
+The bootstrap has been invoked repeatedly, upgrade recovery is verified, and
+the plugin reconstructed successfully after a physical router reboot.
+Astrill's existing `astrill_autostart=0` setting was deliberately preserved;
+the plugin does not decide whether the upstream VPN should connect at boot.

@@ -5,6 +5,12 @@ import json
 import sys
 
 from .astrill import parse_applet
+from .autostart import (
+    autostart_path,
+    disable_autostart,
+    enable_autostart,
+    is_autostart_enabled,
+)
 from .catalog import load_catalog
 from .compiler import compile_rules
 from .installer import RouterInstaller
@@ -24,6 +30,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("rollback", help="restore the previous router rules")
     subparsers.add_parser("install-router", help="install or upgrade the router plugin")
     subparsers.add_parser("uninstall-router", help="remove the router plugin")
+    autostart = subparsers.add_parser(
+        "autostart", help="manage desktop-session autostart"
+    )
+    autostart.add_argument("action", choices=("enable", "disable", "status"))
 
     servers = subparsers.add_parser("servers", help="list Astrill locations")
     servers.add_argument("--json", action="store_true")
@@ -41,6 +51,19 @@ def main(argv: list[str] | None = None) -> int:
         from .application import run_application
 
         return run_application()
+
+    if arguments.command == "autostart":
+        if arguments.action == "enable":
+            enable_autostart()
+        elif arguments.action == "disable":
+            disable_autostart()
+        _print_json(
+            {
+                "enabled": is_autostart_enabled(),
+                "path": str(autostart_path()),
+            }
+        )
+        return 0
 
     store = ConfigStore()
     host = arguments.router or store.router_host

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from astrill_lazy.catalog import load_catalog
-from astrill_lazy.compiler import compile_rules
+from astrill_lazy.compiler import MAX_COMPILED_BYTES, compile_rules
 from astrill_lazy.models import MatchKind, Protocol, RouteTarget, Rule
 from astrill_lazy.store import default_uu_rule
 
@@ -42,7 +42,13 @@ def test_core_catalog_contains_requested_services() -> None:
         "copilot",
         "github",
     } <= identifiers
-    assert len(catalog.services) >= 40
+    assert len(catalog.services) >= 250
+    assert {item.profile_type for item in catalog.services} == {
+        "company",
+        "app",
+        "website",
+    }
+    assert all(item.source.startswith("https://") for item in catalog.services)
 
 
 def test_default_uu_rule_compiles_to_direct_domain() -> None:
@@ -68,6 +74,21 @@ def test_service_rule_expands_every_seed_domain() -> None:
     compilation = compile_rules([rule], catalog)
     assert len(compilation.rules) == len(service.domains)
     assert {item.selector for item in compilation.rules} == set(service.domains)
+
+
+def test_compiler_rejects_policy_larger_than_router_contract() -> None:
+    catalog = load_catalog()
+    rules = [
+        Rule.create(
+            name=f"Google {index}",
+            match_kind=MatchKind.SERVICE,
+            selector="google",
+            target=RouteTarget.VPN,
+        )
+        for index in range(40)
+    ]
+    with pytest.raises(ValueError, match=f"router limit is {MAX_COMPILED_BYTES:,}"):
+        compile_rules(rules, catalog)
 
 
 def test_process_rule_requires_allocated_identity() -> None:

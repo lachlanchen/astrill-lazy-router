@@ -1,0 +1,985 @@
+{
+  "schema_version": 1,
+  "services": [
+    {
+      "id": "weibo",
+      "name": "Weibo",
+      "company": "Sina",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "weibo.com",
+        "weibo.cn",
+        "weibocdn.com",
+        "sinaimg.cn"
+      ],
+      "aliases": [
+        "Sina Weibo"
+      ],
+      "source": "https://weibo.com/"
+    },
+    {
+      "id": "zhihu",
+      "name": "Zhihu",
+      "company": "Zhihu",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "zhihu.com",
+        "vzuu.com"
+      ],
+      "aliases": [
+        "Zhi Hu"
+      ],
+      "source": "https://www.zhihu.com/"
+    },
+    {
+      "id": "douban",
+      "name": "Douban",
+      "company": "Douban",
+      "category": "Social",
+      "profile_type": "website",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "douban.com"
+      ],
+      "aliases": [
+        "Douban Movies"
+      ],
+      "source": "https://www.douban.com/"
+    },
+    {
+      "id": "baidu-tieba",
+      "name": "Baidu Tieba",
+      "company": "Baidu",
+      "category": "Social",
+      "profile_type": "website",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "tieba.baidu.com",
+        "bdimg.com",
+        "bdstatic.com"
+      ],
+      "aliases": [
+        "Tieba"
+      ],
+      "source": "https://tieba.baidu.com/"
+    },
+    {
+      "id": "toutiao",
+      "name": "Toutiao",
+      "company": "ByteDance",
+      "category": "News",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "toutiao.com",
+        "snssdk.com"
+      ],
+      "aliases": [
+        "Jinri Toutiao",
+        "Today's Headlines"
+      ],
+      "source": "https://www.toutiao.com/"
+    },
+    {
+      "id": "kuaishou",
+      "name": "Kuaishou",
+      "company": "Kuaishou",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "kuaishou.com",
+        "gifshow.com",
+        "kwimgs.com",
+        "ksapisrv.com"
+      ],
+      "aliases": [
+        "Kwai"
+      ],
+      "source": "https://www.kuaishou.com/"
+    },
+    {
+      "id": "iqiyi",
+      "name": "iQIYI",
+      "company": "iQIYI",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "iqiyi.com",
+        "qiyi.com",
+        "iqiyipic.com",
+        "qiyipic.com",
+        "qy.net"
+      ],
+      "aliases": [
+        "Qiyi",
+        "IQ"
+      ],
+      "source": "https://www.iqiyi.com/"
+    },
+    {
+      "id": "tencent-video",
+      "name": "Tencent Video",
+      "company": "Tencent",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "v.qq.com",
+        "video.qq.com",
+        "qpic.cn"
+      ],
+      "aliases": [
+        "WeTV",
+        "QQ Video"
+      ],
+      "source": "https://v.qq.com/"
+    },
+    {
+      "id": "youku",
+      "name": "Youku",
+      "company": "Alibaba Group",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "youku.com",
+        "ykimg.com",
+        "youku.tv",
+        "tudou.com"
+      ],
+      "aliases": [
+        "Tudou"
+      ],
+      "source": "https://www.youku.com/"
+    },
+    {
+      "id": "mango-tv",
+      "name": "Mango TV",
+      "company": "Hunan Broadcasting System",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "mgtv.com",
+        "hunantv.com"
+      ],
+      "aliases": [
+        "MGTV",
+        "MangoTV"
+      ],
+      "source": "https://www.mgtv.com/"
+    },
+    {
+      "id": "xigua-video",
+      "name": "Xigua Video",
+      "company": "ByteDance",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "ixigua.com",
+        "snssdk.com"
+      ],
+      "aliases": [
+        "Xigua"
+      ],
+      "source": "https://www.ixigua.com/"
+    },
+    {
+      "id": "huya",
+      "name": "Huya",
+      "company": "Huya",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "huya.com",
+        "msstatic.com"
+      ],
+      "aliases": [
+        "Huya Live"
+      ],
+      "source": "https://www.huya.com/"
+    },
+    {
+      "id": "douyu",
+      "name": "Douyu",
+      "company": "Douyu",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "douyu.com",
+        "douyu.tv"
+      ],
+      "aliases": [
+        "Douyu Live"
+      ],
+      "source": "https://www.douyu.com/"
+    },
+    {
+      "id": "sohu-video",
+      "name": "Sohu Video",
+      "company": "Sohu",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "tv.sohu.com",
+        "sohu.com",
+        "sohucs.com",
+        "56.com",
+        "56img.com"
+      ],
+      "aliases": [
+        "56 Video"
+      ],
+      "source": "https://tv.sohu.com/"
+    },
+    {
+      "id": "qq-music",
+      "name": "QQ Music",
+      "company": "Tencent Music",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "y.qq.com",
+        "qqmusic.qq.com"
+      ],
+      "aliases": [
+        "QQMusic"
+      ],
+      "source": "https://y.qq.com/"
+    },
+    {
+      "id": "netease-cloud-music",
+      "name": "NetEase Cloud Music",
+      "company": "NetEase",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "music.163.com",
+        "163yun.com"
+      ],
+      "aliases": [
+        "Cloud Music",
+        "Wangyi Music"
+      ],
+      "source": "https://music.163.com/"
+    },
+    {
+      "id": "kugou",
+      "name": "Kugou Music",
+      "company": "Tencent Music",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "kugou.com",
+        "kugou.net",
+        "kgimg.com",
+        "kugouaudio.com"
+      ],
+      "aliases": [
+        "KuGou"
+      ],
+      "source": "https://www.kugou.com/"
+    },
+    {
+      "id": "kuwo",
+      "name": "Kuwo Music",
+      "company": "Tencent Music",
+      "category": "Music",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "kuwo.cn",
+        "koowo.com",
+        "koowo.cn"
+      ],
+      "aliases": [
+        "KuWo"
+      ],
+      "source": "https://www.kuwo.cn/"
+    },
+    {
+      "id": "jd",
+      "name": "JD.com",
+      "company": "JD.com",
+      "category": "Commerce",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "jd.com",
+        "360buyimg.com",
+        "3.cn",
+        "jdcloud.com"
+      ],
+      "aliases": [
+        "Jingdong",
+        "JD"
+      ],
+      "source": "https://www.jd.com/"
+    },
+    {
+      "id": "pinduoduo",
+      "name": "Pinduoduo",
+      "company": "PDD Holdings",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "pinduoduo.com",
+        "pinduoduo.net",
+        "pddcdn.com",
+        "yangkeduo.com"
+      ],
+      "aliases": [
+        "PDD"
+      ],
+      "source": "https://www.pinduoduo.com/"
+    },
+    {
+      "id": "xianyu",
+      "name": "Xianyu",
+      "company": "Alibaba Group",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "2.taobao.com",
+        "goofish.com",
+        "alicdn.com"
+      ],
+      "aliases": [
+        "Goofish",
+        "Idle Fish"
+      ],
+      "source": "https://2.taobao.com/"
+    },
+    {
+      "id": "vipshop",
+      "name": "Vipshop",
+      "company": "Vipshop",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "vip.com",
+        "vipstatic.com"
+      ],
+      "aliases": [
+        "VIP.com"
+      ],
+      "source": "https://www.vip.com/"
+    },
+    {
+      "id": "suning",
+      "name": "Suning",
+      "company": "Suning",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "suning.com",
+        "suning.cn",
+        "cnsuning.com",
+        "suningcloud.com"
+      ],
+      "aliases": [
+        "Suning.com"
+      ],
+      "source": "https://www.suning.com/"
+    },
+    {
+      "id": "alipay",
+      "name": "Alipay",
+      "company": "Ant Group",
+      "category": "Finance",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "alipay.com",
+        "alipayobjects.com",
+        "alipaydns.com",
+        "antgroup.com"
+      ],
+      "aliases": [
+        "Zhifubao",
+        "Ant Financial"
+      ],
+      "source": "https://www.alipay.com/"
+    },
+    {
+      "id": "eleme",
+      "name": "Ele.me",
+      "company": "Alibaba Group",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "ele.me",
+        "eleme.cn",
+        "elemecdn.com"
+      ],
+      "aliases": [
+        "Eleme"
+      ],
+      "source": "https://www.ele.me/"
+    },
+    {
+      "id": "didi",
+      "name": "DiDi",
+      "company": "DiDi",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "didi.cn",
+        "didichuxing.com",
+        "didistatic.com",
+        "xiaojukeji.com"
+      ],
+      "aliases": [
+        "Didi Chuxing"
+      ],
+      "source": "https://www.didiglobal.com/"
+    },
+    {
+      "id": "ctrip",
+      "name": "Ctrip & Trip.com",
+      "company": "Trip.com Group",
+      "category": "Travel",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "ctrip.com",
+        "ctrip.cn",
+        "trip.com"
+      ],
+      "aliases": [
+        "Xiecheng",
+        "Trip.com"
+      ],
+      "source": "https://www.ctrip.com/"
+    },
+    {
+      "id": "qunar",
+      "name": "Qunar",
+      "company": "Trip.com Group",
+      "category": "Travel",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "qunar.com",
+        "qunarzz.com"
+      ],
+      "aliases": [
+        "Qunar.com"
+      ],
+      "source": "https://www.qunar.com/"
+    },
+    {
+      "id": "fliggy",
+      "name": "Fliggy",
+      "company": "Alibaba Group",
+      "category": "Travel",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "fliggy.com",
+        "alitrip.com",
+        "alicdn.com"
+      ],
+      "aliases": [
+        "Feizhu",
+        "AliTrip"
+      ],
+      "source": "https://www.fliggy.com/"
+    },
+    {
+      "id": "amap",
+      "name": "Amap",
+      "company": "Alibaba Group",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "amap.com",
+        "amap.net",
+        "autonavi.com",
+        "gaode.com"
+      ],
+      "aliases": [
+        "Gaode Maps",
+        "AutoNavi"
+      ],
+      "source": "https://www.amap.com/"
+    },
+    {
+      "id": "baidu-maps",
+      "name": "Baidu Maps",
+      "company": "Baidu",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "map.baidu.com",
+        "bdimg.com"
+      ],
+      "aliases": [
+        "Baidu Map"
+      ],
+      "source": "https://map.baidu.com/"
+    },
+    {
+      "id": "railway-12306",
+      "name": "China Railway 12306",
+      "company": "China State Railway",
+      "category": "Travel",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "12306.cn",
+        "95306.cn"
+      ],
+      "aliases": [
+        "12306",
+        "China Railway"
+      ],
+      "source": "https://www.12306.cn/"
+    },
+    {
+      "id": "cainiao",
+      "name": "Cainiao",
+      "company": "Alibaba Group",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "cainiao.com",
+        "cainiaoyizhan.com"
+      ],
+      "aliases": [
+        "Cainiao Post",
+        "Cainiao Guoguo"
+      ],
+      "source": "https://www.cainiao.com/"
+    },
+    {
+      "id": "sf-express",
+      "name": "SF Express",
+      "company": "SF Holding",
+      "category": "Local services",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "sf.cn",
+        "sf-international.com",
+        "sf-cityrush.com"
+      ],
+      "aliases": [
+        "Shunfeng",
+        "SF"
+      ],
+      "source": "https://www.sf-express.com/"
+    },
+    {
+      "id": "dingtalk",
+      "name": "DingTalk",
+      "company": "Alibaba Group",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "dingtalk.com",
+        "dingtalk.cn",
+        "dingtalkapps.com",
+        "ddurl.to"
+      ],
+      "aliases": [
+        "Ding Ding"
+      ],
+      "source": "https://www.dingtalk.com/"
+    },
+    {
+      "id": "feishu",
+      "name": "Feishu",
+      "company": "ByteDance",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "feishu.cn",
+        "feishuapp.cn"
+      ],
+      "aliases": [
+        "Fei Shu",
+        "China Lark"
+      ],
+      "source": "https://www.feishu.cn/"
+    },
+    {
+      "id": "lark",
+      "name": "Lark",
+      "company": "ByteDance",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "larksuite.com",
+        "larkoffice.com"
+      ],
+      "aliases": [
+        "Lark Suite",
+        "Global Feishu"
+      ],
+      "source": "https://www.larksuite.com/"
+    },
+    {
+      "id": "wps",
+      "name": "WPS Office",
+      "company": "Kingsoft",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "wps.cn",
+        "wps.com",
+        "wpscdn.cn",
+        "kdocs.cn"
+      ],
+      "aliases": [
+        "Kingsoft Office",
+        "Jinshan Docs"
+      ],
+      "source": "https://www.wps.cn/"
+    },
+    {
+      "id": "tencent-meeting",
+      "name": "Tencent Meeting",
+      "company": "Tencent",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "meeting.tencent.com",
+        "voovmeeting.com",
+        "qq.com"
+      ],
+      "aliases": [
+        "VooV Meeting"
+      ],
+      "source": "https://meeting.tencent.com/"
+    },
+    {
+      "id": "baidu-netdisk",
+      "name": "Baidu Netdisk",
+      "company": "Baidu",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "pan.baidu.com",
+        "baidupcs.com"
+      ],
+      "aliases": [
+        "Baidu Pan",
+        "Baidu Wangpan"
+      ],
+      "source": "https://pan.baidu.com/"
+    },
+    {
+      "id": "aliyun-drive",
+      "name": "Aliyun Drive",
+      "company": "Alibaba Group",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "alipan.com",
+        "aliyundrive.com",
+        "aliyundrive.net"
+      ],
+      "aliases": [
+        "Aliyun Pan",
+        "AliPan"
+      ],
+      "source": "https://www.alipan.com/"
+    },
+    {
+      "id": "weiyun",
+      "name": "Tencent Weiyun",
+      "company": "Tencent",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "weiyun.com",
+        "weiyun.qq.com",
+        "qpic.cn"
+      ],
+      "aliases": [
+        "Weiyun Cloud"
+      ],
+      "source": "https://www.weiyun.com/"
+    },
+    {
+      "id": "quark-cloud",
+      "name": "Quark Cloud Drive",
+      "company": "Alibaba Group",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "quark.cn",
+        "myquark.cn",
+        "uc.cn"
+      ],
+      "aliases": [
+        "Quark Browser",
+        "Quark Pan"
+      ],
+      "source": "https://pan.quark.cn/"
+    },
+    {
+      "id": "sunlogin",
+      "name": "Sunlogin",
+      "company": "Oray",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "sunlogin.oray.com",
+        "oray.com",
+        "oray.net"
+      ],
+      "aliases": [
+        "Sunflower Remote",
+        "Xiangrikui"
+      ],
+      "source": "https://sunlogin.oray.com/"
+    },
+    {
+      "id": "todesk",
+      "name": "ToDesk",
+      "company": "ToDesk",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "todesk.com",
+        "todesk.com.cn"
+      ],
+      "aliases": [
+        "To Desk"
+      ],
+      "source": "https://www.todesk.com/"
+    },
+    {
+      "id": "tencent-games",
+      "name": "Tencent Games",
+      "company": "Tencent",
+      "category": "Gaming",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "game.qq.com"
+      ],
+      "aliases": [
+        "WeGame"
+      ],
+      "source": "https://game.qq.com/"
+    },
+    {
+      "id": "netease-games",
+      "name": "NetEase Games",
+      "company": "NetEase",
+      "category": "Gaming",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "game.163.com",
+        "neteasegames.com",
+        "126.net",
+        "127.net"
+      ],
+      "aliases": [
+        "Wangyi Games"
+      ],
+      "source": "https://game.163.com/"
+    },
+    {
+      "id": "mihoyo",
+      "name": "miHoYo",
+      "company": "miHoYo",
+      "category": "Gaming",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "mihoyo.com",
+        "yuanshen.com",
+        "bh3.com",
+        "miyoushe.com"
+      ],
+      "aliases": [
+        "Genshin China",
+        "Yuan Shen"
+      ],
+      "source": "https://www.mihoyo.com/"
+    },
+    {
+      "id": "hoyoverse",
+      "name": "HoYoverse",
+      "company": "miHoYo",
+      "category": "Gaming",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "hoyoverse.com",
+        "hoyolab.com",
+        "genshinimpact.com",
+        "honkaistarrail.com",
+        "zenlesszonezero.com"
+      ],
+      "aliases": [
+        "Genshin Impact",
+        "Honkai Star Rail",
+        "Zenless Zone Zero"
+      ],
+      "source": "https://www.hoyoverse.com/"
+    },
+    {
+      "id": "taptap",
+      "name": "TapTap",
+      "company": "XD",
+      "category": "Gaming",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "taptap.cn",
+        "taptap.com",
+        "taptap.io"
+      ],
+      "aliases": [
+        "Tap Tap"
+      ],
+      "source": "https://www.taptap.cn/"
+    },
+    {
+      "id": "sogou",
+      "name": "Sogou",
+      "company": "Tencent",
+      "category": "Web",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "sogou.com",
+        "sogou.cn",
+        "sogoucdn.com",
+        "pinyin.cn"
+      ],
+      "aliases": [
+        "Sogou Search",
+        "Sogou Input"
+      ],
+      "source": "https://www.sogou.com/"
+    },
+    {
+      "id": "so360",
+      "name": "360 Search",
+      "company": "Qihoo 360",
+      "category": "Web",
+      "profile_type": "website",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "so.com",
+        "360.cn",
+        "360.com"
+      ],
+      "aliases": [
+        "Haosou",
+        "Qihoo Search"
+      ],
+      "source": "https://www.so.com/"
+    },
+    {
+      "id": "uc-browser",
+      "name": "UC Browser",
+      "company": "Alibaba Group",
+      "category": "Web",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "uc.cn",
+        "ucweb.com",
+        "open-uc.cn"
+      ],
+      "aliases": [
+        "UC"
+      ],
+      "source": "https://www.uc.cn/"
+    }
+  ]
+}

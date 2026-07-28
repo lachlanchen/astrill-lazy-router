@@ -29,8 +29,13 @@ jobs:
       - name: Test
         run: pytest
 
+      - name: Validate catalog
+        run: python scripts/validate-catalog.py
+
       - name: Lint Python
-        run: ruff check desktop tests && ruff format --check desktop tests
+        run: >-
+          ruff check desktop tests scripts/validate-catalog.py &&
+          ruff format --check desktop tests scripts/validate-catalog.py
 
       - name: Check shell
         run: >-

@@ -12,9 +12,11 @@ The current deployment provides:
   namespaces;
 - a native GTK 4 and Libadwaita control application;
 - a companion page at DD-WRT `/MyPage.asp?3`;
-- an extension catalog with 44 common services and 14 region groups;
+- an extension catalog with 260 company, app, and website profiles across 19
+  categories and 14 region groups;
 - guarded A/B policy activation, rollback, watchdog recovery, and fail-closed
   VPN routes;
+- desktop login startup and automatic companion installation or runtime repair;
 - discovery and switching of all 178 locations in the installed Astrill
   applet;
 - an encrypted, round-trip-verified recovery backup.
@@ -39,11 +41,16 @@ astrill-lazy servers
 astrill-lazy refresh
 astrill-lazy rollback
 astrill-lazy install-router
+astrill-lazy autostart status
 ```
 
 The SSH target defaults to the `astrill-router` host alias. The desktop
 configuration is stored with mode `0600` at
 `~/.config/astrill-lazy/config.json`.
+The source installer enables user-session startup at
+`~/.config/autostart/io.github.lachlanchen.AstrillLazyRouter.desktop`.
+On launch, the GUI checks the companion and then reconciles it every 60
+seconds. A healthy current runtime causes no router write.
 
 ## Country Model
 
@@ -65,7 +72,10 @@ schema.
 - Astrill applet: `2.9.52`
 - Router runtime: `/tmp/astrill-lazy`
 - DD-WRT pages: policy `3`, status API `4`
-- Router plugin: `0.1.0`, healthy
+- Desktop/catalog: `0.2.0`
+- Router plugin: `0.1.0`, healthy after a physical reboot
+- Astrill tunnel: disconnected after reboot because its existing autostart
+  setting is disabled
 - Active example: `uuyc.163.com` resolved and marked direct
 
 ## Safety

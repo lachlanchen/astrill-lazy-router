@@ -14,6 +14,7 @@ python3 -m venv --system-site-packages "$VENV"
 mkdir -p "$LOCAL_BIN" "$APPLICATIONS" "$METAINFO"
 ln -sfn "$VENV/bin/astrill-lazy" "$LOCAL_BIN/astrill-lazy"
 ln -sfn "$VENV/bin/astrill-lazy-gui" "$LOCAL_BIN/astrill-lazy-gui"
+"$VENV/bin/astrill-lazy" autostart enable >/dev/null
 sed "s|^Exec=.*|Exec=$VENV/bin/astrill-lazy-gui|" \
     "$ROOT/data/io.github.lachlanchen.AstrillLazyRouter.desktop" \
     > "$APPLICATIONS/io.github.lachlanchen.AstrillLazyRouter.desktop"

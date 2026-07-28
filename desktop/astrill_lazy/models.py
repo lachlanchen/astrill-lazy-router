@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
@@ -41,6 +41,7 @@ class Service:
     name: str
     company: str
     category: str
+    profile_type: str
     default_route: RouteTarget
     preferred_region: str
     domains: tuple[str, ...]
@@ -54,6 +55,7 @@ class Service:
             name=str(value["name"]),
             company=str(value["company"]),
             category=str(value["category"]),
+            profile_type=str(value.get("profile_type", "app")),
             default_route=RouteTarget(value["default_route"]),
             preferred_region=str(value.get("preferred_region", "active-astrill")),
             domains=tuple(str(item).lower() for item in value["domains"]),
@@ -65,17 +67,51 @@ class Service:
 
     def validate(self) -> None:
         validate_id(self.id)
-        if not self.name.strip() or not self.company.strip():
-            raise ValueError(f"service {self.id!r} has an empty name or company")
+        if (
+            not self.name.strip()
+            or not self.company.strip()
+            or not self.category.strip()
+        ):
+            raise ValueError(
+                f"service {self.id!r} has an empty name, company, or category"
+            )
+        if self.profile_type not in {"company", "app", "website"}:
+            raise ValueError(
+                f"service {self.id!r} has invalid profile type {self.profile_type!r}"
+            )
         if not self.domains:
             raise ValueError(f"service {self.id!r} has no domains")
+        if len(self.domains) > 16:
+            raise ValueError(f"service {self.id!r} has more than 16 seed domains")
+        if len(set(self.domains)) != len(self.domains):
+            raise ValueError(f"service {self.id!r} contains duplicate domains")
         for domain in self.domains:
             validate_domain(domain)
+        if any(not alias.strip() for alias in self.aliases):
+            raise ValueError(f"service {self.id!r} contains an empty alias")
+        if (
+            self.default_route is RouteTarget.DIRECT
+            and self.preferred_region != "direct"
+        ):
+            raise ValueError(
+                f"direct service {self.id!r} must prefer the direct region"
+            )
+        if self.source:
+            parsed_source = urlparse(self.source)
+            if parsed_source.scheme != "https" or not parsed_source.hostname:
+                raise ValueError(f"service {self.id!r} has an invalid source URL")
 
     @property
     def search_text(self) -> str:
         return " ".join(
-            [self.name, self.company, self.category, *self.aliases, *self.domains]
+            [
+                self.name,
+                self.company,
+                self.category,
+                self.profile_type,
+                *self.aliases,
+                *self.domains,
+            ]
         ).casefold()
 
 

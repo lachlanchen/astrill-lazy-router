@@ -1,0 +1,669 @@
+{
+  "schema_version": 1,
+  "services": [
+    {
+      "id": "facebook",
+      "name": "Facebook",
+      "company": "Meta",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "facebook.com",
+        "fb.com",
+        "fbcdn.net",
+        "fbsbx.com"
+      ],
+      "aliases": [
+        "FB"
+      ],
+      "source": "https://www.facebook.com/"
+    },
+    {
+      "id": "whatsapp",
+      "name": "WhatsApp",
+      "company": "Meta",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "whatsapp.com",
+        "whatsapp.net",
+        "wa.me"
+      ],
+      "aliases": [
+        "WA"
+      ],
+      "source": "https://www.whatsapp.com/"
+    },
+    {
+      "id": "messenger",
+      "name": "Messenger",
+      "company": "Meta",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "messenger.com",
+        "m.me",
+        "fbmessenger.com",
+        "fbcdn.net"
+      ],
+      "aliases": [
+        "Facebook Messenger"
+      ],
+      "source": "https://www.messenger.com/"
+    },
+    {
+      "id": "threads",
+      "name": "Threads",
+      "company": "Meta",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "threads.net",
+        "threads.com",
+        "instagram.com"
+      ],
+      "aliases": [
+        "Instagram Threads"
+      ],
+      "source": "https://www.threads.com/"
+    },
+    {
+      "id": "linkedin",
+      "name": "LinkedIn",
+      "company": "Microsoft",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "linkedin.com",
+        "lnkd.in"
+      ],
+      "aliases": [
+        "Linked In"
+      ],
+      "source": "https://www.linkedin.com/"
+    },
+    {
+      "id": "pinterest",
+      "name": "Pinterest",
+      "company": "Pinterest",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "pinterest.com",
+        "pinimg.com",
+        "pin.it"
+      ],
+      "aliases": [],
+      "source": "https://www.pinterest.com/"
+    },
+    {
+      "id": "snapchat",
+      "name": "Snapchat",
+      "company": "Snap",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "snapchat.com",
+        "snap.com",
+        "snapkit.com"
+      ],
+      "aliases": [
+        "Snap"
+      ],
+      "source": "https://www.snapchat.com/"
+    },
+    {
+      "id": "bluesky",
+      "name": "Bluesky",
+      "company": "Bluesky",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "bsky.app",
+        "bsky.social",
+        "bsky.network"
+      ],
+      "aliases": [
+        "Blue Sky",
+        "AT Protocol"
+      ],
+      "source": "https://bsky.app/"
+    },
+    {
+      "id": "tumblr",
+      "name": "Tumblr",
+      "company": "Automattic",
+      "category": "Social",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "tumblr.com",
+        "tumblr.co",
+        "tumblr.net"
+      ],
+      "aliases": [],
+      "source": "https://www.tumblr.com/"
+    },
+    {
+      "id": "mastodon",
+      "name": "Mastodon",
+      "company": "Mastodon",
+      "category": "Social",
+      "profile_type": "website",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "joinmastodon.org",
+        "mastodon.social"
+      ],
+      "aliases": [
+        "Fediverse"
+      ],
+      "source": "https://joinmastodon.org/"
+    },
+    {
+      "id": "reddit",
+      "name": "Reddit",
+      "company": "Reddit",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "reddit.com",
+        "redd.it",
+        "redditmedia.com"
+      ],
+      "aliases": [],
+      "source": "https://www.reddit.com/"
+    },
+    {
+      "id": "telegram",
+      "name": "Telegram",
+      "company": "Telegram",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "telegram.org",
+        "t.me",
+        "telegram.me",
+        "telegra.ph"
+      ],
+      "aliases": [
+        "TG"
+      ],
+      "source": "https://telegram.org/"
+    },
+    {
+      "id": "signal",
+      "name": "Signal",
+      "company": "Signal Foundation",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "signal.org",
+        "signal.me",
+        "signal.group"
+      ],
+      "aliases": [
+        "Signal Messenger"
+      ],
+      "source": "https://signal.org/"
+    },
+    {
+      "id": "line",
+      "name": "LINE",
+      "company": "LY Corporation",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "japan",
+      "domains": [
+        "line.me",
+        "line-apps.com",
+        "lin.ee"
+      ],
+      "aliases": [
+        "LINE Messenger"
+      ],
+      "source": "https://line.me/"
+    },
+    {
+      "id": "kakaotalk",
+      "name": "KakaoTalk",
+      "company": "Kakao",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "south-korea",
+      "domains": [
+        "kakao.com",
+        "kakaocorp.com"
+      ],
+      "aliases": [
+        "Kakao Talk"
+      ],
+      "source": "https://www.kakaocorp.com/page/service/service/KakaoTalk"
+    },
+    {
+      "id": "viber",
+      "name": "Viber",
+      "company": "Rakuten",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "viber.com",
+        "viber.me"
+      ],
+      "aliases": [
+        "Rakuten Viber"
+      ],
+      "source": "https://www.viber.com/"
+    },
+    {
+      "id": "discord",
+      "name": "Discord",
+      "company": "Discord",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "discord.com",
+        "discordapp.com",
+        "discord.gg"
+      ],
+      "aliases": [],
+      "source": "https://discord.com/"
+    },
+    {
+      "id": "gmail",
+      "name": "Gmail",
+      "company": "Google",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "gmail.com",
+        "googlemail.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "aliases": [
+        "Google Mail"
+      ],
+      "source": "https://mail.google.com/"
+    },
+    {
+      "id": "google-drive",
+      "name": "Google Drive",
+      "company": "Google",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "drive.google.com",
+        "docs.google.com",
+        "googleusercontent.com",
+        "googleapis.com"
+      ],
+      "aliases": [
+        "Google Docs",
+        "Google Sheets",
+        "Google Slides"
+      ],
+      "source": "https://drive.google.com/"
+    },
+    {
+      "id": "google-meet",
+      "name": "Google Meet",
+      "company": "Google",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "meet.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "aliases": [
+        "Meet"
+      ],
+      "source": "https://meet.google.com/"
+    },
+    {
+      "id": "google-calendar",
+      "name": "Google Calendar",
+      "company": "Google",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "calendar.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "aliases": [
+        "GCal"
+      ],
+      "source": "https://calendar.google.com/"
+    },
+    {
+      "id": "outlook",
+      "name": "Outlook",
+      "company": "Microsoft",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "outlook.com",
+        "outlook.office.com",
+        "live.com",
+        "office.com"
+      ],
+      "aliases": [
+        "Hotmail",
+        "Microsoft Mail"
+      ],
+      "source": "https://outlook.live.com/"
+    },
+    {
+      "id": "teams",
+      "name": "Microsoft Teams",
+      "company": "Microsoft",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "teams.microsoft.com",
+        "teams.live.com",
+        "microsoft.com",
+        "office.com"
+      ],
+      "aliases": [
+        "Teams"
+      ],
+      "source": "https://www.microsoft.com/microsoft-teams/"
+    },
+    {
+      "id": "onedrive",
+      "name": "OneDrive",
+      "company": "Microsoft",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "onedrive.com",
+        "1drv.com",
+        "1drv.ms"
+      ],
+      "aliases": [
+        "Microsoft OneDrive"
+      ],
+      "source": "https://www.microsoft.com/microsoft-365/onedrive/online-cloud-storage"
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "company": "Salesforce",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "slack.com",
+        "slack-imgs.com"
+      ],
+      "aliases": [],
+      "source": "https://slack.com/"
+    },
+    {
+      "id": "zoom",
+      "name": "Zoom",
+      "company": "Zoom",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "zoom.us",
+        "zoom.com"
+      ],
+      "aliases": [
+        "Zoom Meetings"
+      ],
+      "source": "https://www.zoom.com/"
+    },
+    {
+      "id": "notion",
+      "name": "Notion",
+      "company": "Notion",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "notion.com",
+        "notion.so",
+        "notion.site"
+      ],
+      "aliases": [
+        "Notion AI"
+      ],
+      "source": "https://www.notion.com/"
+    },
+    {
+      "id": "trello",
+      "name": "Trello",
+      "company": "Atlassian",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "trello.com"
+      ],
+      "aliases": [],
+      "source": "https://trello.com/"
+    },
+    {
+      "id": "asana",
+      "name": "Asana",
+      "company": "Asana",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "asana.com",
+        "asana.biz"
+      ],
+      "aliases": [],
+      "source": "https://asana.com/"
+    },
+    {
+      "id": "monday",
+      "name": "monday.com",
+      "company": "monday.com",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "monday.com",
+        "monday.app"
+      ],
+      "aliases": [
+        "Monday Work Management"
+      ],
+      "source": "https://monday.com/"
+    },
+    {
+      "id": "airtable",
+      "name": "Airtable",
+      "company": "Airtable",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "airtable.com"
+      ],
+      "aliases": [],
+      "source": "https://www.airtable.com/"
+    },
+    {
+      "id": "figma",
+      "name": "Figma",
+      "company": "Figma",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "figma.com"
+      ],
+      "aliases": [
+        "FigJam"
+      ],
+      "source": "https://www.figma.com/"
+    },
+    {
+      "id": "miro",
+      "name": "Miro",
+      "company": "Miro",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "europe",
+      "domains": [
+        "miro.com",
+        "mirostatic.com"
+      ],
+      "aliases": [
+        "Miro Whiteboard"
+      ],
+      "source": "https://miro.com/"
+    },
+    {
+      "id": "dropbox",
+      "name": "Dropbox",
+      "company": "Dropbox",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "dropbox.com",
+        "dropboxstatic.com"
+      ],
+      "aliases": [],
+      "source": "https://www.dropbox.com/"
+    },
+    {
+      "id": "box",
+      "name": "Box",
+      "company": "Box",
+      "category": "Cloud",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "box.com",
+        "box.net"
+      ],
+      "aliases": [
+        "Box Cloud"
+      ],
+      "source": "https://www.box.com/"
+    },
+    {
+      "id": "salesforce",
+      "name": "Salesforce",
+      "company": "Salesforce",
+      "category": "Work",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "salesforce.com",
+        "force.com",
+        "salesforce-sites.com",
+        "documentforce.com"
+      ],
+      "aliases": [
+        "Sales Cloud",
+        "CRM"
+      ],
+      "source": "https://www.salesforce.com/"
+    },
+    {
+      "id": "adobe",
+      "name": "Adobe",
+      "company": "Adobe",
+      "category": "Work",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "adobe.com",
+        "adobe.io",
+        "creativecloud.com",
+        "adobelogin.com"
+      ],
+      "aliases": [
+        "Creative Cloud",
+        "Photoshop",
+        "Acrobat"
+      ],
+      "source": "https://www.adobe.com/"
+    },
+    {
+      "id": "canva",
+      "name": "Canva",
+      "company": "Canva",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "canva.com",
+        "canvastatus.com"
+      ],
+      "aliases": [
+        "Canva Design"
+      ],
+      "source": "https://www.canva.com/"
+    }
+  ]
+}

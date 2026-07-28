@@ -11,7 +11,8 @@ The source deployment is installed without root:
 This creates a system-site-enabled virtual environment at `.venv`, installs the
 editable package, adds `astrill-lazy` and `astrill-lazy-gui` under
 `~/.local/bin`, and registers the desktop entry under
-`~/.local/share/applications`.
+`~/.local/share/applications`. It also enables a user-level login entry under
+`~/.config/autostart`; no root password is needed.
 
 Launch it from the Ubuntu application menu or run:
 
@@ -19,12 +20,28 @@ Launch it from the Ubuntu application menu or run:
 astrill-lazy-gui
 ```
 
+Manage login startup from the Extensions view or the CLI:
+
+```bash
+astrill-lazy autostart enable
+astrill-lazy autostart status
+astrill-lazy autostart disable
+```
+
+At startup and every 60 seconds, the GUI checks the DD-WRT companion. A missing
+or outdated companion is installed, while a current companion with a stopped
+watchdog is repaired in place. A healthy runtime is only read, not rewritten.
+The package fingerprint prevents an identical broken package from being
+automatically written on every monitor cycle; the Install/Upgrade action is the
+explicit recovery override.
+
 ## Views
 
 ### Policies
 
 The first screen shows controller health, tunnel state, active Astrill
-location, and enabled policy count. Each rule has:
+location, and enabled policy count. A configured server is not reported as
+active while the tunnel is disconnected. Each rule has:
 
 - an enable switch;
 - Direct/Astrill segmented routing;
@@ -37,10 +54,10 @@ transactionally installs the full rule set on DD-WRT.
 
 ### Services
 
-The catalog can be searched by service, company, alias, or seed domain and
-filtered by category. It includes the requested Chinese and global vendors,
-AI tools, development services, media, messaging, work, and common daily
-services.
+The 260-profile catalog can be searched by service, company, alias, or seed
+domain and filtered by category and profile type. It includes Chinese and
+global vendors, AI tools, development services, media, messaging, work, and
+common daily services.
 
 ### Devices
 
@@ -56,8 +73,9 @@ A confirmation is required because reconnecting pauses VPN-routed traffic.
 ### Extensions
 
 Installed catalogs can be enabled, disabled, inspected, and opened in the file
-manager. The core catalog is mandatory. The same view reports whether the
-DD-WRT companion is installed and can perform an idempotent upgrade.
+manager. The core catalog is mandatory. The same view controls login startup,
+reports whether the DD-WRT companion is installed, and can perform an
+idempotent upgrade.
 
 ## Application Profiles
 

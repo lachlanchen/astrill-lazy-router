@@ -1,0 +1,564 @@
+{
+  "schema_version": 1,
+  "services": [
+    {
+      "id": "uu-remote",
+      "name": "UU Remote",
+      "company": "NetEase",
+      "category": "Remote access",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "uuyc.163.com"
+      ],
+      "aliases": [
+        "UU Yuancheng",
+        "NetEase UU Remote"
+      ],
+      "source": "https://uuyc.163.com/"
+    },
+    {
+      "id": "meta",
+      "name": "Meta",
+      "company": "Meta",
+      "category": "Social",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "meta.com",
+        "facebook.com",
+        "fbcdn.net",
+        "messenger.com",
+        "instagram.com",
+        "whatsapp.com",
+        "whatsapp.net",
+        "threads.net"
+      ],
+      "aliases": [
+        "Facebook",
+        "Instagram",
+        "Messenger",
+        "WhatsApp",
+        "Threads"
+      ],
+      "source": "https://about.meta.com/"
+    },
+    {
+      "id": "google",
+      "name": "Google",
+      "company": "Google",
+      "category": "Web",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "google.com",
+        "googleapis.com",
+        "gstatic.com",
+        "googleusercontent.com",
+        "googlevideo.com"
+      ],
+      "aliases": [
+        "Google Search",
+        "Google Workspace",
+        "Alphabet"
+      ],
+      "source": "https://about.google/"
+    },
+    {
+      "id": "apple",
+      "name": "Apple",
+      "company": "Apple",
+      "category": "Cloud",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "apple.com",
+        "icloud.com",
+        "icloud-content.com",
+        "mzstatic.com",
+        "apple-cloudkit.com"
+      ],
+      "aliases": [
+        "iCloud",
+        "App Store",
+        "Apple ID"
+      ],
+      "source": "https://www.apple.com/"
+    },
+    {
+      "id": "microsoft",
+      "name": "Microsoft",
+      "company": "Microsoft",
+      "category": "Work",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "microsoft.com",
+        "live.com",
+        "office.com",
+        "windows.net"
+      ],
+      "aliases": [
+        "Microsoft 365",
+        "Office",
+        "Windows",
+        "OneDrive",
+        "Teams"
+      ],
+      "source": "https://www.microsoft.com/"
+    },
+    {
+      "id": "amazon",
+      "name": "Amazon",
+      "company": "Amazon",
+      "category": "Commerce",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "amazon.com",
+        "amazonaws.com",
+        "amazonvideo.com"
+      ],
+      "aliases": [
+        "AWS",
+        "Prime Video",
+        "Amazon Music"
+      ],
+      "source": "https://www.amazon.com/"
+    },
+    {
+      "id": "alibaba",
+      "name": "Alibaba Group",
+      "company": "Alibaba Group",
+      "category": "Commerce",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "alibabagroup.com",
+        "alibaba.com",
+        "alibabacloud.com",
+        "aliyun.com",
+        "alipay.com",
+        "alicdn.com",
+        "alibabausercontent.com"
+      ],
+      "aliases": [
+        "Aliyun",
+        "Alipay",
+        "Taobao",
+        "Tmall"
+      ],
+      "source": "https://www.alibabagroup.com/"
+    },
+    {
+      "id": "tencent",
+      "name": "Tencent",
+      "company": "Tencent",
+      "category": "Cloud",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "tencent.com",
+        "qcloud.com",
+        "qq.com",
+        "qpic.cn"
+      ],
+      "aliases": [
+        "Tencent Cloud",
+        "WeChat",
+        "QQ"
+      ],
+      "source": "https://www.tencent.com/"
+    },
+    {
+      "id": "bytedance",
+      "name": "ByteDance",
+      "company": "ByteDance",
+      "category": "Cloud",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "bytedance.com",
+        "bytecdn.cn",
+        "volcengine.com",
+        "snssdk.com"
+      ],
+      "aliases": [
+        "Douyin",
+        "TikTok",
+        "Volcengine"
+      ],
+      "source": "https://www.bytedance.com/"
+    },
+    {
+      "id": "baidu",
+      "name": "Baidu",
+      "company": "Baidu",
+      "category": "Web",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "baidu.com",
+        "baidu.cn",
+        "bdimg.com",
+        "bdstatic.com",
+        "baidupcs.com"
+      ],
+      "aliases": [
+        "Baidu Search",
+        "Baidu Cloud"
+      ],
+      "source": "https://www.baidu.com/"
+    },
+    {
+      "id": "netease",
+      "name": "NetEase",
+      "company": "NetEase",
+      "category": "Web",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "163.com",
+        "126.com",
+        "127.net",
+        "163yun.com",
+        "netease.com"
+      ],
+      "aliases": [
+        "163",
+        "NetEase Games",
+        "NetEase Cloud Music"
+      ],
+      "source": "https://www.163.com/"
+    },
+    {
+      "id": "xiaomi",
+      "name": "Xiaomi",
+      "company": "Xiaomi",
+      "category": "Cloud",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "mi.com",
+        "xiaomi.com",
+        "miui.com"
+      ],
+      "aliases": [
+        "Mi",
+        "MIUI",
+        "Mijia"
+      ],
+      "source": "https://www.mi.com/"
+    },
+    {
+      "id": "instagram",
+      "name": "Instagram",
+      "company": "Meta",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "instagram.com",
+        "ig.me"
+      ],
+      "aliases": [
+        "IG"
+      ],
+      "source": "https://www.instagram.com/"
+    },
+    {
+      "id": "x",
+      "name": "X",
+      "company": "X Corp.",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "x.com",
+        "twitter.com",
+        "t.co"
+      ],
+      "aliases": [
+        "Twitter"
+      ],
+      "source": "https://x.com/"
+    },
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "company": "Google",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "youtube.com",
+        "youtu.be",
+        "googlevideo.com",
+        "youtube-nocookie.com"
+      ],
+      "aliases": [
+        "YT"
+      ],
+      "source": "https://www.youtube.com/"
+    },
+    {
+      "id": "taobao",
+      "name": "Taobao & Tmall",
+      "company": "Alibaba Group",
+      "category": "Commerce",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "taobao.com",
+        "tmall.com",
+        "tbcdn.cn",
+        "alicdn.com"
+      ],
+      "aliases": [
+        "Taobao",
+        "Tmall"
+      ],
+      "source": "https://www.taobao.com/"
+    },
+    {
+      "id": "wechat",
+      "name": "WeChat",
+      "company": "Tencent",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "wechat.com",
+        "weixin.qq.com",
+        "weixin.com",
+        "qpic.cn"
+      ],
+      "aliases": [
+        "Weixin",
+        "WeChat Pay"
+      ],
+      "source": "https://www.wechat.com/"
+    },
+    {
+      "id": "qq",
+      "name": "QQ",
+      "company": "Tencent",
+      "category": "Messaging",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "qq.com",
+        "qzone.qq.com",
+        "qpic.cn"
+      ],
+      "aliases": [
+        "Qzone"
+      ],
+      "source": "https://im.qq.com/"
+    },
+    {
+      "id": "wecom",
+      "name": "WeCom",
+      "company": "Tencent",
+      "category": "Work",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "work.weixin.qq.com",
+        "wecom.work"
+      ],
+      "aliases": [
+        "WeChat Work",
+        "Enterprise WeChat"
+      ],
+      "source": "https://www.wecom.com/"
+    },
+    {
+      "id": "meituan",
+      "name": "Meituan & Dianping",
+      "company": "Meituan",
+      "category": "Local services",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "meituan.com",
+        "meituan.net",
+        "dianping.com",
+        "sankuai.com"
+      ],
+      "aliases": [
+        "Dianping",
+        "Maoyan"
+      ],
+      "source": "https://www.meituan.com/"
+    },
+    {
+      "id": "xiaohongshu",
+      "name": "Xiaohongshu",
+      "company": "Xingin",
+      "category": "Social",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "xiaohongshu.com",
+        "xhscdn.com"
+      ],
+      "aliases": [
+        "RED",
+        "Little Red Book",
+        "XHS"
+      ],
+      "source": "https://www.xiaohongshu.com/"
+    },
+    {
+      "id": "douyin",
+      "name": "Douyin",
+      "company": "ByteDance",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "douyin.com",
+        "amemv.com",
+        "snssdk.com"
+      ],
+      "aliases": [
+        "Chinese TikTok"
+      ],
+      "source": "https://www.douyin.com/"
+    },
+    {
+      "id": "tiktok",
+      "name": "TikTok",
+      "company": "ByteDance",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "vpn",
+      "preferred_region": "singapore",
+      "domains": [
+        "tiktok.com",
+        "tiktokv.com"
+      ],
+      "aliases": [],
+      "source": "https://www.tiktok.com/"
+    },
+    {
+      "id": "bilibili",
+      "name": "Bilibili",
+      "company": "Bilibili",
+      "category": "Video",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "bilibili.com",
+        "biligame.com"
+      ],
+      "aliases": [
+        "B Site"
+      ],
+      "source": "https://www.bilibili.com/"
+    },
+    {
+      "id": "sohu",
+      "name": "Sohu",
+      "company": "Sohu",
+      "category": "News",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "sohu.com",
+        "sohucs.com",
+        "sogou.com",
+        "itc.cn"
+      ],
+      "aliases": [
+        "Sogou",
+        "Sohu News"
+      ],
+      "source": "https://www.sohu.com/"
+    },
+    {
+      "id": "yahoo",
+      "name": "Yahoo",
+      "company": "Yahoo",
+      "category": "Web",
+      "profile_type": "company",
+      "default_route": "vpn",
+      "preferred_region": "united-states",
+      "domains": [
+        "yahoo.com",
+        "yimg.com"
+      ],
+      "aliases": [
+        "Yahoo Mail",
+        "Yahoo Finance"
+      ],
+      "source": "https://www.yahoo.com/"
+    },
+    {
+      "id": "sina",
+      "name": "Sina",
+      "company": "Sina",
+      "category": "News",
+      "profile_type": "company",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "sina.com.cn",
+        "sina.cn",
+        "sinaimg.cn",
+        "weibo.com",
+        "weibocdn.com"
+      ],
+      "aliases": [
+        "Sina News",
+        "Weibo"
+      ],
+      "source": "https://www.sina.com.cn/"
+    },
+    {
+      "id": "xiaoyunque",
+      "name": "Xiaoyunque",
+      "company": "ByteDance",
+      "category": "AI",
+      "profile_type": "app",
+      "default_route": "direct",
+      "preferred_region": "direct",
+      "domains": [
+        "xyq.jianying.com",
+        "jianying.com",
+        "pippit.ai",
+        "capcut.com"
+      ],
+      "aliases": [
+        "Pippit",
+        "Little Skylark"
+      ],
+      "source": "https://xyq.jianying.com/"
+    }
+  ]
+}

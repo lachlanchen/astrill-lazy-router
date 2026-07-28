@@ -2,14 +2,20 @@
   "schema_version": 1,
   "id": "core-catalog",
   "name": "Core Service Catalog",
-  "version": "0.1.0",
-  "minimum_app_version": "0.1.0",
+  "version": "0.2.0",
+  "minimum_app_version": "0.2.0",
   "capabilities": [
     "catalog.services",
     "catalog.regions"
   ],
   "entrypoints": {
-    "services": "services.json",
+    "services": [
+      "services-core.json",
+      "services-ai-development.json",
+      "services-global-communication.json",
+      "services-global-daily.json",
+      "services-china.json"
+    ],
     "regions": "regions.json"
   }
 }

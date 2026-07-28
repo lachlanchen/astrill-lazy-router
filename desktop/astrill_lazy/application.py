@@ -14,9 +14,14 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 from .astrill import AstrillServer, group_by_region, parse_applet
+from .autostart import (
+    disable_autostart,
+    enable_autostart,
+    is_autostart_enabled,
+)
 from .catalog import Catalog, discover_extensions, load_catalog
 from .compiler import compile_rules
-from .installer import RouterInstaller
+from .installer import EnsureResult, RouterInstaller
 from .launcher import ApplicationLauncher, parse_command
 from .models import MatchKind, Region, RouteTarget, Rule
 from .router import RouterClient
@@ -57,6 +62,7 @@ CSS = """
 .catalog-route { font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 4px; }
 .catalog-direct { background: #dcece2; color: #145d3d; }
 .catalog-vpn { background: #dce8f3; color: #145789; }
+.catalog-count { color: #68747d; margin-left: 4px; }
 .location-current { background: #edf7f0; }
 .sidebar-status { padding: 12px 16px; border-top: 1px solid #d8dde1; }
 """
@@ -113,6 +119,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.busy_count = 0
         self.dirty = False
         self._region_filter = "all"
+        self._updating_autostart = False
 
         self._install_css()
         self.toast_overlay = Adw.ToastOverlay()
@@ -124,8 +131,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_rules()
         self._render_services()
         self._render_extensions()
-        self.refresh_router()
+        self.ensure_router_companion(quiet=False)
         self.load_servers()
+        self.router_monitor_id = GLib.timeout_add_seconds(
+            60, self._monitor_router_companion
+        )
 
     def _install_css(self) -> None:
         provider = Gtk.CssProvider()
@@ -311,24 +321,35 @@ class MainWindow(Adw.ApplicationWindow):
     def _build_services_page(self) -> Gtk.Widget:
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         content.add_css_class("page-content")
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.service_search = Gtk.SearchEntry()
-        self.service_search.set_placeholder_text("Search service, company, or domain")
+        self.service_search.set_placeholder_text(
+            "Search app, company, alias, or domain"
+        )
         self.service_search.set_hexpand(True)
         self.service_search.connect(
             "search-changed", lambda _entry: self._render_services()
         )
-        top.append(self.service_search)
-        categories = [
-            "All categories",
-            *sorted({item.category for item in self.catalog.services}),
-        ]
-        self.category_dropdown = Gtk.DropDown.new_from_strings(categories)
+        content.append(self.service_search)
+
+        filters = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.category_dropdown = Gtk.DropDown()
         self.category_dropdown.connect(
             "notify::selected", lambda *_args: self._render_services()
         )
-        top.append(self.category_dropdown)
-        content.append(top)
+        filters.append(self.category_dropdown)
+        self.profile_type_dropdown = Gtk.DropDown()
+        self.profile_type_dropdown.connect(
+            "notify::selected", lambda *_args: self._render_services()
+        )
+        filters.append(self.profile_type_dropdown)
+        self.service_result_count = Gtk.Label()
+        self.service_result_count.set_xalign(1)
+        self.service_result_count.set_hexpand(True)
+        self.service_result_count.add_css_class("catalog-count")
+        filters.append(self.service_result_count)
+        content.append(filters)
+        self._refresh_service_filters()
+
         self.service_list = Gtk.ListBox()
         self.service_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self.service_list.add_css_class("catalog-list")
@@ -410,6 +431,28 @@ class MainWindow(Adw.ApplicationWindow):
         self.extension_list.add_css_class("catalog-list")
         content.append(self.extension_list)
 
+        desktop_heading = Gtk.Label(label="Desktop")
+        desktop_heading.set_xalign(0)
+        desktop_heading.add_css_class("section-title")
+        desktop_heading.add_css_class("toolbar-section")
+        content.append(desktop_heading)
+        autostart_row = Adw.ActionRow(
+            title="Launch at login",
+            subtitle="Start the controller and reconcile the router companion",
+        )
+        autostart_row.set_use_markup(False)
+        autostart_row.add_prefix(Gtk.Image.new_from_icon_name("system-run-symbolic"))
+        self.autostart_switch = Gtk.Switch(active=is_autostart_enabled())
+        self.autostart_switch.set_valign(Gtk.Align.CENTER)
+        self.autostart_switch.set_tooltip_text("Launch Astrill Lazy after login")
+        self.autostart_switch.connect("notify::active", self._toggle_autostart)
+        autostart_row.add_suffix(self.autostart_switch)
+        desktop_list = Gtk.ListBox()
+        desktop_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        desktop_list.add_css_class("catalog-list")
+        desktop_list.append(autostart_row)
+        content.append(desktop_list)
+
         router_heading = Gtk.Label(label="Router Companion")
         router_heading.set_xalign(0)
         router_heading.add_css_class("section-title")
@@ -417,7 +460,7 @@ class MainWindow(Adw.ApplicationWindow):
         content.append(router_heading)
         self.router_companion_row = Adw.ActionRow(
             title="DD-WRT MyPage plugin",
-            subtitle="Persistent controller, watchdog, status API, and policy page",
+            subtitle="Persistent controller, watchdog, MyPage, and automatic repair",
         )
         self.router_companion_row.set_use_markup(False)
         self.router_companion_icon = Gtk.Image.new_from_icon_name(
@@ -570,11 +613,9 @@ class MainWindow(Adw.ApplicationWindow):
         _clear_list(self.service_list)
         query = self.service_search.get_text().strip().casefold()
         category_index = self.category_dropdown.get_selected()
-        category = (
-            None
-            if category_index == 0
-            else self.category_dropdown.get_selected_item().get_string()
-        )
+        category = self.service_categories[category_index]
+        profile_type_index = self.profile_type_dropdown.get_selected()
+        profile_type = self.service_profile_types[profile_type_index]
         existing = {
             rule.selector
             for rule in self.store.rules
@@ -584,14 +625,22 @@ class MainWindow(Adw.ApplicationWindow):
             service
             for service in self.catalog.services
             if (not query or query in service.search_text)
-            and (category is None or service.category == category)
+            and (category == "all" or service.category == category)
+            and (profile_type == "all" or service.profile_type == profile_type)
         ]
+        services.sort(
+            key=lambda service: (service.company.casefold(), service.name.casefold())
+        )
+        self.service_result_count.set_label(
+            f"{len(services)} of {len(self.catalog.services)}"
+        )
         for service in services:
             row = Adw.ActionRow()
             row.set_use_markup(False)
             row.set_title(service.name)
             row.set_subtitle(
-                f"{service.company} · {service.category} · {len(service.domains)} domains"
+                f"{service.company} · {service.category} · "
+                f"{service.profile_type.title()} · {len(service.domains)} domains"
             )
             row.add_prefix(
                 Gtk.Image.new_from_icon_name(_category_icon(service.category))
@@ -630,6 +679,26 @@ class MainWindow(Adw.ApplicationWindow):
             self.service_list.append(
                 _empty_row("No matching services", "Try a company name or domain.")
             )
+
+    def _refresh_service_filters(self) -> None:
+        self.service_categories = [
+            "all",
+            *sorted({item.category for item in self.catalog.services}),
+        ]
+        self.category_dropdown.set_model(
+            Gtk.StringList.new(
+                [
+                    "All categories",
+                    *self.service_categories[1:],
+                ]
+            )
+        )
+        self.category_dropdown.set_selected(0)
+        self.service_profile_types = ["all", "company", "app", "website"]
+        self.profile_type_dropdown.set_model(
+            Gtk.StringList.new(["All profiles", "Companies", "Apps", "Websites"])
+        )
+        self.profile_type_dropdown.set_selected(0)
 
     def _render_devices(self) -> None:
         if not hasattr(self, "device_list"):
@@ -684,6 +753,7 @@ class MainWindow(Adw.ApplicationWindow):
             else None
         )
         current_id = int(self.router_status.get("astrill_server_id", 0))
+        tunnel_connected = self.router_status.get("vpn_state") == "up"
         visible = [
             server
             for server in self.servers
@@ -691,24 +761,32 @@ class MainWindow(Adw.ApplicationWindow):
             and (allowed is None or server.id in allowed)
         ]
         for server in visible:
+            configured = server.id == current_id
+            connected = configured and tunnel_connected
             row = Adw.ActionRow()
             row.set_use_markup(False)
             row.set_title(server.name)
             row.set_subtitle(
                 f"Server {server.id} · {len(server.nodes)} endpoint groups"
             )
-            if server.id == current_id:
+            if connected:
                 row.add_css_class("location-current")
                 current = Gtk.Image.new_from_icon_name("object-select-symbolic")
                 current.set_tooltip_text("Current Astrill location")
                 row.add_prefix(current)
+            elif configured:
+                configured_icon = Gtk.Image.new_from_icon_name(
+                    "network-offline-symbolic"
+                )
+                configured_icon.set_tooltip_text(
+                    "Configured location; Astrill is disconnected"
+                )
+                row.add_prefix(configured_icon)
             else:
                 row.add_prefix(Gtk.Image.new_from_icon_name("network-vpn-symbolic"))
-            connect = Gtk.Button(
-                label="Connected" if server.id == current_id else "Connect"
-            )
+            connect = Gtk.Button(label="Connected" if connected else "Connect")
             connect.add_css_class("compact-button")
-            connect.set_sensitive(server.id != current_id)
+            connect.set_sensitive(not connected)
             connect.set_valign(Gtk.Align.CENTER)
             connect.connect(
                 "clicked",
@@ -796,11 +874,32 @@ class MainWindow(Adw.ApplicationWindow):
         self._region_filter = "all"
         if self.servers is not None:
             self.server_groups = group_by_region(self.servers, self.catalog.regions)
+        self._refresh_service_filters()
         self._render_rules()
         self._render_services()
         self._render_locations()
         self._render_extensions()
         self.toast("Extension settings updated")
+
+    def _toggle_autostart(self, switch: Gtk.Switch, _param: object) -> None:
+        if self._updating_autostart:
+            return
+        try:
+            if switch.get_active():
+                enable_autostart()
+            else:
+                disable_autostart()
+        except OSError as exc:
+            self._updating_autostart = True
+            switch.set_active(is_autostart_enabled())
+            self._updating_autostart = False
+            self.toast(f"Could not update desktop startup: {exc}")
+            return
+        self.toast(
+            "Astrill Lazy will start after login"
+            if switch.get_active()
+            else "Desktop startup disabled"
+        )
 
     def _set_rule_target(
         self, rule: Rule, target: RouteTarget, dropdown: Gtk.DropDown
@@ -1131,6 +1230,26 @@ class MainWindow(Adw.ApplicationWindow):
             quiet=True,
         )
 
+    def ensure_router_companion(self, *, quiet: bool = True) -> None:
+        self._run_task(
+            lambda: RouterInstaller(self.router).ensure(),
+            self._router_companion_ensured,
+            "Could not reconcile the router companion",
+            quiet=quiet,
+        )
+
+    def _router_companion_ensured(self, result: EnsureResult) -> None:
+        self._router_refreshed(result.status)
+        if result.action == "installed":
+            self.toast("Router companion installed automatically")
+        elif result.action == "repaired":
+            self.toast("Router companion runtime repaired")
+
+    def _monitor_router_companion(self) -> bool:
+        if self.busy_count == 0:
+            self.ensure_router_companion()
+        return GLib.SOURCE_CONTINUE
+
     def _router_refreshed(self, status: dict[str, Any]) -> None:
         self.router_status = status
         self._update_status()
@@ -1147,7 +1266,9 @@ class MainWindow(Adw.ApplicationWindow):
         server_id = int(status.get("astrill_server_id", 0))
         server = self._server_by_id(server_id)
         self.metrics["location"].set_label(
-            server.name if server else f"Server {server_id}"
+            (server.name if server else f"Server {server_id}")
+            if tunnel
+            else "No active tunnel"
         )
         self.metrics["rules"].set_label(str(status.get("origin_count", 0)))
         if healthy:
@@ -1435,12 +1556,22 @@ def _kind_icon(kind: MatchKind) -> str:
 def _category_icon(category: str) -> str:
     return {
         "AI": "applications-science-symbolic",
+        "Cloud": "folder-remote-symbolic",
         "Commerce": "user-bookmarks-symbolic",
         "Development": "applications-development-symbolic",
+        "Education": "accessories-dictionary-symbolic",
+        "Finance": "wallet-symbolic",
         "Gaming": "applications-games-symbolic",
+        "Local services": "find-location-symbolic",
         "Messaging": "chat-message-new-symbolic",
         "Music": "applications-multimedia-symbolic",
+        "News": "text-x-generic-symbolic",
+        "Reference": "accessories-dictionary-symbolic",
+        "Remote access": "computer-symbolic",
+        "Social": "system-users-symbolic",
+        "Travel": "mark-location-symbolic",
         "Video": "applications-multimedia-symbolic",
+        "Web": "web-browser-symbolic",
         "Work": "applications-office-symbolic",
     }.get(category, "applications-internet-symbolic")
 

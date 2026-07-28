@@ -6,6 +6,7 @@ import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .models import Region, Service
 
@@ -40,7 +41,7 @@ class ExtensionInfo:
     version: str
     path: Path
     capabilities: tuple[str, ...]
-    entrypoints: dict[str, str]
+    entrypoints: dict[str, tuple[str, ...]]
 
 
 def extension_roots() -> Iterable[Path]:
@@ -89,10 +90,7 @@ def discover_extensions() -> dict[str, ExtensionInfo]:
                 capabilities=tuple(
                     str(item) for item in manifest.get("capabilities", [])
                 ),
-                entrypoints={
-                    str(key): str(value)
-                    for key, value in manifest.get("entrypoints", {}).items()
-                },
+                entrypoints=_normalize_entrypoints(manifest.get("entrypoints", {})),
             )
     return discovered
 
@@ -125,6 +123,12 @@ def load_catalog(
 
     _ensure_unique((item.id for item in services.values()), "service")
     _ensure_unique((item.id for item in regions.values()), "region")
+    for service in services.values():
+        if service.preferred_region not in regions:
+            raise ValueError(
+                f"service {service.id!r} uses unknown preferred region "
+                f"{service.preferred_region!r}"
+            )
     return Catalog(
         services=tuple(services.values()),
         regions=tuple(regions.values()),
@@ -145,17 +149,25 @@ def _load_catalog_extension(
     services: tuple[Service, ...] = ()
     regions: tuple[Region, ...] = ()
     if "services" in extension.entrypoints:
-        services_document = _read_json(root / extension.entrypoints["services"])
-        if services_document.get("schema_version") != 1:
-            raise ValueError("unsupported services catalog schema")
-        services = tuple(
-            Service.from_dict(item) for item in services_document["services"]
-        )
+        service_items: list[Service] = []
+        for path in _entrypoint_paths(root, extension.entrypoints["services"]):
+            services_document = _read_json(path)
+            if services_document.get("schema_version") != 1:
+                raise ValueError("unsupported services catalog schema")
+            service_items.extend(
+                Service.from_dict(item) for item in services_document["services"]
+            )
+        services = tuple(service_items)
     if "regions" in extension.entrypoints:
-        regions_document = _read_json(root / extension.entrypoints["regions"])
-        if regions_document.get("schema_version") != 1:
-            raise ValueError("unsupported regions catalog schema")
-        regions = tuple(Region.from_dict(item) for item in regions_document["regions"])
+        region_items: list[Region] = []
+        for path in _entrypoint_paths(root, extension.entrypoints["regions"]):
+            regions_document = _read_json(path)
+            if regions_document.get("schema_version") != 1:
+                raise ValueError("unsupported regions catalog schema")
+            region_items.extend(
+                Region.from_dict(item) for item in regions_document["regions"]
+            )
+        regions = tuple(region_items)
     _ensure_unique((item.id for item in services), "service")
     _ensure_unique((item.id for item in regions), "region")
     return services, regions
@@ -163,7 +175,47 @@ def _load_catalog_extension(
 
 def _read_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        return json.load(handle, object_pairs_hook=_object_without_duplicates)
+
+
+def _object_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
+
+
+def _normalize_entrypoints(value: object) -> dict[str, tuple[str, ...]]:
+    if not isinstance(value, dict):
+        raise TypeError("extension entrypoints must be an object")
+    normalized: dict[str, tuple[str, ...]] = {}
+    for raw_key, raw_paths in value.items():
+        key = str(raw_key)
+        if isinstance(raw_paths, str):
+            paths = (raw_paths,)
+        elif (
+            isinstance(raw_paths, list)
+            and raw_paths
+            and all(isinstance(item, str) for item in raw_paths)
+        ):
+            paths = tuple(raw_paths)
+        else:
+            raise ValueError(f"invalid extension entrypoint {key!r}")
+        normalized[key] = paths
+    return normalized
+
+
+def _entrypoint_paths(root: Path, values: tuple[str, ...]) -> tuple[Path, ...]:
+    resolved_root = root.resolve()
+    paths: list[Path] = []
+    for value in values:
+        candidate = (root / value).resolve()
+        if not candidate.is_relative_to(resolved_root):
+            raise ValueError(f"extension entrypoint escapes its directory: {value!r}")
+        paths.append(candidate)
+    return tuple(paths)
 
 
 def _ensure_unique(values: Iterable[str], label: str) -> None:

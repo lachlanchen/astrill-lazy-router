@@ -20,7 +20,8 @@ the desktop configuration are merged. `core-catalog` is always enabled.
 ```text
 example-catalog/
   manifest.json
-  services.json
+  services-core.json
+  services-extra.json
   regions.json
 ```
 
@@ -32,20 +33,25 @@ example-catalog/
   "id": "example-catalog",
   "name": "Example Catalog",
   "version": "1.0.0",
-  "minimum_app_version": "0.1.0",
+  "minimum_app_version": "0.2.0",
   "capabilities": [
     "catalog.services",
     "catalog.regions"
   ],
   "entrypoints": {
-    "services": "services.json",
+    "services": [
+      "services-core.json",
+      "services-extra.json"
+    ],
     "regions": "regions.json"
   }
 }
 ```
 
-Either entrypoint can be omitted. IDs must match the directory name. Catalog
-files use schema version 1 and arrays named `services` or `regions`.
+Either entrypoint can be omitted, and each can name one file or an ordered list
+of files. Paths must remain inside the extension directory. IDs must match the
+directory name. Catalog files use schema version 1 and arrays named `services`
+or `regions`; duplicate JSON keys and duplicate IDs are rejected.
 
 ## Service Entry
 
@@ -55,6 +61,7 @@ files use schema version 1 and arrays named `services` or `regions`.
   "name": "Example Service",
   "company": "Example Company",
   "category": "Work",
+  "profile_type": "app",
   "default_route": "vpn",
   "preferred_region": "singapore",
   "domains": [
@@ -68,8 +75,20 @@ files use schema version 1 and arrays named `services` or `regions`.
 }
 ```
 
-Domains are seed suffixes, not wildcard expressions. Every domain is validated
-before the extension loads.
+Profile types are `company`, `app`, or `website`. Domains are seed hostnames,
+not wildcard expressions. Every domain, source URL, preferred region, and
+route/region combination is validated before the extension loads. A service
+can contain at most 16 unique seed hosts.
+
+Run the full catalog audit with:
+
+```bash
+python scripts/validate-catalog.py
+python scripts/validate-catalog.py --dns
+```
+
+The live DNS mode retries transient failures and requires every unique seed to
+publish an IPv4 address usable by this router.
 
 ## Region Entry
 

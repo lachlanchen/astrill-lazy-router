@@ -75,6 +75,16 @@ verifies its MD5 value using tools available in this firmware, extracts it, and
 starts the controller. The host installer also records SHA-256 for release
 verification.
 
+The desktop reconciles the companion at launch and every 60 seconds. It first
+reads status over SSH. A matching version with its jump and watchdog present is
+left untouched; a stopped current runtime is started in place; only a missing,
+outdated, or fingerprint-mismatched package invokes the NVRAM installer. A
+current package can also be reconstructed from its stored bootstrap without a
+rewrite. An identical package that still cannot recover requires the explicit
+Install/Upgrade action, preventing automatic repeated NVRAM writes. This
+lifecycle is separate from Astrill connection management and does not change
+`astrill_autostart`.
+
 ## Per-Application Routing
 
 Routers see addresses and packets, not Ubuntu process names. The desktop's
@@ -98,6 +108,7 @@ bus endpoints.
   routing path is IPv4-only.
 - One Astrill tunnel means one active VPN country.
 - Domain rules use periodically resolved A records because this firmware has no
-  `ipset` support.
+  `ipset` support. Catalog seeds improve coverage but cannot identify every
+  changing CDN hostname owned by a company.
 - Application identities require an Ethernet parent that supports macvlan.
   Other transports can be added as launcher providers.

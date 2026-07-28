@@ -21,6 +21,11 @@ or recovery path, and do not couple that change to a policy upgrade.
 The DD-WRT web account is separate from Telnet root access. Its password was not
 guessed, reset, or stored by this project.
 
+Desktop login startup is a mode `0644` freedesktop entry in the current user's
+configuration. It stores only the absolute GUI executable path. Companion
+reconciliation uses the existing key-only SSH alias and stores no router or
+Ubuntu password.
+
 ## Input Handling
 
 Router TSV input is limited to 6,144 bytes and exactly ten fields per rule.
@@ -49,6 +54,10 @@ website text is edited over SSH in the native app, not interpolated into
 - A/B activation leaves the previous chain live until the new chain is ready.
 - The watchdog repairs applet/firewall restarts within 15 seconds.
 - `alctl stop` removes only plugin-owned objects.
+- Automatic reconciliation checks version and runtime markers before any
+  install, and compares the deterministic package fingerprint before recovery,
+  so a healthy or identically broken companion does not cause repeated NVRAM
+  writes.
 
 Domain matching still depends on known, resolved service domains. Unknown CDN
 hostnames follow the router's ordinary Astrill behavior rather than being
