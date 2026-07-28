@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Astrill Lazy Router
+Comment=Control direct and Astrill policy routing
+Exec=astrill-lazy-gui
+Icon=network-vpn
+Terminal=false
+Categories=Network;
+Keywords=VPN;Astrill;Router;Routing;DD-WRT;
+StartupNotify=true
+StartupWMClass=io.github.lachlanchen.AstrillLazyRouter

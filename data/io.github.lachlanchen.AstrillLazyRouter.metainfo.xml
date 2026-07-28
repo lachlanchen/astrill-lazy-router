@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.lachlanchen.AstrillLazyRouter</id>
+  <name>Astrill Lazy Router</name>
+  <summary>Direct and Astrill routing policy control</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="github.com/lachlanchen">
+    <name>Lachlan Chen</name>
+  </developer>
+  <url type="homepage">https://github.com/lachlanchen/astrill-lazy-router</url>
+  <description>
+    <p>
+      A native Ubuntu controller and DD-WRT companion for routing services,
+      websites, devices, and isolated applications either directly or through
+      the active Astrill tunnel.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.lachlanchen.AstrillLazyRouter.desktop</launchable>
+  <provides>
+    <binary>astrill-lazy-gui</binary>
+  </provides>
+  <categories>
+    <category>Network</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-07-28"/>
+  </releases>
+</component>

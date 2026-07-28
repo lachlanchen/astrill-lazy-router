@@ -1,0 +1,4 @@
+#!/bin/sh
+
+[ "${HTTP_HOST##*:}" = 8998 ] && printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+/tmp/astrill-lazy/alctl status --json

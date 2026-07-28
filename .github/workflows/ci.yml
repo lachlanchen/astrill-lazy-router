@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install shell checks
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck
+
+      - name: Install development package
+        run: python -m pip install --upgrade pip wheel && python -m pip install --editable ".[dev]"
+
+      - name: Test
+        run: pytest
+
+      - name: Lint Python
+        run: ruff check desktop tests && ruff format --check desktop tests
+
+      - name: Check shell
+        run: >-
+          shellcheck -x -s sh
+          scripts/install-desktop.sh
+          scripts/uninstall-desktop.sh
+          helpers/astrill-lazy-netns
+          router/alctl
+          router/alapi
+          router/alpage
+          router/bootstrap.sh
+
+      - name: Build wheel
+        run: python -m pip wheel --no-deps --wheel-dir /tmp/wheel .

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrill-lazy-router"
+version = "0.1.0"
+description = "Native Ubuntu and DD-WRT policy routing controls for Astrill"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Lachlan Chen" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5"
+]
+
+[project.scripts]
+astrill-lazy = "astrill_lazy.cli:main"
+astrill-lazy-gui = "astrill_lazy.application:main"
+
+[tool.setuptools]
+package-dir = { "" = "desktop" }
+
+[tool.setuptools.packages.find]
+where = ["desktop"]
+
+[tool.setuptools.data-files]
+"share/astrill-lazy/extensions/core-catalog" = [
+  "extensions/core-catalog/manifest.json",
+  "extensions/core-catalog/services.json",
+  "extensions/core-catalog/regions.json"
+]
+"share/astrill-lazy/router" = [
+  "router/alctl",
+  "router/alapi",
+  "router/alpage",
+  "router/bootstrap.sh",
+  "router/VERSION"
+]
+"libexec" = ["helpers/astrill-lazy-netns"]
+"share/applications" = [
+  "data/io.github.lachlanchen.AstrillLazyRouter.desktop"
+]
+"share/metainfo" = [
+  "data/io.github.lachlanchen.AstrillLazyRouter.metainfo.xml"
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["desktop"]

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "regions": [
+    {"id": "direct", "name": "Direct connection", "kind": "direct", "match": []},
+    {"id": "active-astrill", "name": "Current Astrill location", "kind": "vpn", "match": []},
+    {"id": "united-states", "name": "United States", "kind": "astrill", "match": ["USA", "United States"]},
+    {"id": "europe", "name": "Europe", "kind": "astrill", "match": ["UK", "Germany", "France", "Netherlands", "Switzerland", "Sweden", "Norway", "Spain", "Italy", "Belgium", "Denmark", "Finland", "Ireland", "Austria", "Portugal"]},
+    {"id": "japan", "name": "Japan", "kind": "astrill", "match": ["Japan"]},
+    {"id": "taiwan", "name": "Taiwan", "kind": "astrill", "match": ["Taiwan"]},
+    {"id": "hong-kong", "name": "Hong Kong", "kind": "astrill", "match": ["Hong Kong"]},
+    {"id": "china", "name": "China", "kind": "astrill", "match": ["[China]", "China"]},
+    {"id": "singapore", "name": "Singapore", "kind": "astrill", "match": ["Singapore"]},
+    {"id": "australia", "name": "Australia", "kind": "astrill", "match": ["Australia"]},
+    {"id": "canada", "name": "Canada", "kind": "astrill", "match": ["Canada"]},
+    {"id": "south-korea", "name": "South Korea", "kind": "astrill", "match": ["Korea"]},
+    {"id": "india", "name": "India", "kind": "astrill", "match": ["India"]},
+    {"id": "other", "name": "Other locations", "kind": "astrill", "match": []}
+  ]
+}
