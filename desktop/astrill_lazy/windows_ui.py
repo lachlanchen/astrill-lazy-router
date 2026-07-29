@@ -61,6 +61,7 @@ from .native_settings import (
     WRITABLE_NATIVE_ASTRILL_KEYS,
     NativeAstrillSettings,
 )
+from .router import _openssh_config_path
 from .service_policy import ServiceRouteMode
 from .windows_controller import WindowsController
 from .windows_ssh_setup import WindowsHostKey, WindowsKeyAuthorization
@@ -1847,7 +1848,7 @@ class MainWindow(QMainWindow):
             arguments.extend(
                 (
                     "-o",
-                    f"UserKnownHostsFile={self.controller.known_hosts_path}",
+                    f"UserKnownHostsFile={_openssh_config_path(self.controller.known_hosts_path)}",
                 )
             )
             arguments.append(target)

@@ -353,6 +353,8 @@ def build_router_package(root: Path) -> bytes:
         for name in PACKAGE_FILES:
             path = root / name
             data = path.read_bytes()
+            if name == "VERSION":
+                data = data.decode("ascii").strip().encode("ascii") + b"\n"
             info = tarfile.TarInfo(f"astrill-lazy/{name}")
             info.size = len(data)
             info.mode = 0o700 if name != "VERSION" else 0o600

@@ -373,8 +373,19 @@ done
         if self.identity_file is not None:
             arguments.extend(("-o", "IdentitiesOnly=yes", "-i", self.identity_file))
         if self.known_hosts_file is not None:
-            arguments.extend(("-o", f"UserKnownHostsFile={self.known_hosts_file}"))
+            arguments.extend(
+                (
+                    "-o",
+                    f"UserKnownHostsFile={_openssh_config_path(self.known_hosts_file)}",
+                )
+            )
         return arguments
+
+
+def _openssh_config_path(value: str | Path) -> str:
+    """Encode a path embedded in an OpenSSH ``-o`` configuration value."""
+    normalized = Path(value).expanduser().as_posix()
+    return "".join(f"\\{char}" if char in {" ", "\t"} else char for char in normalized)
 
 
 def _last_json_line(output: str) -> str:

@@ -49,6 +49,21 @@ def test_router_package_is_deterministic_and_contains_only_runtime_files() -> No
         assert all("key" not in name and "backup" not in name for name in names)
 
 
+def test_router_package_canonicalizes_crlf_version(tmp_path: Path) -> None:
+    root = tmp_path / "router"
+    root.mkdir()
+    for name in ("alctl", "alapi", "alpage"):
+        (root / name).write_bytes(b"#!/bin/sh\n")
+    (root / "VERSION").write_bytes(b"0.2.3\r\n")
+
+    package = build_router_package(root)
+
+    with tarfile.open(fileobj=BytesIO(package), mode="r:gz") as archive:
+        version_file = archive.extractfile("astrill-lazy/VERSION")
+        assert version_file is not None
+        assert version_file.read() == b"0.2.3\n"
+
+
 def test_config_store_round_trip_is_private(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     store = ConfigStore(path)

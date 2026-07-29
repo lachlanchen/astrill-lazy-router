@@ -9,6 +9,7 @@ from astrill_lazy.router import (
     CommandResult,
     RouterClient,
     RouterError,
+    _openssh_config_path,
     _parse_native_clients,
 )
 
@@ -78,11 +79,33 @@ def test_remote_commands_use_stable_key_only_ssh_options(
     assert captured[captured.index("-i") + 1] == str(
         Path("~/.ssh/router-key").expanduser()
     )
-    assert (
-        f"UserKnownHostsFile={Path('~/.ssh/astrill-lazy-known-hosts').expanduser()}"
-        in captured
-    )
+    known_hosts = Path("~/.ssh/astrill-lazy-known-hosts").expanduser()
+    assert f"UserKnownHostsFile={_openssh_config_path(known_hosts)}" in captured
     assert "root@192.168.1.1" in captured
+
+
+def test_known_hosts_path_with_spaces_is_one_openssh_config_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[str] = []
+
+    def complete(
+        arguments: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess:
+        captured.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, b"ready\n", b"")
+
+    monkeypatch.setattr(subprocess, "run", complete)
+    known_hosts = tmp_path / "Astrill Lazy Router" / "known hosts"
+    client = RouterClient("192.168.1.1", known_hosts_file=known_hosts)
+
+    assert client.ping()
+    option = next(
+        argument for argument in captured if argument.startswith("UserKnownHostsFile=")
+    )
+    encoded = known_hosts.as_posix().replace(" ", r"\ ")
+    assert option == f"UserKnownHostsFile={encoded}"
+    assert _openssh_config_path(known_hosts) == encoded
 
 
 def test_remote_commands_can_require_a_preverified_host_key(
