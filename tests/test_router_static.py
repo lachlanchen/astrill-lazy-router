@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,7 @@ def test_router_and_helper_scripts_parse_with_posix_shell() -> None:
         ROOT / "scripts" / "install-novnc-service.sh",
         ROOT / "scripts" / "run-novnc-debug.sh",
         ROOT / "scripts" / "uninstall-novnc-service.sh",
+        ROOT / "contrib" / "macos" / "install-launcher.sh",
     ]
     for script in scripts:
         subprocess.run(["sh", "-n", str(script)], check=True)
@@ -36,7 +38,11 @@ def test_novnc_service_is_rendered_from_the_checked_out_repository() -> None:
 
     assert "@ROOT@" in unit
     assert "Projects/astrill-lazy" not in unit
+    assert "EnvironmentFile=-%h/.config/astrill-lazy/novnc.env" in unit
+    assert "Restart=always" in unit
     assert 'sed "s|@ROOT@|$escaped_root|g"' in installer
+    assert "--install-only" in installer
+    assert "DBUS_SESSION_BUS_ADDRESS" in installer
 
 
 def test_desktop_installer_selects_a_supported_python_and_opt_in_autostart() -> None:
@@ -55,8 +61,15 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "eval " not in helper
     assert "--set-xmark" in controller
     assert "0xc000000" in controller
-    assert "DIRECT_PREF=32000" in controller
-    assert "VPN_PREF=32001" in controller
+    assert "DIRECT_PREF=29000" in controller
+    assert "VPN_PREF=29001" in controller
+    assert "LEGACY_DIRECT_PREF=32000" in controller
+    assert "LEGACY_VPN_PREF=32001" in controller
+    assert "ensure_companion_precedence" in controller
+    assert "remove_exact_ip_rule" in controller
+    direct_pref = int(re.search(r"^DIRECT_PREF=(\d+)$", controller, re.MULTILINE)[1])
+    vpn_pref = int(re.search(r"^VPN_PREF=(\d+)$", controller, re.MULTILINE)[1])
+    assert 0 < direct_pref < vpn_pref < 29998
     assert "MAX_RULE_BYTES=6144" in controller
     assert controller.count("iptables -w 10") >= 15
     assert "insufficient NVRAM headroom" in controller

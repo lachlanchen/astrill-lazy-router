@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 - 2026-07-29
 
 - Add a native-only, read-only first-run mode so an already-working Astrill
   router can be inspected without companion installation or router writes.
@@ -28,8 +28,12 @@
 - Extend router refresh operations to 180 seconds and report SSH command
   timeouts cleanly, because a complete DNS refresh can exceed the normal
   interactive timeout.
-- Add a boot-persistent isolated noVNC service and a secure Mac controller
-  launcher source.
+- Make explicit companion matches a reversible overlay of native Global,
+  Include, and Exclude modes, with guarded earlier policy preferences and exact
+  cleanup of companion-owned legacy preferences.
+- Add a boot-persistent, configurable isolated noVNC service with deterministic
+  window fitting and secure, idempotent macOS Dock and Windows Desktop/Start
+  Menu launchers.
 
 ## 0.2.2 - 2026-07-29
 

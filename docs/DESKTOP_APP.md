@@ -53,10 +53,10 @@ Run visual tests without opening a window in the active Ubuntu session:
 The default local URL is:
 
 ```text
-http://127.0.0.1:6086/vnc.html?host=127.0.0.1&port=6086&autoconnect=1&resize=scale
+http://127.0.0.1:6087/vnc.html?host=127.0.0.1&port=6087&autoconnect=1&resize=scale
 ```
 
-The script uses X display `:44`, VNC port `5926`, and web port `6086`. Override
+The script uses X display `:45`, VNC port `5927`, and web port `6087`. Override
 them with `ASTRILL_LAZY_NOVNC_DISPLAY`, `ASTRILL_LAZY_VNC_PORT`, and
 `ASTRILL_LAZY_NOVNC_PORT`. Both listeners bind only to loopback, and the
 separate X display cannot move or focus windows in the active desktop session.
@@ -72,14 +72,35 @@ systemctl --user status \
 
 The installer renders the unit from the actual checkout path, so clones named
 `astrill-lazy-router` or stored outside `~/Projects` do not depend on a
-hard-coded source directory.
+hard-coded source directory. It also records the selected display and ports in
+`~/.config/astrill-lazy/novnc.env`. The validated defaults deliberately avoid
+port `6086`, which another virtual desktop already owns on this workstation:
 
-The Mac desktop application `Astrill Lazy Router.app` creates a passwordless
-SSH local forward from `127.0.0.1:16086` to this loopback-only web port and
-then opens the controller. It never exposes noVNC to the LAN. Its auditable
-source is
-[`contrib/macos/open-astrill-lazy.applescript`](../contrib/macos/open-astrill-lazy.applescript).
-The application does not launch or take focus until it is opened by the user.
+```bash
+./scripts/install-novnc-service.sh
+```
+
+The Mac desktop application `Astrill Lazy Router.app` and Windows shortcuts
+create a passwordless SSH local forward from `127.0.0.1:16087` to the
+workstation's loopback-only port `6087`, then open the controller. They never
+expose noVNC to the LAN. Their auditable sources are
+[`contrib/macos/`](../contrib/macos/) and
+[`contrib/windows/`](../contrib/windows/). Install them on each client:
+
+```bash
+# macOS
+./contrib/macos/install-launcher.sh
+```
+
+```powershell
+# Windows PowerShell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\contrib\windows\install-launcher.ps1
+```
+
+The macOS installer adds the application to the Dock. The Windows installer
+creates both Desktop and Start Menu shortcuts. The launchers do not run or
+take focus until opened by the user.
 
 ## Views
 

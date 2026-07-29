@@ -87,8 +87,12 @@ New rules extend the active native Astrill mode:
 - include-list native routing creates an Astrill union;
 - country remains `No country override` until explicitly selected.
 
-Native rules have earlier policy preferences, so a companion rule cannot
-silently reverse an explicit native website or device decision.
+The route selector is also a reversible subtraction operator. Direct removes a
+match from an Include list's effective Astrill set, while Astrill removes a
+match from an Exclude list's effective Direct set. The companion uses separate
+marks and earlier policy preferences only for explicit matches; it does not
+rewrite native Astrill entries, and removing a companion rule restores the
+native result.
 
 ## Detection Metadata
 

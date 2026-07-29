@@ -1,13 +1,14 @@
 [Unit]
 Description=Astrill Lazy Router isolated noVNC controller
-After=network-online.target
-Wants=network-online.target
 
 [Service]
 Type=simple
+EnvironmentFile=-%h/.config/astrill-lazy/novnc.env
 ExecStart="@ROOT@/scripts/run-novnc-debug.sh"
-Restart=on-failure
+Restart=always
 RestartSec=5
+KillMode=control-group
+TimeoutStopSec=10
 NoNewPrivileges=yes
 
 [Install]

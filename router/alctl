@@ -24,8 +24,10 @@ VPN_MARK=0x8000000
 MARK_MASK=0xc000000
 DIRECT_TABLE=213
 VPN_TABLE=212
-DIRECT_PREF=32000
-VPN_PREF=32001
+DIRECT_PREF=29000
+VPN_PREF=29001
+LEGACY_DIRECT_PREF=32000
+LEGACY_VPN_PREF=32001
 MAX_RULE_BYTES=6144
 TAB="$(printf '\t')"
 
@@ -406,6 +408,35 @@ ensure_ip_rule() {
     }
 }
 
+ensure_companion_precedence() {
+    native_pref=$(ip rule show | awk '
+        /lookup (110|111|112|113|114)([[:space:]]|$)/ {
+            pref = $1
+            sub(/:$/, "", pref)
+            if (pref ~ /^[0-9]+$/ && (lowest == "" || pref < lowest)) {
+                lowest = pref
+            }
+        }
+        END { print lowest }
+    ')
+    if [ -n "$native_pref" ] && [ "$native_pref" -le "$VPN_PREF" ]; then
+        log_message ERROR \
+            "native Astrill preference $native_pref conflicts with companion override range"
+        return 1
+    fi
+}
+
+remove_exact_ip_rule() {
+    pref=$1
+    mark=$2
+    table=$3
+    existing=$(ip rule show | awk -v pref="$pref:" '$1 == pref { print; exit }')
+    [ -n "$existing" ] || return 0
+    printf '%s\n' "$existing" |
+        grep -q "fwmark $mark/$MARK_MASK.*lookup $table" || return 0
+    ip rule del pref "$pref"
+}
+
 ensure_routes() {
     wan_iface=$(nvram get wan_iface)
     wan_gateway=$(nvram get wan_gateway)
@@ -437,8 +468,13 @@ ensure_routes() {
         fi
     fi
 
+    ensure_companion_precedence || return 1
     ensure_ip_rule "$DIRECT_PREF" "$DIRECT_MARK" "$DIRECT_TABLE" || return 1
     ensure_ip_rule "$VPN_PREF" "$VPN_MARK" "$VPN_TABLE" || return 1
+    remove_exact_ip_rule \
+        "$LEGACY_DIRECT_PREF" "$DIRECT_MARK" "$DIRECT_TABLE" || return 1
+    remove_exact_ip_rule \
+        "$LEGACY_VPN_PREF" "$VPN_MARK" "$VPN_TABLE" || return 1
     ip route flush cache 2>/dev/null || true
 }
 

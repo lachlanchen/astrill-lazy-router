@@ -65,7 +65,8 @@ The following checks were performed against the Linksys E4200:
 
 - router package installation and repeated idempotent upgrade;
 - startup/MyPage preservation;
-- policy preferences `32000` and `32001`;
+- overlay policy preferences `29000` and `29001`, their precedence guard, and
+  exact cleanup of legacy `32000` and `32001` rules;
 - WAN table `213` and tunnel table `212`;
 - default empty chain with no traffic effect;
 - `UU Remote -> Direct` compilation and DNS resolution;

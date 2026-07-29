@@ -25,6 +25,13 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.3" date="2026-07-29">
+      <description>
+        <p>Add native-only inspection, reversible native-policy overlays,
+        configurable reboot-persistent noVNC, and secure macOS and Windows
+        launchers.</p>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-07-29">
       <description>
         <p>

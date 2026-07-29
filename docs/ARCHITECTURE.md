@@ -44,15 +44,21 @@ these marks and returns:
 
 | Target | Mark | Mask | Preference | Table |
 | --- | --- | --- | --- | --- |
-| Direct | `0x4000000` | `0xc000000` | `32000` | `213` |
-| Astrill | `0x8000000` | `0xc000000` | `32001` | `212` |
+| Direct | `0x4000000` | `0xc000000` | `29000` | `213` |
+| Astrill | `0x8000000` | `0xc000000` | `29001` | `212` |
 
 Astrill uses mask `0x3000000`, tables `110` through `114`, and observed
-preferences `29998` through `30001`. The companion deliberately uses separate
-high bits and later preferences `32000` and `32001`. Native Astrill
-classifications therefore win a conflict; companion rules affect traffic
-that native Astrill leaves to its default route. This is the basis of the
-incremental extension model.
+preferences `29998` through `30001`. The companion uses separate high bits and
+the earlier preferences `29000` and `29001`. An explicit companion match
+therefore overlays the native result without rewriting Astrill's own list.
+Deleting or disabling that companion rule reveals the unchanged native result
+again. This reversible overlay is the basis of the incremental extension
+model.
+
+The controller refuses to apply if a future Astrill build occupies an equal or
+earlier preference for tables `110` through `114`. Upgrades remove only the
+companion's exact legacy `32000` and `32001` rules; an unrelated rule at either
+preference is left untouched.
 
 Table `213` contains the DD-WRT WAN default. Table `212` contains the `tun0`
 default while Astrill is connected. When `tun0` is unavailable, table `212`
@@ -116,7 +122,18 @@ native applet's underlying modes:
 | Exclude list (`2`) | Astrill | Direct union |
 | Automatic (`3`/`4`) | Applet-owned | Direct exception |
 
-Native website, device, Wi-Fi, and VLAN rules retain their higher precedence.
+The selected default extends the native mode, while changing the target
+performs the corresponding set subtraction:
+
+- Global + Direct bypasses Astrill for the new match.
+- Include + Astrill extends the included set; Include + Direct subtracts the
+  match from that set.
+- Exclude + Direct extends the excluded set; Exclude + Astrill subtracts the
+  match from that set.
+
+This is effective-policy composition, not destructive editing of Astrill's
+stored list. Explicit companion matches take precedence; unmatched website,
+device, Wi-Fi, and VLAN traffic keeps the native result.
 Country is independent: a new Astrill policy starts with
 `No country override`, and only an explicit country selection requests an
 endpoint region.
