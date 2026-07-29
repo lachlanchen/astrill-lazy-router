@@ -54,9 +54,13 @@ validated DD-WRT BusyBox image has `hexdump` but no `base64` command.
 
 The GUI displays a read-only banner, disables policy and native-setting
 mutations, and uses the same companion-free client reader for the Devices page.
-Its 60-second monitor refreshes status only. The SSH, Astrill installer, and
-companion onboarding actions remain available because each has its own explicit
-confirmation.
+It performs one startup check and does not poll the router over SSH in the
+background. Later status and data reads are manual, page-demand, or returned by
+an action. A successfully loaded empty device inventory is cached rather than
+read again on every page visit. If desktop login startup runs before DD-WRT is
+ready, use the manual Refresh action after the router finishes booting. The
+SSH, Astrill installer, and companion onboarding actions remain available
+because each has its own explicit confirmation.
 
 ## Native Include-Mode Example
 

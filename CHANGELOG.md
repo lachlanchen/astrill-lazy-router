@@ -22,6 +22,13 @@
 - Keep background Windows OpenSSH status, endpoint, host-key, and identity
   helpers console-free while retaining the explicitly requested interactive
   SSH terminal.
+- Replace recurring 60-second desktop SSH polling with one startup check,
+  explicit refreshes, page-demand reads, and status returned by completed
+  actions. Cache successful empty inventories and make boot-order retries
+  manual so an early login launch does not create a polling loop.
+- Add an explicitly triggered Windows PC-side endpoint test with selected,
+  visible, or all-loaded scope. It reports bounded TCP-connect latency without
+  sending router commands, switching endpoints, or claiming throughput.
 - Preserve writable companion behavior for legacy configuration files while
   adding an explicit `astrill-lazy access` guard for new deployments.
 - Add companion-free LAN client discovery and a sanitized native inspection

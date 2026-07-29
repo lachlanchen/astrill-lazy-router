@@ -19,6 +19,8 @@ The native Windows application provides:
 - the 261-profile service catalog and Suggested, Direct, or Astrill batch
   policy actions;
 - country-preference and shared-endpoint summaries;
+- manual, Windows-PC-side TCP latency checks for a selected, visible, or all
+  loaded endpoints;
 - confirmed Astrill connect and disconnect controls, plus a companion-backed
   action that selects an endpoint and reconnects the router's shared tunnel;
 - installation, repair, refresh, rollback, and complete removal of the
@@ -214,9 +216,20 @@ A fresh Windows configuration is:
 - read-only: router-changing operations are blocked;
 - empty: no policy is seeded or applied automatically.
 
-The application refreshes status on startup and every 60 seconds. In
-native-only mode those refreshes read the Astrill applet and DD-WRT state
-directly.
+The application performs one status and reconciliation check when its window
+starts. It does not run a recurring timer or poll DD-WRT over SSH in the
+background. After that startup check, router status is read only when the
+operator selects **Refresh router**, a page first needs router data, or a
+completed action returns status or verified readback.
+
+Successful page reads are cached for the life of the window, including a valid
+empty device result. Moving between pages therefore does not turn an empty
+inventory into repeated router requests. Use the page's explicit Load or
+Refresh action when fresh data is required.
+
+This removes desktop SSH polling only. An installed companion still runs its
+15-second watchdog and five-minute DNS refresh locally on DD-WRT; those
+router-local maintenance cycles do not open desktop SSH sessions.
 
 When the local configuration records a previously confirmed companion,
 refresh also reconciles router-reboot state:
@@ -227,8 +240,9 @@ refresh also reconciles router-reboot state:
   NVRAM;
 - if neither persistent markers nor a runtime remain, the desktop falls back
   atomically to native-only mode and keeps **Install / upgrade** available;
-- SSH or router unavailability leaves companion mode unchanged so the next
-  monitor refresh can retry.
+- SSH or router unavailability leaves companion mode unchanged. If the Windows
+  Startup shortcut ran before DD-WRT finished booting, wait until the router is
+  reachable and select **Refresh router** to retry reconciliation.
 
 An inconsistent runtime or a package requiring a version rewrite fails closed.
 The app never silently installs or rewrites a missing or incompatible
@@ -264,6 +278,16 @@ enabled only while the app is idle, the read-only guard is off, the companion
 is enabled, and a server is selected. The companion transaction restores the
 previous router endpoint settings when the requested endpoint does not connect.
 All Astrill-targeted devices and policies still share that one router tunnel.
+
+**Test PC latency** is a separate, manual inspection action. It can test the
+selected endpoint, endpoints visible under the current search, or all loaded
+endpoints. The test opens one bounded TCP connection per target from the
+Windows PC over its current network path, records TCP-connect latency and
+reachability, and immediately closes the connection. It never starts
+automatically, sends no command to DD-WRT, changes no NVRAM value, and does not
+switch or reconnect the router endpoint. The result is not a bandwidth,
+download-speed, or VPN-throughput measurement. For a selected UDP protocol,
+the app tests the same endpoint family's TCP counterpart when available.
 
 The guard is an accident-prevention feature, not an authorization boundary.
 A user who can edit the configuration or invoke `ssh.exe` directly can still

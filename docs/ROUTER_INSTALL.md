@@ -50,13 +50,20 @@ The `clients --json` operation is read-only. It merges DHCP leases, static
 reservations, and complete ARP neighbors on the configured LAN bridge,
 deduplicates by MAC address, and excludes WAN-interface neighbors.
 
-The desktop GUI calls a lighter reconciliation path at startup and every 60
-seconds. It performs no NVRAM write when the installed version, active jump,
-and watchdog are current. It attempts `alctl start` before reinstalling a
-degraded current version and can reconstruct a matching stored package without
-rewriting it. If that identical package still fails, automatic reconciliation
-reports the error instead of repeatedly writing NVRAM; use Install/Upgrade to
-request an explicit rewrite.
+The desktop GUI calls a lighter reconciliation path once at startup. It does
+not repeat that check through background SSH polling. Manual Refresh retries
+the same safe path, including when desktop login startup occurred before
+DD-WRT finished booting. The check performs no NVRAM write when the installed
+version, active jump, and watchdog are current. It attempts `alctl start`
+before reinstalling a degraded current version and can reconstruct a matching
+stored package without rewriting it. If that identical package still fails,
+reconciliation reports the error instead of repeatedly writing NVRAM; use
+Install/Upgrade to request an explicit rewrite.
+
+Removing the desktop timer does not remove the installed companion's own
+router-local recovery. Its watchdog still runs every 15 seconds on DD-WRT, and
+its domain rules still refresh locally every 20 watchdog cycles (five
+minutes). Neither operation opens a desktop SSH session.
 
 Current integration values:
 

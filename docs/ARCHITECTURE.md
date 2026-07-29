@@ -21,10 +21,13 @@ The desktop sends a versioned, tab-separated compiled document over key-only
 SSH. The router never parses desktop JSON and never executes catalog code.
 
 The companion is optional. In native-only mode the desktop uses allowlisted,
-read-only SSH probes for status, native settings, endpoint discovery, DHCP
-leases, static reservations, and LAN ARP neighbors. It creates no remote
-runtime file and performs no reconciliation. Fresh configurations start in
-this mode behind a local read-only guard.
+read-only SSH requests for status, native settings, endpoint discovery, DHCP
+leases, static reservations, and LAN ARP neighbors. Those requests occur at
+the startup check, through an explicit refresh, or when a page first needs its
+data; the desktop has no recurring SSH poll. Successful empty inventories are
+cached rather than mistaken for data that has not loaded. Native-only reads
+create no remote runtime file and perform no reconciliation. Fresh
+configurations start in this mode behind a local read-only guard.
 
 ## Packet Path
 
@@ -83,9 +86,11 @@ Rollback applies the same transaction in the opposite direction.
 
 ## Runtime Recovery
 
-`alctl watchdog-loop` runs every 15 seconds. It repairs missing policy rules,
-tables, chains, and the `PREROUTING` hook. Every 20 cycles it re-resolves domain
-rules through DD-WRT's local DNS service and performs an A/B refresh.
+`alctl watchdog-loop` runs locally on DD-WRT every 15 seconds. It repairs
+missing policy rules, tables, chains, and the `PREROUTING` hook. Every 20
+cycles it re-resolves domain rules through DD-WRT's local DNS service and
+performs an A/B refresh. This router-local watchdog and five-minute DNS cycle
+are not desktop SSH polling.
 Status is degraded whenever this watchdog is absent, the active jump is
 missing, or a VPN policy is enabled while the tunnel is down.
 
@@ -95,15 +100,17 @@ verifies its MD5 value using tools available in this firmware, extracts it, and
 starts the controller. The host installer also records SHA-256 for release
 verification.
 
-The desktop reconciles the companion at launch and every 60 seconds. It first
-reads status over SSH. A matching version with its jump and watchdog present is
-left untouched; a stopped current runtime may be started in place; and a
-current package can be reconstructed from its stored bootstrap without a
-rewrite. A missing, outdated, fingerprint-mismatched, or non-repairable package
-only opens the Install/Upgrade confirmation. The monitor cannot invoke the
-NVRAM installer, preventing silent or repeated package writes. This lifecycle
-is separate from Astrill connection management and does not change
-`astrill_autostart`.
+The desktop reconciles the companion once at launch. Later reconciliation is
+manual; status and data otherwise come from explicit page loads or the result
+of an action the operator requested. A matching version with its jump and
+watchdog present is left untouched; a stopped current runtime may be started
+in place; and a current package can be reconstructed from its stored bootstrap
+without a rewrite. If login startup precedes router startup, the failed read
+does not change the saved mode and manual Refresh retries after DD-WRT is
+reachable. A missing, outdated, fingerprint-mismatched, or non-repairable
+package only opens the Install/Upgrade confirmation. No background desktop
+monitor can invoke the NVRAM installer. This lifecycle is separate from
+Astrill connection management and does not change `astrill_autostart`.
 
 `Restore Astrill Only` records native tunnel state, removes all
 companion-owned runtime and persistent objects, audits that cleanup, and then

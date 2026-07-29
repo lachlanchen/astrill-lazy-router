@@ -39,14 +39,20 @@ astrill-lazy autostart status
 astrill-lazy autostart disable
 ```
 
-At startup and every 60 seconds, the Ubuntu GUI checks key-only SSH, the native
-Astrill applet, and the DD-WRT companion. A healthy current companion is only
-read. A current stored package with a stopped runtime can be repaired in place.
-A missing, outdated, or non-repairable package opens a confirmation dialog and
-is never installed silently.
-The package fingerprint prevents an identical broken package from being
-automatically written on every monitor cycle; the Install/Upgrade action is the
-explicit recovery override.
+At startup, the Ubuntu GUI performs one environment check covering key-only
+SSH, the native Astrill applet, and the DD-WRT companion. A healthy current
+companion is only read. A current stored package with a stopped runtime can be
+repaired in place. A missing, outdated, or non-repairable package opens a
+confirmation dialog and is never installed silently.
+
+The desktop does not repeat that check on a timer or poll DD-WRT over SSH in
+the background. Later reads are manual, requested when a page first needs its
+data, or returned by a completed router action. Successfully loaded empty
+device data is cached too, so changing pages does not cause repeated reads.
+Use the header Refresh action after DD-WRT becomes reachable if login startup
+ran before the router finished booting. The package fingerprint and explicit
+Install/Upgrade action remain the safeguards against rewriting a broken
+package.
 
 ## Ubuntu Router Onboarding
 
@@ -89,10 +95,14 @@ launch the application during installation. The Startup shortcut opens it
 after Windows sign-in, including after a reboot. It needs Windows OpenSSH
 Client at runtime but does not need WSL, GTK, or noVNC.
 
-The Windows frontend refreshes status every 60 seconds. For a previously
-confirmed companion it can restore the validated current runtime from the
-package retained in router NVRAM after a reboot; this does not rewrite NVRAM.
-If the router retained no companion, it falls back to native-only mode.
+The Windows frontend performs one status and reconciliation check when it
+starts, then uses manual refreshes, first-page data loads, and status returned
+by completed actions. It does not poll the router in the background. For a
+previously confirmed companion, the startup or manual check can restore the
+validated current runtime from the package retained in router NVRAM after a
+reboot; this does not rewrite NVRAM. If Windows login startup runs before the
+router is ready, select **Refresh router** after DD-WRT becomes reachable. If
+the router retained no companion, the check falls back to native-only mode.
 Installing or rewriting a package remains an explicit action in the Router
 view. Follow the
 [Windows build, install, and verified SSH setup](WINDOWS_APP.md) before first
@@ -109,6 +119,7 @@ confirmation-gated, one-time LAN Telnet session.
 | Companion policies and recovery | Yes | Yes |
 | Service, domain, network, and device policy | Yes | Yes |
 | Endpoint and safe native-setting controls | Yes | Yes |
+| Manual endpoint TCP latency | Not exposed | Windows PC-side; no router command |
 | Per-application routing identity | Linux macvlan namespace | Not available; no Windows WFP backend |
 | Route detection and recommendations | Yes | Not exposed |
 | Extension and login-startup controls | Yes | Startup is installer-managed; no in-app switch |
@@ -249,6 +260,12 @@ country tokens, identifies the current endpoint, and can reconnect the shared
 tunnel using a selected Astrill protocol. A confirmation is required because
 reconnecting pauses VPN-routed traffic.
 
+The Windows Endpoints view also offers **Test PC latency** for the selected,
+visible, or all loaded endpoints. It runs only when clicked and opens bounded
+TCP connections from the Windows PC; it sends no command to DD-WRT and never
+switches the router endpoint. The displayed value is TCP-connect latency and
+reachability over the PC's current path, not bandwidth or VPN throughput.
+
 ### Router
 
 The Router view reports the upstream Astrill connection and companion policy
@@ -257,7 +274,8 @@ confirmation-gated policy rollback, and idempotent companion installation or
 upgrade. `Restore Astrill Only` removes every companion-owned runtime, NVRAM,
 MyPage, firewall, policy-rule, and watchdog object while preserving Astrill's
 endpoint, protocol, and connection state. The saved desktop mode then prevents
-the 60-second monitor from reinstalling it.
+later manual or page-demand reads from treating it as an enabled companion;
+reinstallation remains an explicit action.
 
 ### Astrill
 

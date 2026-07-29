@@ -149,6 +149,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.servers_loading = False
         self.server_groups: dict[str, tuple[AstrillServer, ...]] = {}
         self.clients: list[dict[str, Any]] = []
+        self._clients_loading = False
+        self._clients_loaded = False
+        self._native_settings_loading = False
         self.selected_service_ids: set[str] = set()
         self.service_batch_route_mode = ServiceRouteMode.SUGGESTED
         self.busy_count = 0
@@ -179,9 +182,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.check_router_environment(quiet=False)
         self.load_servers()
         self.refresh_native_settings(quiet=True)
-        self.router_monitor_id = GLib.timeout_add_seconds(
-            60, self._monitor_router_companion
-        )
 
     def _install_css(self) -> None:
         provider = Gtk.CssProvider()
@@ -261,7 +261,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.window_title = Adw.WindowTitle(title="Policies", subtitle="Router policy")
         header.set_title_widget(self.window_title)
         refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        refresh.set_tooltip_text("Refresh router status")
+        refresh.set_tooltip_text(
+            "Refresh router status now (manual; no background polling)"
+        )
         refresh.connect("clicked", lambda _button: self.refresh_router())
         header.pack_end(refresh)
         self.apply_button = _button_with_icon(
@@ -897,15 +899,13 @@ class MainWindow(Adw.ApplicationWindow):
         }
         self.window_title.set_title(title)
         self.window_title.set_subtitle(subtitles[page_id])
-        if page_id in {"devices", "astrill"} and not self.clients:
+        if page_id in {"devices", "astrill"} and not self._clients_loaded:
             self.refresh_clients()
         if page_id == "locations" and self.servers is None:
             self.load_servers()
         if page_id == "services":
             self._render_services()
-        if page_id == "astrill" and (
-            self.native_settings is None or not self.native_page.dirty
-        ):
+        if page_id == "astrill" and self.native_settings is None:
             self.refresh_native_settings(quiet=True)
 
     def _show_services(self) -> None:
@@ -2123,6 +2123,9 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def refresh_native_settings(self, *, quiet: bool = False) -> None:
+        if self._native_settings_loading:
+            return
+        self._native_settings_loading = True
         self._run_task(
             self.router.native_astrill_settings,
             lambda settings: self._native_settings_refreshed(
@@ -2135,6 +2138,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _native_settings_refreshed(
         self, settings: NativeAstrillSettings, *, notify: bool
     ) -> None:
+        self._native_settings_loading = False
         self.native_settings = settings
         self.native_page.render(settings, self.clients)
         self._render_services()
@@ -2389,11 +2393,6 @@ class MainWindow(Adw.ApplicationWindow):
         if result.action == "repaired":
             self.toast("Router companion runtime repaired")
 
-    def _monitor_router_companion(self) -> bool:
-        if self.busy_count == 0:
-            self.check_router_environment()
-        return GLib.SOURCE_CONTINUE
-
     def _router_refreshed(self, status: dict[str, Any]) -> None:
         self.router_status = status
         self._update_status()
@@ -2525,6 +2524,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_recommendation_controls()
 
     def refresh_clients(self) -> None:
+        if self._clients_loading:
+            return
+        self._clients_loading = True
         self._run_task(
             (
                 self.router.clients
@@ -2536,6 +2538,8 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _clients_refreshed(self, clients: list[dict[str, Any]]) -> None:
+        self._clients_loading = False
+        self._clients_loaded = True
         self.clients = clients
         self._render_devices()
         self.native_page.update_clients(clients)
@@ -2938,6 +2942,10 @@ class MainWindow(Adw.ApplicationWindow):
                 self.confirm_authorize_router_key()
         if prefix == "Could not load Astrill endpoints":
             self.servers_loading = False
+        if prefix == "Could not load router clients":
+            self._clients_loading = False
+        if prefix == "Could not load native Astrill settings":
+            self._native_settings_loading = False
         if prefix in {
             "Could not change Astrill connection",
             "Could not fully restore native Astrill",

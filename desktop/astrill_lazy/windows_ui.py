@@ -4,6 +4,7 @@ import ctypes
 import json
 import sys
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QThreadPool,
+    QTime,
     QTimer,
     Signal,
     Slot,
@@ -53,6 +55,7 @@ from PySide6.QtWidgets import (
 
 from . import __version__
 from .astrill import ASTRILL_PROTOCOL_NAMES, AstrillServer
+from .endpoint_probe import EndpointProbeResult, EndpointProbeStatus, probe_servers
 from .models import MatchKind, RouteTarget, Rule
 from .native_settings import NativeAstrillSettings
 from .router import _openssh_config_path
@@ -145,6 +148,10 @@ QLabel#pageTitle {{
 QLabel#pageSubtitle, QLabel.muted {{
     color: {COLORS["muted"]};
 }}
+QLabel#refreshMode {{
+    color: {COLORS["muted"]};
+    font-size: 9pt;
+}}
 QFrame.card, QGroupBox {{
     background: {COLORS["card"]};
     border: 1px solid {COLORS["border"]};
@@ -161,6 +168,39 @@ QFrame#metric_endpoint {{
 }}
 QFrame#metric_rules {{
     border-top: 4px solid #10b981;
+}}
+QFrame#latencyCard {{
+    background: #ecfeff;
+    border: 1px solid #67e8f9;
+    border-left: 5px solid #06b6d4;
+    border-radius: 12px;
+}}
+QLabel#latencyTitle {{
+    color: #155e75;
+    font-size: 12pt;
+    font-weight: 800;
+}}
+QLabel#latencyNote {{
+    color: #155e75;
+}}
+QLabel#latencyStatus {{
+    color: #0e7490;
+    font-weight: 600;
+}}
+QPushButton#latencyAction {{
+    color: white;
+    background: #0891b2;
+    border-color: #0891b2;
+    font-weight: 700;
+}}
+QPushButton#latencyAction:hover {{
+    background: #0e7490;
+    border-color: #0e7490;
+}}
+QPushButton#latencyAction:disabled {{
+    color: #94a3b8;
+    background: #e2e8f0;
+    border-color: #cbd5e1;
 }}
 QGroupBox {{
     margin-top: 12px;
@@ -493,6 +533,13 @@ class MainWindow(QMainWindow):
         self.router_status: dict[str, Any] = {}
         self.clients: list[dict[str, Any]] = []
         self._clients_loading = False
+        self._clients_loaded = False
+        self._endpoint_catalog_loading = False
+        self._endpoint_catalog_loaded = False
+        self._endpoint_probe_running = False
+        self._endpoint_probe_results: dict[
+            tuple[int, int], tuple[EndpointProbeResult, str]
+        ] = {}
         self.native_settings: NativeAstrillSettings | None = None
         self._native_settings_loading = False
         self._syncing_access = False
@@ -518,11 +565,6 @@ class MainWindow(QMainWindow):
         self._render_all_local()
         self._select_page(0)
         self._refresh_status(quiet=True)
-
-        self.monitor = QTimer(self)
-        self.monitor.setInterval(60_000)
-        self.monitor.timeout.connect(lambda: self._refresh_status(quiet=True))
-        self.monitor.start()
 
     def _build_shell(self) -> None:
         root = QWidget()
@@ -586,7 +628,16 @@ class MainWindow(QMainWindow):
         titles.addWidget(self.page_title)
         titles.addWidget(self.page_subtitle)
         header.addLayout(titles, 1)
-        self.refresh_button = QPushButton("Refresh")
+        self.refresh_mode_label = QLabel("Startup check · manual refresh after this")
+        self.refresh_mode_label.setObjectName("refreshMode")
+        self.refresh_mode_label.setToolTip(
+            "Astrill Lazy Router does not poll DD-WRT in the background."
+        )
+        header.addWidget(self.refresh_mode_label)
+        self.refresh_button = QPushButton("Refresh router")
+        self.refresh_button.setToolTip(
+            "Read router status now. Status is not polled automatically."
+        )
         self.refresh_button.clicked.connect(lambda: self._refresh_status())
         header.addWidget(self.refresh_button)
         self.apply_button = QPushButton("Apply policies")
@@ -847,9 +898,7 @@ class MainWindow(QMainWindow):
         self.protocol = QComboBox()
         self.protocol.addItems(list(ASTRILL_PROTOCOL_NAMES))
         self.protocol.activated.connect(self._endpoint_protocol_selected)
-        self.protocol.currentIndexChanged.connect(
-            lambda _index: self._sync_endpoint_action_ui()
-        )
+        self.protocol.currentIndexChanged.connect(self._endpoint_protocol_changed)
         row.addWidget(self.protocol)
         self.load_endpoints_button = QPushButton("Load endpoints")
         self.load_endpoints_button.clicked.connect(self._load_endpoints)
@@ -862,13 +911,71 @@ class MainWindow(QMainWindow):
         row.addWidget(self.connect_endpoint_button)
         layout.addLayout(row)
 
+        latency_card = QFrame()
+        latency_card.setObjectName("latencyCard")
+        latency_layout = QVBoxLayout(latency_card)
+        latency_layout.setContentsMargins(16, 13, 16, 13)
+        latency_layout.setSpacing(8)
+        latency_title = QLabel("PC latency test")
+        latency_title.setObjectName("latencyTitle")
+        latency_layout.addWidget(latency_title)
+        latency_note = QLabel(
+            "Runs one TCP connection check from this Windows PC over its current "
+            "network path. It does not send commands to DD-WRT, switch the router "
+            "endpoint, or measure VPN download speed."
+        )
+        latency_note.setObjectName("latencyNote")
+        latency_note.setWordWrap(True)
+        latency_layout.addWidget(latency_note)
+        latency_controls = QHBoxLayout()
+        latency_controls.addWidget(QLabel("Scope"))
+        self.endpoint_probe_scope = QComboBox()
+        self.endpoint_probe_scope.addItem("Selected endpoint", "selected")
+        self.endpoint_probe_scope.addItem("Visible endpoints", "visible")
+        self.endpoint_probe_scope.addItem("All loaded endpoints", "all")
+        self.endpoint_probe_scope.currentIndexChanged.connect(
+            lambda _index: self._sync_endpoint_action_ui()
+        )
+        latency_controls.addWidget(self.endpoint_probe_scope)
+        self.endpoint_probe_button = QPushButton("Test PC latency")
+        self.endpoint_probe_button.setObjectName("latencyAction")
+        self.endpoint_probe_button.setToolTip(
+            "Manual only: opens one bounded TCP connection per endpoint from "
+            "this computer and immediately closes it."
+        )
+        self.endpoint_probe_button.clicked.connect(self._test_endpoint_latency)
+        latency_controls.addWidget(self.endpoint_probe_button)
+        self.endpoint_probe_clear_button = QPushButton("Clear results")
+        self.endpoint_probe_clear_button.clicked.connect(
+            self._clear_endpoint_probe_results
+        )
+        latency_controls.addWidget(self.endpoint_probe_clear_button)
+        latency_controls.addStretch(1)
+        latency_layout.addLayout(latency_controls)
+        self.endpoint_probe_status = QLabel(
+            "Not run · results appear only after you click Test PC latency."
+        )
+        self.endpoint_probe_status.setObjectName("latencyStatus")
+        self.endpoint_probe_status.setWordWrap(True)
+        latency_layout.addWidget(self.endpoint_probe_status)
+        layout.addWidget(latency_card)
+
         self.endpoint_action_status = QLabel("")
         self.endpoint_action_status.setWordWrap(True)
         layout.addWidget(self.endpoint_action_status)
 
         self.endpoint_tree = QTreeWidget()
         self.endpoint_tree.setHeaderLabels(
-            ["Endpoint", "Server ID", "Groups", "Region", "State"]
+            [
+                "Endpoint",
+                "Region",
+                "Server ID",
+                "Router state",
+                "Nodes",
+                "PC latency",
+                "Reach",
+                "Tested",
+            ]
         )
         self.endpoint_tree.setAlternatingRowColors(True)
         self.endpoint_tree.setRootIsDecorated(False)
@@ -878,7 +985,7 @@ class MainWindow(QMainWindow):
         self.endpoint_tree.header().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
-        for column in range(1, 5):
+        for column in range(1, 8):
             self.endpoint_tree.header().setSectionResizeMode(
                 column, QHeaderView.ResizeMode.ResizeToContents
             )
@@ -1047,12 +1154,12 @@ class MainWindow(QMainWindow):
         page_id, title, subtitle = self.PAGE_DEFINITIONS[index]
         self.page_title.setText(title)
         self.page_subtitle.setText(subtitle)
-        if title == "Devices" and not self.clients:
+        if title == "Devices" and not self._clients_loaded:
             self._load_devices(quiet=True)
-        if title == "Endpoints" and not self.controller.server_catalog.servers:
+        if title == "Endpoints" and not self._endpoint_catalog_loaded:
             self._load_endpoints(quiet=True)
         if page_id == "astrill":
-            if not self.clients:
+            if not self._clients_loaded:
                 self._load_devices(quiet=True)
             if self.native_settings is None:
                 self._load_native_settings()
@@ -1065,6 +1172,7 @@ class MainWindow(QMainWindow):
         *,
         quiet: bool = False,
         finished_callback: Callable[[], None] | None = None,
+        router_related: bool = True,
     ) -> None:
         task = BackgroundTask(function)
         self._tasks.add(task)
@@ -1078,7 +1186,9 @@ class MainWindow(QMainWindow):
             lambda _result: self.statusBar().showMessage(f"{label}: complete", 3500)
         )
         task.signals.failed.connect(
-            lambda message: self._task_failed(label, message, quiet)
+            lambda message: self._task_failed(
+                label, message, quiet, router_related=router_related
+            )
         )
 
         def finished() -> None:
@@ -1094,9 +1204,12 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(task)
         self._sync_access_ui()
 
-    def _task_failed(self, label: str, message: str, quiet: bool) -> None:
+    def _task_failed(
+        self, label: str, message: str, quiet: bool, *, router_related: bool
+    ) -> None:
         self.statusBar().showMessage(f"{label}: {message}", 9000)
-        self.sidebar_status.setText("Router unavailable · check Settings")
+        if router_related:
+            self.sidebar_status.setText("Router unavailable · check Settings")
         if not quiet:
             QMessageBox.warning(self, label, message)
 
@@ -1345,6 +1458,7 @@ class MainWindow(QMainWindow):
         self._clients_loading = False
 
     def _devices_loaded(self, clients: object) -> None:
+        self._clients_loaded = True
         self.clients = list(clients)  # type: ignore[arg-type]
         self._render_devices()
         if hasattr(self, "native_page"):
@@ -1397,15 +1511,23 @@ class MainWindow(QMainWindow):
         self._render_after_policy_change()
 
     def _load_endpoints(self, *, quiet: bool = False) -> None:
+        if self._endpoint_catalog_loading:
+            return
+        self._endpoint_catalog_loading = True
         self._run_task(
             "Loading Astrill endpoints",
             self.controller.load_servers,
             self._endpoints_loaded,
             quiet=quiet,
+            finished_callback=self._endpoint_catalog_finished,
         )
+
+    def _endpoint_catalog_finished(self) -> None:
+        self._endpoint_catalog_loading = False
 
     def _endpoints_loaded(self, result: object) -> None:
         _catalog = result
+        self._endpoint_catalog_loaded = True
         self._render_endpoints()
         self._render_countries()
         self._update_status_metrics()
@@ -1413,6 +1535,9 @@ class MainWindow(QMainWindow):
     def _endpoint_protocol_selected(self, _index: int) -> None:
         self._endpoint_protocol_user_selected = True
         self._sync_endpoint_action_ui()
+
+    def _endpoint_protocol_changed(self, _index: int) -> None:
+        self._render_endpoints()
 
     def _render_endpoints(self) -> None:
         if not hasattr(self, "endpoint_tree"):
@@ -1444,19 +1569,150 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem(
                 [
                     server.name,
-                    str(server.id),
-                    str(len(server.nodes)),
                     self._region_name(group_by_id.get(server.id, "")),
+                    str(server.id),
                     state,
+                    str(len(server.nodes)),
+                    *self._endpoint_probe_cells(server),
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, server)
+            self._decorate_endpoint_probe_result(item, server)
             self.endpoint_tree.addTopLevelItem(item)
             if server.id == selected_id:
                 item_to_select = item
         if item_to_select is not None:
             self.endpoint_tree.setCurrentItem(item_to_select)
         self._sync_endpoint_action_ui()
+
+    def _endpoint_probe_cells(self, server: AstrillServer) -> list[str]:
+        cached = self._endpoint_probe_results.get(
+            (server.id, self.protocol.currentIndex())
+        )
+        if cached is None:
+            return ["—", "Not tested", "—"]
+        result, checked_at = cached
+        latency = (
+            f"{result.latency_ms:.1f} ms"
+            if result.status is EndpointProbeStatus.REACHABLE
+            and result.latency_ms is not None
+            else "—"
+        )
+        reach = {
+            EndpointProbeStatus.REACHABLE: "Reachable",
+            EndpointProbeStatus.UNREACHABLE: "No reply",
+            EndpointProbeStatus.UNAVAILABLE: "Unavailable",
+        }[result.status]
+        return [latency, reach, checked_at]
+
+    def _decorate_endpoint_probe_result(
+        self, item: QTreeWidgetItem, server: AstrillServer
+    ) -> None:
+        cached = self._endpoint_probe_results.get(
+            (server.id, self.protocol.currentIndex())
+        )
+        if cached is None:
+            return
+        result, checked_at = cached
+        if result.status is EndpointProbeStatus.REACHABLE:
+            latency = result.latency_ms or 0.0
+            color = (
+                "#0f766e"
+                if latency < 80
+                else ("#d97706" if latency < 180 else "#e11d48")
+            )
+        else:
+            color = "#b91c1c"
+        for column in (5, 6, 7):
+            item.setForeground(column, QColor(color))
+        method = (
+            f"{ASTRILL_PROTOCOL_NAMES[result.tested_protocol]} TCP counterpart"
+            if result.used_tcp_counterpart and result.tested_protocol is not None
+            else "TCP connect"
+        )
+        target = (
+            f"{result.address}:{result.port}"
+            if result.address is not None and result.port is not None
+            else "No usable mapped target"
+        )
+        tooltip = (
+            f"Tested from this Windows PC at {checked_at}\n"
+            f"Target: {target}\n"
+            f"Method: {method}\n"
+            f"{result.detail}"
+        )
+        for column in (5, 6, 7):
+            item.setToolTip(column, tooltip)
+
+    def _endpoint_probe_selection(self) -> tuple[AstrillServer, ...]:
+        scope = self.endpoint_probe_scope.currentData()
+        if scope == "all":
+            return tuple(self.controller.server_catalog.servers)
+        if scope == "visible":
+            visible: list[AstrillServer] = []
+            for index in range(self.endpoint_tree.topLevelItemCount()):
+                item = self.endpoint_tree.topLevelItem(index)
+                value = item.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(value, AstrillServer):
+                    visible.append(value)
+            return tuple(visible)
+        item = self.endpoint_tree.currentItem()
+        if item is None:
+            return ()
+        value = item.data(0, Qt.ItemDataRole.UserRole)
+        return (value,) if isinstance(value, AstrillServer) else ()
+
+    def _test_endpoint_latency(self) -> None:
+        if self.busy_count or self._endpoint_probe_running:
+            return
+        servers = self._endpoint_probe_selection()
+        if not self._endpoint_catalog_loaded or not servers:
+            self.endpoint_probe_status.setText(
+                "Load endpoints and choose a scope with at least one endpoint."
+            )
+            return
+        protocol = self.protocol.currentIndex()
+        self._endpoint_probe_running = True
+        self.endpoint_probe_status.setText(
+            f"Testing {len(servers)} endpoint"
+            f"{'' if len(servers) == 1 else 's'} from this PC · no router commands…"
+        )
+        self._run_task(
+            "Testing endpoint latency from this PC",
+            lambda: probe_servers(servers, protocol),
+            self._endpoint_probe_completed,
+            finished_callback=self._endpoint_probe_finished,
+            router_related=False,
+        )
+
+    def _endpoint_probe_completed(self, value: object) -> None:
+        results = tuple(value)  # type: ignore[arg-type]
+        checked_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        reachable = 0
+        for result in results:
+            if not isinstance(result, EndpointProbeResult):
+                continue
+            self._endpoint_probe_results[
+                (result.server_id, result.selected_protocol)
+            ] = (result, checked_at)
+            if result.status is EndpointProbeStatus.REACHABLE:
+                reachable += 1
+        self.endpoint_probe_status.setText(
+            f"Manual PC test complete · {reachable}/{len(results)} reachable · "
+            "no DD-WRT commands sent."
+        )
+        self._render_endpoints()
+
+    def _endpoint_probe_finished(self) -> None:
+        self._endpoint_probe_running = False
+        self._sync_endpoint_action_ui()
+
+    def _clear_endpoint_probe_results(self) -> None:
+        self._endpoint_probe_results.clear()
+        self.endpoint_probe_status.setText(
+            "Results cleared · tests run only when you click Test PC latency."
+        )
+        self._render_endpoints()
 
     def _connect_endpoint(self) -> None:
         if self.busy_count:
@@ -1542,6 +1798,15 @@ class MainWindow(QMainWindow):
         self.endpoint_search.setEnabled(idle)
         self.protocol.setEnabled(idle)
         self.endpoint_tree.setEnabled(idle)
+        self.endpoint_probe_scope.setEnabled(idle)
+        self.endpoint_probe_button.setEnabled(
+            idle
+            and self._endpoint_catalog_loaded
+            and bool(self._endpoint_probe_selection())
+        )
+        self.endpoint_probe_clear_button.setEnabled(
+            idle and bool(self._endpoint_probe_results)
+        )
         self.connect_endpoint_button.setEnabled(
             idle
             and not read_only
@@ -1559,7 +1824,12 @@ class MainWindow(QMainWindow):
             else "Connect router to selected endpoint"
         )
 
-        if not idle:
+        if self._endpoint_probe_running:
+            message = (
+                "The manual latency test is running on this Windows PC. "
+                "No router command or endpoint change is in progress."
+            )
+        elif not idle:
             message = "A router action is in progress. Endpoint controls are locked."
         elif read_only:
             message = (
@@ -1660,6 +1930,9 @@ class MainWindow(QMainWindow):
 
     def _status_loaded(self, status: object) -> None:
         self.router_status = dict(status)  # type: ignore[arg-type]
+        self.refresh_mode_label.setText(
+            f"Updated {QTime.currentTime().toString('HH:mm')} · manual only"
+        )
         protocol = int(self.router_status.get("astrill_protocol", 0) or 0)
         if (
             not self._endpoint_protocol_user_selected

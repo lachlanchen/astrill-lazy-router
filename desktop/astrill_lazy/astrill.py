@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import ipaddress
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ IP_RE = re.compile(
     r"\{ip:(-?\d+),port:(?:'([^']+)'|(\d+)),mode:(\d+),"
     r"proto:(\d+),index:(\d+)(?:,protop:(\d+))?\}"
 )
+ENDPOINT_ADDRESS_RE = re.compile(r"(?:^|;)(-?\d+)=((?:\d{1,3}\.){3}\d{1,3})(?=;)")
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class AstrillEndpoint:
     protocol_code: int
     port_index: int
     protocol_original: int | None = None
+    resolved_ip: str | None = None
 
     @property
     def router_pro(self) -> bool:
@@ -89,8 +92,12 @@ class AstrillServer:
 
 def parse_applet(payload: bytes) -> tuple[AstrillServer, ...]:
     script = unpack_applet(payload)
+    endpoint_addresses = _extract_endpoint_addresses(script)
     literal = _extract_list_literal(script)
-    servers = tuple(_parse_server(item) for item in _split_top_level_objects(literal))
+    servers = tuple(
+        _parse_server(item, endpoint_addresses)
+        for item in _split_top_level_objects(literal)
+    )
     if not servers:
         raise ValueError("Astrill server list was empty")
     return servers
@@ -201,7 +208,9 @@ def _split_top_level_objects(literal: str) -> Iterable[str]:
         raise ValueError("unterminated Astrill server object")
 
 
-def _parse_server(value: str) -> AstrillServer:
+def _parse_server(
+    value: str, endpoint_addresses: dict[int, str] | None = None
+) -> AstrillServer:
     head = SERVER_HEAD_RE.search(value)
     if head is None:
         raise ValueError("malformed Astrill server header")
@@ -222,6 +231,11 @@ def _parse_server(value: str) -> AstrillServer:
                 protocol_original=(
                     int(match.group(7)) if match.group(7) is not None else None
                 ),
+                resolved_ip=(
+                    endpoint_addresses.get(int(match.group(1)))
+                    if endpoint_addresses
+                    else None
+                ),
             )
             for match in IP_RE.finditer(value[node_start + 1 : node_end])
         )
@@ -235,3 +249,20 @@ def _parse_server(value: str) -> AstrillServer:
     if not nodes:
         raise ValueError(f"Astrill server {name!r} has no nodes")
     return AstrillServer(id=server_id, name=name, nodes=tuple(nodes))
+
+
+def _extract_endpoint_addresses(script: str) -> dict[int, str]:
+    addresses: dict[int, str] = {}
+    for match in ENDPOINT_ADDRESS_RE.finditer(script):
+        try:
+            address = str(ipaddress.IPv4Address(match.group(2)))
+        except ipaddress.AddressValueError:
+            continue
+        token = int(match.group(1))
+        existing = addresses.get(token)
+        if existing is not None and existing != address:
+            raise ValueError(
+                f"Astrill endpoint token {token} maps to conflicting addresses"
+            )
+        addresses[token] = address
+    return addresses
