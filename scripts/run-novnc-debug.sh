@@ -45,20 +45,20 @@ fit_app_window() {
     attempts=0
     while [ "$attempts" -lt 40 ]; do
         attempts=$((attempts + 1))
-        window=$(DISPLAY=$DISPLAY_VALUE XAUTHORITY= xdotool \
+        window=$(DISPLAY=$DISPLAY_VALUE XAUTHORITY='' xdotool \
             search --onlyvisible --pid "$app_pid" 2>/dev/null |
             tail -n 1)
         if [ -z "$window" ]; then
-            window=$(DISPLAY=$DISPLAY_VALUE XAUTHORITY= xdotool \
+            window=$(DISPLAY=$DISPLAY_VALUE XAUTHORITY='' xdotool \
                 search --onlyvisible --name '^Astrill Lazy Router$' 2>/dev/null |
                 tail -n 1)
         fi
         if [ -n "$window" ]; then
-            geometry=$(DISPLAY=$DISPLAY_VALUE XAUTHORITY= \
+            geometry=$(DISPLAY=$DISPLAY_VALUE XAUTHORITY='' \
                 xdotool getdisplaygeometry)
             width=${geometry% *}
             height=${geometry#* }
-            DISPLAY=$DISPLAY_VALUE XAUTHORITY= xdotool \
+            DISPLAY=$DISPLAY_VALUE XAUTHORITY='' xdotool \
                 windowmap "$window" \
                 windowmove --sync "$window" 0 0 \
                 windowsize --sync "$window" "$width" "$height" \
