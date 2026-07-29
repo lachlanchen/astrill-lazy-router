@@ -19,10 +19,11 @@
 
 </div>
 
-Astrill Lazy Router is a native Ubuntu control application and a small DD-WRT
-companion. It adds explicit policy routing beside Astrill while keeping
-Astrill responsible for its own tunnel, server, DNS behavior, and native
-website/device rules.
+Astrill Lazy Router is a native Ubuntu control application with an optional
+small DD-WRT companion. It can safely inspect an already-working native
+Astrill router without installing anything, or add explicit policy routing
+beside Astrill after write access and companion deployment are deliberately
+enabled.
 
 ![Services view with provider-country filtering and batch policy controls](docs/assets/services-country-batch.png)
 
@@ -35,6 +36,7 @@ website/device rules.
 | Catalog | 261 maintained profiles with search and provider-country, category, and type filters |
 | Batch workflow | Select the visible result and apply Suggested, Direct, or Astrill to new and existing policies |
 | Native sync | Bidirectional website, device, interface, DNS, connection, and advanced Astrill settings |
+| Native-only audit | Read-only status, settings, endpoints, and LAN clients with no companion or router writes |
 | Router safety | Validated input, separate marks/tables, transactional A/B activation, rollback, and watchdog recovery |
 | Recovery | One action removes every companion-owned object and restores native Astrill-only operation |
 
@@ -65,12 +67,13 @@ tables.
 
 ```mermaid
 flowchart LR
-    GUI["Ubuntu GTK 4 app"] -->|"validated policy over key-only SSH"| CTRL["DD-WRT companion"]
+    GUI["Ubuntu GTK 4 app"] -->|"read-only native inspection"| APPLET["Native Astrill applet"]
+    GUI -->|"optional validated policy over key-only SSH"| CTRL["DD-WRT companion"]
     CATALOG["Data-only service catalog"] --> GUI
     LAN["LAN devices and app identities"] --> CTRL
     CTRL -->|"Direct policy"| WAN["WAN gateway"]
     CTRL -->|"Astrill policy"| TUN["Astrill tun0"]
-    APPLET["Native Astrill applet"] --> TUN
+    APPLET --> TUN
     CTRL -->|"status, rollback, recovery"| GUI
 ```
 
@@ -129,6 +132,8 @@ macvlan network namespace to obtain an independent router-visible identity.
 - `Restore Astrill Only` removes companion state without changing the selected
   Astrill endpoint, protocol, or connection state.
 - Catalog extensions are declarative data and never execute on the router.
+- Fresh configurations are native-only and read-only; legacy companion
+  configurations retain their saved behavior.
 
 Read the complete [security model](docs/SECURITY.md) before deploying to a
 shared or untrusted LAN.
@@ -160,15 +165,23 @@ Launch from the Ubuntu application menu or run:
 astrill-lazy-gui
 ```
 
-The user-local installer creates an editable virtual environment, enables
-login startup, and installs the desktop launcher. When companion mode is
-enabled, the GUI checks the router at startup and repairs or installs only
-when required.
+The user-local installer creates an editable virtual environment and installs
+the desktop launcher. A fresh configuration is native-only and read-only, and
+login startup is opt-in:
+
+```bash
+ASTRILL_LAZY_ENABLE_AUTOSTART=1 ./scripts/install-desktop.sh
+```
+
+When an existing writable configuration has companion mode enabled, the GUI
+checks the router at startup and repairs or installs only when required.
 
 ### Useful CLI commands
 
 ```bash
 astrill-lazy status
+astrill-lazy inspect
+astrill-lazy access status
 astrill-lazy apply
 astrill-lazy servers
 astrill-lazy refresh
@@ -212,6 +225,10 @@ address and teardown command.
 | Policy engine | IPv4, one active Astrill tunnel |
 | Catalog | 261 profiles, 19 categories, 9 provider-country groups |
 
+The native-only path was also validated on a second E4200 that already used
+Astrill Include mode. Direct and listed-VPN egress were confirmed without
+installing the companion or changing its policy.
+
 Other DD-WRT hardware may work, but package size, NVRAM, shell utilities,
 firewall behavior, and Astrill integration must be verified independently.
 
@@ -223,6 +240,7 @@ firewall behavior, and Astrill integration must be verified independently.
 | [Astrill analysis](docs/ASTRILL_ANALYSIS.md) | Observed applet behavior and DD-WRT integration |
 | [Desktop application](docs/DESKTOP_APP.md) | Every GUI view, startup, noVNC, and application identities |
 | [Router installation](docs/ROUTER_INSTALL.md) | Prerequisites, installation, persistence, operations, and rollback |
+| [Native-only operation](docs/NATIVE_ONLY.md) | Safe inspection, write guard, second-router evidence, and DD-WRT SSH lessons |
 | [Rule model](docs/RULE_MODEL.md) | Selectors, priorities, compilation, and native composition |
 | [Device-local routing](docs/DEVICE_ROUTING.md) | Validated non-enforcing multi-endpoint policy model |
 | [Extensions](docs/EXTENSIONS.md) | Data-only service, country, and region catalogs |

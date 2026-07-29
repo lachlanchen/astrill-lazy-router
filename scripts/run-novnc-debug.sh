@@ -56,8 +56,8 @@ websockify --web=/usr/share/novnc "127.0.0.1:$WEB_PORT" \
     "127.0.0.1:$VNC_PORT" >"$RUNTIME_DIR/websockify.log" 2>&1 &
 websockify_pid=$!
 
-printf 'noVNC: http://127.0.0.1:%s/vnc.html?autoconnect=1&resize=scale\n' \
-    "$WEB_PORT"
+printf 'noVNC: http://127.0.0.1:%s/vnc.html?host=127.0.0.1&port=%s&autoconnect=1&resize=scale\n' \
+    "$WEB_PORT" "$WEB_PORT"
 dbus-run-session -- env DISPLAY="$DISPLAY_VALUE" GDK_BACKEND=x11 \
     GSK_RENDERER=cairo GTK_USE_PORTAL=0 NO_AT_BRIDGE=1 "$GUI" &
 app_pid=$!

@@ -6,6 +6,7 @@ ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 UNIT_NAME=io.github.lachlanchen.AstrillLazyRouter.NoVNC.service
 UNIT_SOURCE=$ROOT/data/$UNIT_NAME
 UNIT_DIRECTORY=${HOME}/.config/systemd/user
+UNIT_PATH=$UNIT_DIRECTORY/$UNIT_NAME
 
 for command in systemctl Xvfb openbox x11vnc websockify dbus-run-session; do
     command -v "$command" >/dev/null 2>&1 || {
@@ -20,8 +21,19 @@ done
 }
 
 mkdir -p "$UNIT_DIRECTORY"
-install -m 0644 "$UNIT_SOURCE" "$UNIT_DIRECTORY/$UNIT_NAME"
+case $ROOT in
+    *'
+'*) printf 'repository path cannot contain a newline\n' >&2; exit 1 ;;
+esac
+escaped_root=$(printf '%s' "$ROOT" | sed \
+    -e 's/[\\&|]/\\&/g' \
+    -e 's/%/%%/g' \
+    -e 's/"/\\"/g')
+temporary_unit=$(mktemp "$UNIT_DIRECTORY/.astrill-lazy-novnc.XXXXXX")
+trap 'rm -f "$temporary_unit"' EXIT HUP INT TERM
+sed "s|@ROOT@|$escaped_root|g" "$UNIT_SOURCE" > "$temporary_unit"
+install -m 0644 "$temporary_unit" "$UNIT_PATH"
 systemctl --user daemon-reload
 systemctl --user enable --now "$UNIT_NAME"
 printf '%s\n' \
-    'noVNC service enabled at http://127.0.0.1:6086/vnc.html?autoconnect=1&resize=scale'
+    'noVNC service enabled at http://127.0.0.1:6086/vnc.html?host=127.0.0.1&port=6086&autoconnect=1&resize=scale'

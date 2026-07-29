@@ -41,8 +41,10 @@ jobs:
         run: >-
           shellcheck -x -s sh
           scripts/install-desktop.sh
+          scripts/install-novnc-service.sh
           scripts/run-novnc-debug.sh
           scripts/uninstall-desktop.sh
+          scripts/uninstall-novnc-service.sh
           helpers/astrill-lazy-netns
           router/alctl
           router/alapi

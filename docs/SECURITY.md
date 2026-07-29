@@ -22,9 +22,17 @@ The DD-WRT web account is separate from Telnet root access. Its password was not
 guessed, reset, or stored by this project.
 
 Desktop login startup is a mode `0644` freedesktop entry in the current user's
-configuration. It stores only the absolute GUI executable path. Companion
+configuration when explicitly enabled. It stores only the absolute GUI
+executable path. Companion
 reconciliation uses the existing key-only SSH alias and stores no router or
 Ubuntu password.
+
+A fresh configuration is native-only and read-only. The GUI and CLI block
+companion installation, policy apply/rollback/refresh, endpoint switching,
+connection changes, and native-setting writes until the local operator runs
+`astrill-lazy access read-write`. The guard prevents accidents; it is not a
+security boundary against someone who controls the user account or invokes SSH
+directly.
 
 The native settings mirror uses an explicit safe-key allowlist. Astrill
 account values, router passwords, installer URLs, and generated OpenVPN

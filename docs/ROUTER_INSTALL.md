@@ -7,19 +7,17 @@
 - Astrill already installed and working
 - at least about 16 KB of free NVRAM for this release
 
-The deployed SSH key is
-`~/.ssh/astrill_lazy_router_ed25519`. Its public fingerprint is:
-
-```text
-SHA256:DA01fyS6KuaJp8xyhsleXKKBf5C2iyT9OLLyknirI9w
-```
-
 Password authentication remains disabled for SSH. Telnet was intentionally
 left available as a recovery path; its credentials are not stored here.
+Generate and verify a dedicated deployment key rather than copying a
+machine-specific fingerprint from documentation. Firmware-specific setup and
+the validated `sshd_passwd_auth` NVRAM name are documented in
+[Native-only operation](NATIVE_ONLY.md#dd-wrt-key-only-ssh).
 
 ## Install Or Upgrade
 
 ```bash
+astrill-lazy access read-write
 astrill-lazy install-router
 ```
 

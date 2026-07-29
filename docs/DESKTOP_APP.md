@@ -11,8 +11,13 @@ The source deployment is installed without root:
 This creates a system-site-enabled virtual environment at `.venv`, installs the
 editable package, adds `astrill-lazy` and `astrill-lazy-gui` under
 `~/.local/bin`, and registers the desktop entry under
-`~/.local/share/applications`. It also enables a user-level login entry under
-`~/.config/autostart`; no root password is needed.
+`~/.local/share/applications`. Login startup is not enabled on a fresh
+installation. Opt in with `ASTRILL_LAZY_ENABLE_AUTOSTART=1`, or enable it later
+through the GUI/CLI; no root password is needed.
+
+The installer selects Python 3.12, then 3.11, before a generic `python3`, and
+rejects Python 3.10 or older. Set `ASTRILL_LAZY_PYTHON` to an explicit
+compatible interpreter when several Conda/system installations coexist.
 
 Launch it from the Ubuntu application menu or run:
 
@@ -28,9 +33,11 @@ astrill-lazy autostart status
 astrill-lazy autostart disable
 ```
 
-At startup and every 60 seconds, the GUI checks the DD-WRT companion. A missing
-or outdated companion is installed, while a current companion with a stopped
-watchdog is repaired in place. A healthy runtime is only read, not rewritten.
+At startup and every 60 seconds, a native-only or read-only GUI performs status
+reads only. A writable configuration with companion mode enabled checks the
+DD-WRT companion: a missing or outdated companion is installed, while a
+current companion with a stopped watchdog is repaired in place. A healthy
+runtime is only read, not rewritten.
 The package fingerprint prevents an identical broken package from being
 automatically written on every monitor cycle; the Install/Upgrade action is the
 explicit recovery override.
@@ -46,7 +53,7 @@ Run visual tests without opening a window in the active Ubuntu session:
 The default local URL is:
 
 ```text
-http://127.0.0.1:6086/vnc.html?autoconnect=1&resize=scale
+http://127.0.0.1:6086/vnc.html?host=127.0.0.1&port=6086&autoconnect=1&resize=scale
 ```
 
 The script uses X display `:44`, VNC port `5926`, and web port `6086`. Override
@@ -62,6 +69,10 @@ through the lingering user systemd instance:
 systemctl --user status \
   io.github.lachlanchen.AstrillLazyRouter.NoVNC.service
 ```
+
+The installer renders the unit from the actual checkout path, so clones named
+`astrill-lazy-router` or stored outside `~/Projects` do not depend on a
+hard-coded source directory.
 
 The Mac desktop application `Astrill Lazy Router.app` creates a passwordless
 SSH local forward from `127.0.0.1:16086` to this loopback-only web port and
@@ -120,7 +131,9 @@ endpoint does not satisfy the one requested country.
 ### Devices
 
 The companion merges current DHCP leases, configured static reservations, and
-active ARP neighbors on the DD-WRT LAN bridge. Duplicate MAC addresses collapse
+active ARP neighbors on the DD-WRT LAN bridge. Native-only mode reads and
+merges the same sources directly without installing or writing a runtime file.
+Duplicate MAC addresses collapse
 to one device, each source and online state is shown, and WAN neighbors are
 excluded. An entirely offline device with no remaining lease or static
 reservation cannot be discovered; its fixed address can be added manually.
@@ -194,5 +207,10 @@ It contains:
 - editable source rules;
 - application profile metadata and allocated lease addresses;
 - the enabled/disabled companion state and route recommendation results.
+- the read-only/read-write router access guard.
 
 It contains no Astrill account credential or SSH private key.
+
+A fresh configuration is native-only, read-only, and has no seeded policy.
+Legacy files that predate the access guard retain their existing writable
+companion behavior. See [native-only operation](NATIVE_ONLY.md).

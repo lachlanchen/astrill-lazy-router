@@ -8,6 +8,7 @@ from astrill_lazy.router import (
     CommandResult,
     RouterClient,
     RouterError,
+    _parse_native_clients,
 )
 
 
@@ -42,3 +43,76 @@ def test_remote_timeout_is_reported_as_a_router_error(
     monkeypatch.setattr(subprocess, "run", time_out)
     with pytest.raises(RouterError, match="timed out after 7 seconds"):
         client.status()
+
+
+def test_native_clients_merge_read_only_router_sources() -> None:
+    def tagged(name: str, value: str) -> str:
+        return f"{name}\t{value.encode().hex()}\n"
+
+    output = "".join(
+        (
+            tagged(
+                "leases",
+                "2000000000 AA:BB:CC:DD:EE:01 192.168.1.10 * client-id\n",
+            ),
+            tagged(
+                "arp",
+                "IP address HW type Flags HW address Mask Device\n"
+                "192.168.1.10 0x1 0x2 aa:bb:cc:dd:ee:01 * br0\n"
+                "192.168.1.30 0x1 0x2 aa:bb:cc:dd:ee:03 * br0\n"
+                "192.168.2.1 0x1 0x2 aa:bb:cc:dd:ee:ff * vlan2\n",
+            ),
+            tagged(
+                "nvram:static_leases",
+                "AA:BB:CC:DD:EE:01=laptop=192.168.1.10=1440",
+            ),
+            tagged(
+                "nvram:dhcp_staticlist",
+                "<AA:BB:CC:DD:EE:02=printer=192.168.1.20=1440>",
+            ),
+            tagged("nvram:dhcpd_static", ""),
+            tagged("nvram:lan_ifname", "br0"),
+        )
+    )
+
+    clients = _parse_native_clients(output)
+    by_mac = {client["mac"]: client for client in clients}
+
+    assert set(by_mac) == {
+        "aa:bb:cc:dd:ee:01",
+        "aa:bb:cc:dd:ee:02",
+        "aa:bb:cc:dd:ee:03",
+    }
+    assert by_mac["aa:bb:cc:dd:ee:01"] == {
+        "address": "192.168.1.10",
+        "mac": "aa:bb:cc:dd:ee:01",
+        "hostname": "laptop",
+        "expires": 2000000000,
+        "source": "dhcp,static,arp",
+        "active": True,
+    }
+    assert by_mac["aa:bb:cc:dd:ee:02"]["source"] == "static"
+    assert by_mac["aa:bb:cc:dd:ee:02"]["active"] is False
+    assert by_mac["aa:bb:cc:dd:ee:03"]["source"] == "arp"
+    assert by_mac["aa:bb:cc:dd:ee:03"]["active"] is True
+
+
+def test_native_client_inventory_does_not_use_companion_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+    captured = ""
+
+    def run_script(script: str, *, timeout: int = 60) -> str:
+        nonlocal captured
+        assert timeout == 60
+        captured = script
+        return ""
+
+    monkeypatch.setattr(client, "run_script", run_script)
+
+    assert client.native_clients() == []
+    assert "/tmp/astrill-lazy" not in captured
+    assert "nvram get" in captured
+    assert "/tmp/dnsmasq.leases" in captured
+    assert "/proc/net/arp" in captured

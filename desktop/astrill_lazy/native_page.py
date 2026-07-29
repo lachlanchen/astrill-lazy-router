@@ -57,6 +57,8 @@ class NativeSettingsPage(Gtk.Box):
         self._wifi_dirty = False
         self._vlan_dirty = False
         self._dirty = False
+        self._busy = False
+        self._read_only = False
         self._device_controls: list[tuple[NativeDevice, Gtk.DropDown]] = []
 
         heading = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -65,10 +67,10 @@ class NativeSettingsPage(Gtk.Box):
         title.set_hexpand(True)
         title.add_css_class("section-title")
         heading.append(title)
-        refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        refresh.set_tooltip_text("Reload native Astrill settings")
-        refresh.connect("clicked", lambda _button: on_refresh())
-        heading.append(refresh)
+        self.refresh_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
+        self.refresh_button.set_tooltip_text("Reload native Astrill settings")
+        self.refresh_button.connect("clicked", lambda _button: on_refresh())
+        heading.append(self.refresh_button)
         self.save_button = Gtk.Button(label="Save")
         self.save_button.add_css_class("suggested-action")
         self.save_button.set_sensitive(False)
@@ -80,13 +82,49 @@ class NativeSettingsPage(Gtk.Box):
         self._build_dns()
         self._build_connection()
         self._build_advanced()
+        self._write_controls: list[Gtk.Widget] = [
+            self.site_default,
+            self.device_default,
+            self.site_view,
+            self.wifi_default,
+            self.wifi_exceptions,
+            self.vlan_default,
+            self.vlan_exceptions,
+            self.dmz_device,
+            self.dns_provider,
+            self.user_dns,
+            self.cipher,
+            self.mtu,
+            self.site_source,
+            self.site_file,
+            self.external_filter,
+            *self.switches.values(),
+        ]
 
     @property
     def dirty(self) -> bool:
         return self._dirty
 
     def set_busy(self, busy: bool) -> None:
-        self.save_button.set_sensitive(self._dirty and not busy)
+        self._busy = busy
+        self.save_button.set_sensitive(
+            self._dirty and not self._busy and not self._read_only
+        )
+
+    def set_read_only(self, read_only: bool) -> None:
+        self._read_only = read_only
+        for control in self._write_controls:
+            control.set_sensitive(not read_only)
+        for _device, control in self._device_controls:
+            control.set_sensitive(not read_only)
+        self.save_button.set_sensitive(
+            self._dirty and not self._busy and not self._read_only
+        )
+        self.save_button.set_tooltip_text(
+            "Run “astrill-lazy access read-write” before changing router settings"
+            if read_only
+            else "Save changed native Astrill settings"
+        )
 
     def render(
         self,
@@ -469,6 +507,7 @@ class NativeSettingsPage(Gtk.Box):
             control = _route_dropdown()
             target = policy.exception if device.mac in selected else policy.default
             control.set_selected(_route_index(target))
+            control.set_sensitive(not self._read_only)
             control.connect(
                 "notify::selected", lambda *_args: self._mark_device_dirty()
             )
@@ -517,7 +556,7 @@ class NativeSettingsPage(Gtk.Box):
         if self._loading:
             return
         self._dirty = True
-        self.save_button.set_sensitive(True)
+        self.save_button.set_sensitive(not self._busy and not self._read_only)
 
 
 def _route_dropdown() -> Gtk.DropDown:

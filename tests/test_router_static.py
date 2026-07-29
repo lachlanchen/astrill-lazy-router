@@ -17,10 +17,35 @@ def test_router_and_helper_scripts_parse_with_posix_shell() -> None:
         ROOT / "router" / "alpage",
         ROOT / "router" / "bootstrap.sh",
         ROOT / "helpers" / "astrill-lazy-netns",
+        ROOT / "scripts" / "install-desktop.sh",
+        ROOT / "scripts" / "install-novnc-service.sh",
         ROOT / "scripts" / "run-novnc-debug.sh",
+        ROOT / "scripts" / "uninstall-novnc-service.sh",
     ]
     for script in scripts:
         subprocess.run(["sh", "-n", str(script)], check=True)
+
+
+def test_novnc_service_is_rendered_from_the_checked_out_repository() -> None:
+    unit = (
+        ROOT / "data" / "io.github.lachlanchen.AstrillLazyRouter.NoVNC.service"
+    ).read_text(encoding="utf-8")
+    installer = (ROOT / "scripts" / "install-novnc-service.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "@ROOT@" in unit
+    assert "Projects/astrill-lazy" not in unit
+    assert 'sed "s|@ROOT@|$escaped_root|g"' in installer
+
+
+def test_desktop_installer_selects_a_supported_python_and_opt_in_autostart() -> None:
+    installer = (ROOT / "scripts" / "install-desktop.sh").read_text(encoding="utf-8")
+
+    assert "python3.12 python3.11 python3" in installer
+    assert "sys.version_info < (3, 11)" in installer
+    assert "ASTRILL_LAZY_PYTHON" in installer
+    assert "ASTRILL_LAZY_ENABLE_AUTOSTART" in installer
 
 
 def test_policy_controller_never_evaluates_rule_content() -> None:

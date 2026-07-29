@@ -22,12 +22,15 @@ class ConfigStore:
         self.rules: list[Rule] = []
         self.active_region = "active-astrill"
         self.enabled_extensions = ["core-catalog"]
-        self.companion_enabled = True
+        # A new workstation may point at an already-working Astrill router.
+        # Start in inspection-only native mode until the operator explicitly
+        # enables writes and installs the optional companion.
+        self.companion_enabled = False
+        self.read_only = True
         self.load()
 
     def load(self) -> None:
         if not self.path.exists():
-            self.rules = [default_uu_rule()]
             return
         with self.path.open("r", encoding="utf-8") as handle:
             document = json.load(handle)
@@ -39,6 +42,13 @@ class ConfigStore:
         if not isinstance(companion_enabled, bool):
             raise TypeError("companion_enabled must be a boolean")
         self.companion_enabled = companion_enabled
+        # Configurations created before read-only access existed were already
+        # writable. Preserve that behavior instead of silently disabling a
+        # deployed companion during an upgrade.
+        read_only = document.get("read_only", False)
+        if not isinstance(read_only, bool):
+            raise TypeError("read_only must be a boolean")
+        self.read_only = read_only
         self.enabled_extensions = [
             str(item) for item in document.get("enabled_extensions", ["core-catalog"])
         ]
@@ -53,6 +63,7 @@ class ConfigStore:
             "router_host": self.router_host,
             "active_region": self.active_region,
             "companion_enabled": self.companion_enabled,
+            "read_only": self.read_only,
             "enabled_extensions": self.enabled_extensions,
             "rules": [rule.to_dict() for rule in self.rules],
         }

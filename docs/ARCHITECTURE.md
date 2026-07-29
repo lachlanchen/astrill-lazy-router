@@ -20,6 +20,12 @@ provider sessions. See [Device-local routing](DEVICE_ROUTING.md).
 The desktop sends a versioned, tab-separated compiled document over key-only
 SSH. The router never parses desktop JSON and never executes catalog code.
 
+The companion is optional. In native-only mode the desktop uses allowlisted,
+read-only SSH probes for status, native settings, endpoint discovery, DHCP
+leases, static reservations, and LAN ARP neighbors. It creates no remote
+runtime file and performs no reconciliation. Fresh configurations start in
+this mode behind a local read-only guard.
+
 ## Packet Path
 
 The router inserts one jump at the beginning of mangle `PREROUTING`. The active

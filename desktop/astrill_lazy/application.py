@@ -145,6 +145,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._updating_protocol = False
         self._updating_astrill_connection = False
         self._protocol_user_selected = False
+        self.router_install_buttons: list[Gtk.Button] = []
 
         self._install_css()
         self.toast_overlay = Adw.ToastOverlay()
@@ -157,7 +158,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_services()
         self._render_countries()
         self._render_extensions()
-        if self.store.companion_enabled:
+        self.native_page.set_read_only(self.store.read_only)
+        if self.store.companion_enabled and not self.store.read_only:
             self.ensure_router_companion(quiet=False)
         else:
             self.refresh_router()
@@ -277,6 +279,12 @@ class MainWindow(Adw.ApplicationWindow):
     def _build_policies_page(self) -> Gtk.Widget:
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         content.add_css_class("page-content")
+        self.access_banner = Adw.Banner()
+        self.access_banner.set_title(
+            "Read-only access: router changes and companion installation are disabled."
+        )
+        self.access_banner.set_revealed(self.store.read_only)
+        content.append(self.access_banner)
         self.policy_banner = Adw.Banner()
         self.policy_banner.set_revealed(False)
         content.append(self.policy_banner)
@@ -685,6 +693,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.install_router,
         )
         install.set_valign(Gtk.Align.CENTER)
+        self.router_install_buttons.append(install)
         package_row.add_suffix(install)
         self.restore_native_button = _button_with_icon(
             "Restore Astrill Only",
@@ -761,6 +770,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.install_router,
         )
         install.set_valign(Gtk.Align.CENTER)
+        self.router_install_buttons.append(install)
         self.router_companion_row.add_suffix(install)
         companion_list = Gtk.ListBox()
         companion_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -1391,7 +1401,11 @@ class MainWindow(Adw.ApplicationWindow):
                 row.add_prefix(Gtk.Image.new_from_icon_name("network-vpn-symbolic"))
             connect = Gtk.Button(label="Connected" if connected else "Connect")
             connect.add_css_class("compact-button")
-            connect.set_sensitive(self.store.companion_enabled and not connected)
+            connect.set_sensitive(
+                self.store.companion_enabled
+                and not self.store.read_only
+                and not connected
+            )
             connect.set_valign(Gtk.Align.CENTER)
             connect.connect(
                 "clicked",
@@ -1511,6 +1525,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _toggle_astrill_connection(self, switch: Gtk.Switch, _param: object) -> None:
         if self._updating_astrill_connection:
+            return
+        if not self._require_write_access("changing the Astrill connection"):
+            self._update_status()
             return
         connected = switch.get_active()
         switch.set_sensitive(False)
@@ -1846,6 +1863,8 @@ class MainWindow(Adw.ApplicationWindow):
         return RouteTarget.DIRECT
 
     def apply_configuration(self, _button: Gtk.Button | None = None) -> None:
+        if not self._require_write_access("applying router policies"):
+            return
         if not self.store.companion_enabled:
             self.toast("Install the companion before applying routing policies")
             return
@@ -1928,6 +1947,8 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def apply_route_recommendations(self, _button: Gtk.Button | None = None) -> None:
+        if not self._require_write_access("applying route recommendations"):
+            return
         recommendations = [
             (rule, value)
             for rule in self.store.rules
@@ -1983,7 +2004,10 @@ class MainWindow(Adw.ApplicationWindow):
         idle = self.busy_count == 0
         self.detect_routes_button.set_sensitive(self.store.companion_enabled and idle)
         self.apply_recommendations_button.set_sensitive(
-            self.store.companion_enabled and idle and pending
+            self.store.companion_enabled
+            and not self.store.read_only
+            and idle
+            and pending
         )
 
     def refresh_router(self) -> None:
@@ -2019,6 +2043,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.toast("Native Astrill settings synchronized")
 
     def save_native_settings(self) -> None:
+        if not self._require_write_access("saving native Astrill settings"):
+            return
         try:
             changes = self.native_page.collect_changes()
         except ValueError as exc:
@@ -2040,6 +2066,8 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def refresh_domains(self, _button: Gtk.Button | None = None) -> None:
+        if not self._require_write_access("refreshing companion domain routes"):
+            return
         self._run_task(
             self.router.refresh,
             self._domains_refreshed,
@@ -2051,6 +2079,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast(f"Refreshed {status.get('resolved_addresses', 0)} domain addresses")
 
     def confirm_rollback(self, _button: Gtk.Button | None = None) -> None:
+        if not self._require_write_access("rolling back the router policy"):
+            return
         dialog = Adw.MessageDialog.new(
             self,
             "Restore the previous router policy?",
@@ -2086,7 +2116,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def ensure_router_companion(self, *, quiet: bool = True) -> None:
-        if not self.store.companion_enabled:
+        if not self.store.companion_enabled or self.store.read_only:
             self.refresh_router()
             return
         self._run_task(
@@ -2097,6 +2127,8 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def reconcile_router(self, _button: Gtk.Button | None = None) -> None:
+        if not self._require_write_access("repairing the router companion"):
+            return
         if not self.store.companion_enabled:
             self.toast("Install the companion before repairing its runtime")
             return
@@ -2120,7 +2152,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _monitor_router_companion(self) -> bool:
         if self.busy_count == 0:
-            if self.store.companion_enabled:
+            if self.store.companion_enabled and not self.store.read_only:
                 self.ensure_router_companion()
             else:
                 self.refresh_router()
@@ -2236,28 +2268,31 @@ class MainWindow(Adw.ApplicationWindow):
         self._updating_astrill_connection = True
         self.astrill_connection_switch.set_active(tunnel)
         self._updating_astrill_connection = False
-        self.astrill_connection_switch.set_sensitive(self.busy_count == 0)
-        self.choose_location_button.set_sensitive(
-            self.store.companion_enabled and self.busy_count == 0
-        )
-        self.protocol_dropdown.set_sensitive(self.store.companion_enabled)
+        writable = not self.store.read_only and self.busy_count == 0
+        companion_writable = self.store.companion_enabled and writable
+        self.astrill_connection_switch.set_sensitive(writable)
+        self.choose_location_button.set_sensitive(companion_writable)
+        self.protocol_dropdown.set_sensitive(companion_writable)
         for control in (
             self.router_repair_button,
             self.router_refresh_domains_button,
             self.router_rollback_button,
         ):
-            control.set_sensitive(self.store.companion_enabled and self.busy_count == 0)
-        self.restore_native_button.set_sensitive(
-            self.store.companion_enabled and self.busy_count == 0
-        )
-        self.apply_button.set_sensitive(
-            self.store.companion_enabled and self.busy_count == 0
-        )
+            control.set_sensitive(companion_writable)
+        self.restore_native_button.set_sensitive(companion_writable)
+        self.apply_button.set_sensitive(companion_writable)
+        for button in self.router_install_buttons:
+            button.set_sensitive(writable)
+        self.native_page.set_read_only(self.store.read_only)
         self._update_recommendation_controls()
 
     def refresh_clients(self) -> None:
         self._run_task(
-            self.router.clients,
+            (
+                self.router.clients
+                if self.store.companion_enabled
+                else self.router.native_clients
+            ),
             self._clients_refreshed,
             "Could not load router clients",
         )
@@ -2338,6 +2373,8 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present()
 
     def _switch_server(self, server: AstrillServer) -> None:
+        if not self._require_write_access("switching the Astrill endpoint"):
+            return
         protocol = self.protocol_dropdown.get_selected()
         try:
             sid, endpoint = server.endpoint_for(protocol)
@@ -2375,6 +2412,9 @@ class MainWindow(Adw.ApplicationWindow):
         return "other"
 
     def launch_app(self, rule: Rule) -> None:
+        if not self._require_write_access("launching a router-routed application"):
+            return
+
         def prepare_apply_launch() -> tuple[str, dict[str, Any]]:
             address = self.launcher.prepare(rule)
             self.store.save()
@@ -2398,6 +2438,9 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def install_router(self, _button: Gtk.Button | None = None) -> None:
+        if not self._require_write_access("installing the router companion"):
+            return
+
         def success(result: Any) -> None:
             self.store.companion_enabled = True
             self.store.save()
@@ -2411,6 +2454,8 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def confirm_restore_native(self, _button: Gtk.Button | None = None) -> None:
+        if not self._require_write_access("removing the router companion"):
+            return
         dialog = Adw.MessageDialog.new(
             self,
             "Restore native Astrill only?",
@@ -2491,10 +2536,21 @@ class MainWindow(Adw.ApplicationWindow):
     def _task_finished(self) -> None:
         self.busy_count = max(0, self.busy_count - 1)
         self.apply_button.set_sensitive(
-            self.store.companion_enabled and self.busy_count == 0
+            self.store.companion_enabled
+            and not self.store.read_only
+            and self.busy_count == 0
         )
         self.native_page.set_busy(self.busy_count != 0)
         self._update_recommendation_controls()
+
+    def _require_write_access(self, action: str) -> bool:
+        if not self.store.read_only:
+            return True
+        self.toast(
+            f"Read-only access prevents {action}. "
+            "Run “astrill-lazy access read-write” and reopen the app."
+        )
+        return False
 
     def toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast(title=message, timeout=4))

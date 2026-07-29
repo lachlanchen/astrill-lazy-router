@@ -49,6 +49,7 @@ def test_config_store_round_trip_is_private(tmp_path: Path) -> None:
     store.rules = [default_uu_rule()]
     store.enabled_extensions = ["core-catalog"]
     store.companion_enabled = False
+    store.read_only = False
     store.save()
     assert path.stat().st_mode & 0o777 == 0o600
 
@@ -56,9 +57,40 @@ def test_config_store_round_trip_is_private(tmp_path: Path) -> None:
     assert loaded.rules[0].selector == "uu-remote"
     assert loaded.enabled_extensions == ["core-catalog"]
     assert loaded.companion_enabled is False
+    assert loaded.read_only is False
     document = json.loads(path.read_text(encoding="utf-8"))
     assert document["schema_version"] == 1
     assert document["companion_enabled"] is False
+    assert document["read_only"] is False
+
+
+def test_fresh_config_store_starts_native_only_and_read_only(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "missing.json")
+
+    assert store.companion_enabled is False
+    assert store.read_only is True
+    assert store.rules == []
+
+
+def test_legacy_config_keeps_its_writable_companion_behavior(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "router_host": "legacy-router",
+                "active_region": "active-astrill",
+                "enabled_extensions": ["core-catalog"],
+                "rules": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ConfigStore(path)
+
+    assert store.companion_enabled is True
+    assert store.read_only is False
 
 
 def test_parse_application_command() -> None:

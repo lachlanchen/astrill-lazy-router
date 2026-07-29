@@ -18,7 +18,7 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-62 tests passed
+77 tests passed
 Ruff: all checks passed
 Catalog: 261 profiles, 649/649 unique seed hosts resolved to IPv4
 ShellCheck: no findings
@@ -40,10 +40,14 @@ Tests cover:
   watchdog repair, and identical-package rewrite suppression;
 - private, atomic user-session autostart;
 - private atomic desktop configuration;
+- safe fresh defaults, legacy configuration compatibility, and the CLI write
+  guard;
 - application command parsing;
 - POSIX shell parsing and the no-`eval` policy contract;
 - DHCP/static/ARP client inventory merging, MAC deduplication, and WAN
   exclusion;
+- companion-free read-only LAN inventory and path-independent noVNC service
+  rendering;
 - SSH banner error cleanup;
 - native mode adapters, device/site parsing, safe-key validation, and
   round-trip writes;
@@ -105,6 +109,12 @@ The following checks were performed against the Linksys E4200:
   Ubuntu desktop session.
 - boot-persistent loopback-only noVNC startup and a nonblank direct capture of
   its isolated X display.
+- a second native-only E4200 with no companion markers/runtime, native website
+  Include mode, direct ordinary egress, VPN egress for a listed AI service,
+  177 applet endpoints at inspection time, and 17 LAN clients loaded through
+  read-only SSH;
+- a read-only GTK run showing the safety banner, disabled native/router write
+  controls, and the companion-free Devices inventory.
 
 The bootstrap was exercised directly, during multiple upgrades, and through a
 physical reboot. Astrill was later connected using its own upstream state while
@@ -119,6 +129,8 @@ namespace helper and router scripts.
 ## Health Checklist
 
 ```bash
+astrill-lazy access status
+astrill-lazy inspect
 astrill-lazy status
 ssh astrill-router 'ip rule show'
 ssh astrill-router 'ip route show table 212'
@@ -134,6 +146,10 @@ Healthy state requires:
 - a live watchdog PID;
 - both mark policy rules;
 - no unresolved domain warning, unless a prior cached address is expected.
+
+For native-only inspection, companion chains, policy tables, and a watchdog are
+expected to be absent. `astrill-lazy inspect` should instead report a healthy
+native applet and `"installed": false` for the companion.
 
 ## Failure Response
 

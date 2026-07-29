@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Add a native-only, read-only first-run mode so an already-working Astrill
+  router can be inspected without companion installation or router writes.
+- Preserve writable companion behavior for legacy configuration files while
+  adding an explicit `astrill-lazy access` guard for new deployments.
+- Add companion-free LAN client discovery and a sanitized native inspection
+  report covering status, effective routes, endpoints, and client counts.
+- Validate a second Linksys E4200 using native Include routing, and document
+  DD-WRT key-only SSH setup, BusyBox limitations, and safe Telnet recovery.
+- Render the noVNC user service from the actual checkout path and make desktop
+  login autostart opt-in.
+- Select and verify Python 3.11 or newer during desktop installation instead of
+  trusting a potentially incompatible Conda `python3`.
 - Add a branded project README, repository screenshot, GitHub Sponsors panel,
   and concise guides across the profile's 11-language navigation set.
 - Add provider-country filtering, persistent multi-selection, and Suggested,

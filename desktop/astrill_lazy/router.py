@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import json
+import re
 import shlex
 import subprocess
 from collections.abc import Iterable
@@ -66,6 +68,41 @@ class RouterClient:
     def clients(self) -> list[dict[str, Any]]:
         result = self._run_alctl(["clients", "--json"])
         return list(json.loads(_last_json_line(result.stdout)))
+
+    def native_clients(self) -> list[dict[str, Any]]:
+        """Read LAN clients without requiring or writing companion runtime files."""
+        script = """
+printf 'leases\\t'
+[ ! -r /tmp/dnsmasq.leases ] ||
+    hexdump -v -e '1/1 "%02x"' /tmp/dnsmasq.leases
+printf '\\narp\\t'
+[ ! -r /proc/net/arp ] || hexdump -v -e '1/1 "%02x"' /proc/net/arp
+printf '\\n'
+for key in static_leases dhcp_staticlist dhcpd_static lan_ifname; do
+    printf 'nvram:%s\\t' "$key"
+    nvram get "$key" | hexdump -v -e '1/1 "%02x"'
+    printf '\\n'
+done
+"""
+        return _parse_native_clients(self.run_script(script))
+
+    def companion_presence(self) -> dict[str, Any]:
+        """Inspect companion markers without starting, repairing, or installing it."""
+        script = """
+for key in astrill_lazy_installed astrill_lazy_version; do
+    printf '%s\\t' "$key"
+    nvram get "$key" | hexdump -v -e '1/1 "%02x"'
+    printf '\\n'
+done
+[ -x /tmp/astrill-lazy/alctl ] && runtime=true || runtime=false
+printf 'runtime\\t%s\\n' "$runtime"
+"""
+        values = _decode_tagged_hex(self.run_script(script), plain_tags={"runtime"})
+        return {
+            "installed": values.get("astrill_lazy_installed") == "1",
+            "version": values.get("astrill_lazy_version") or None,
+            "runtime": values.get("runtime") == "true",
+        }
 
     def switch_astrill(
         self,
@@ -302,3 +339,120 @@ def _clean_ssh_stderr(output: str) -> str:
         for line in output.splitlines()
         if line.strip() and not line.startswith(ignored_prefixes)
     ).strip()
+
+
+def _decode_tagged_hex(
+    output: str, *, plain_tags: set[str] | None = None
+) -> dict[str, str]:
+    plain = plain_tags or set()
+    values: dict[str, str] = {}
+    for line in output.splitlines():
+        if "\t" not in line:
+            continue
+        tag, encoded = line.split("\t", 1)
+        if tag in plain:
+            values[tag] = encoded
+            continue
+        try:
+            values[tag] = bytes.fromhex(encoded).decode("utf-8").removesuffix("\n")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise RouterError(
+                f"router returned invalid encoded data for {tag}"
+            ) from exc
+    return values
+
+
+def _parse_native_clients(output: str) -> list[dict[str, Any]]:
+    values = _decode_tagged_hex(output)
+    records: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+
+    def add(
+        address: str,
+        mac: str,
+        hostname: str,
+        expires: int,
+        source: str,
+        active: bool,
+    ) -> None:
+        normalized_mac = mac.casefold()
+        if not _valid_ipv4_network(address) or not _valid_mac(normalized_mac):
+            return
+        key = f"mac:{normalized_mac}"
+        known_name = hostname not in {"", "*", "unknown"}
+        if key not in records:
+            order.append(key)
+            records[key] = {
+                "address": address,
+                "mac": normalized_mac,
+                "hostname": hostname or "unknown",
+                "expires": max(0, expires),
+                "sources": [source],
+                "active": active,
+            }
+            return
+        record = records[key]
+        if active:
+            record["address"] = address
+            record["active"] = True
+        existing_name = str(record["hostname"])
+        if (source == "static" or existing_name in {"", "*", "unknown"}) and known_name:
+            record["hostname"] = hostname
+        record["expires"] = max(int(record["expires"]), max(0, expires))
+        if source not in record["sources"]:
+            record["sources"].append(source)
+
+    for line in values.get("leases", "").splitlines():
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+        expires = int(fields[0]) if fields[0].isdigit() else 0
+        add(fields[2], fields[1], fields[3], expires, "dhcp", False)
+
+    for nvram_key in ("static_leases", "dhcp_staticlist", "dhcpd_static"):
+        for token in re.split(r"[<>\s]+", values.get(f"nvram:{nvram_key}", "")):
+            if not token:
+                continue
+            fields = token.split("=")
+            if len(fields) < 3:
+                continue
+            add(fields[2], fields[0], fields[1], 0, "static", False)
+
+    lan_interface = values.get("nvram:lan_ifname") or "br0"
+    for position, line in enumerate(values.get("arp", "").splitlines()):
+        if position == 0:
+            continue
+        fields = line.split()
+        if len(fields) < 6 or fields[2].casefold() != "0x2":
+            continue
+        if fields[5] != lan_interface:
+            continue
+        add(fields[0], fields[3], "unknown", 0, "arp", True)
+
+    clients: list[dict[str, Any]] = []
+    for key in order:
+        record = records[key]
+        clients.append(
+            {
+                "address": record["address"],
+                "mac": record["mac"],
+                "hostname": record["hostname"],
+                "expires": record["expires"],
+                "source": ",".join(record["sources"]),
+                "active": record["active"],
+            }
+        )
+    return clients
+
+
+def _valid_ipv4_network(value: str) -> bool:
+    try:
+        address, separator, prefix = value.partition("/")
+        ipaddress.IPv4Address(address)
+        return not separator or (prefix.isdigit() and 0 <= int(prefix) <= 32)
+    except ipaddress.AddressValueError:
+        return False
+
+
+def _valid_mac(value: str) -> bool:
+    return re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", value) is not None

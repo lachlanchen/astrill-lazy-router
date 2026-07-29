@@ -32,6 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("gui", help="open the native control application")
     subparsers.add_parser("status", help="show router and Astrill status")
+    inspect = subparsers.add_parser(
+        "inspect", help="inspect native Astrill without changing the router"
+    )
+    inspect.add_argument(
+        "--full",
+        action="store_true",
+        help="include native website and device entries",
+    )
     subparsers.add_parser("rules", help="show compiled rules on the router")
     subparsers.add_parser("apply", help="compile and apply the desktop rules")
     subparsers.add_parser("refresh", help="refresh domain addresses and routing")
@@ -42,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
         "autostart", help="manage desktop-session autostart"
     )
     autostart.add_argument("action", choices=("enable", "disable", "status"))
+    access = subparsers.add_parser(
+        "access", help="show or change the local router write guard"
+    )
+    access.add_argument("action", choices=("status", "read-only", "read-write"))
 
     servers = subparsers.add_parser("servers", help="list Astrill server endpoints")
     servers.add_argument("--json", action="store_true")
@@ -95,6 +107,23 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "enabled": is_autostart_enabled(),
                 "path": str(autostart_path()),
+            }
+        )
+        return 0
+
+    if arguments.command == "access":
+        store = ConfigStore()
+        if arguments.action == "read-only":
+            store.read_only = True
+            store.save()
+        elif arguments.action == "read-write":
+            store.read_only = False
+            store.save()
+        _print_json(
+            {
+                "access": "read-only" if store.read_only else "read-write",
+                "companion_enabled": store.companion_enabled,
+                "path": str(store.path),
             }
         )
         return 0
@@ -154,6 +183,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     store = ConfigStore()
+    mutating_commands = {
+        "apply",
+        "refresh",
+        "rollback",
+        "install-router",
+        "uninstall-router",
+        "switch",
+    }
+    if store.read_only and arguments.command in mutating_commands:
+        print(
+            "astrill-lazy: read-only access blocks this command; "
+            "run `astrill-lazy access read-write` first",
+            file=sys.stderr,
+        )
+        return 2
     host = arguments.router or store.router_host
     router = RouterClient(host)
     try:
@@ -163,7 +207,21 @@ def main(argv: list[str] | None = None) -> int:
                 if store.companion_enabled
                 else router.native_astrill_status()
             )
+        elif arguments.command == "inspect":
+            _print_json(
+                _native_inspection(
+                    router,
+                    host=host,
+                    store=store,
+                    full=arguments.full,
+                )
+            )
         elif arguments.command == "rules":
+            if not store.companion_enabled:
+                raise RouterError(
+                    "compiled rules require the companion; use `astrill-lazy inspect` "
+                    "for a native-only router"
+                )
             print(router.rules(), end="")
         elif arguments.command == "apply":
             compilation = compile_rules(store.rules, load_catalog())
@@ -235,6 +293,72 @@ def main(argv: list[str] | None = None) -> int:
 
 def _print_json(value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True))
+
+
+def _native_inspection(
+    router: RouterClient,
+    *,
+    host: str,
+    store: ConfigStore,
+    full: bool,
+) -> dict[str, object]:
+    status = router.native_astrill_status()
+    settings = router.native_astrill_settings()
+    clients = router.native_clients()
+    companion = router.companion_presence()
+    servers = parse_applet(router.fetch_astrill_payload())
+    site_entries = [
+        line.strip()
+        for line in settings.get("astrill_iplistraw").splitlines()
+        if line.strip()
+    ]
+    devices = settings.devices
+    result: dict[str, object] = {
+        "ok": True,
+        "router": host,
+        "access": "read-only" if store.read_only else "read-write",
+        "configured_mode": ("companion" if store.companion_enabled else "native-only"),
+        "companion": companion,
+        "native_astrill": {
+            "health": status.get("health"),
+            "vpn_state": status.get("vpn_state"),
+            "server_id": status.get("astrill_server_id"),
+            "protocol": status.get("astrill_protocol"),
+            "autostart": settings.enabled("astrill_autostart"),
+            "website_policy": {
+                "mode": settings.integer("astrill_routingmode"),
+                "default": settings.site_policy.default.value,
+                "listed_route": settings.site_policy.exception.value,
+                "entries": len(site_entries),
+                "compiled_ipv4": len(settings.get("astrill_iplist").split()),
+            },
+            "device_policy": {
+                "mode": settings.integer("astrill_devmode"),
+                "default": settings.device_policy.default.value,
+                "listed_route": settings.device_policy.exception.value,
+                "entries": len(devices),
+            },
+            "wifi_mode": settings.integer("astrill_ifmode"),
+            "vlan_mode": settings.integer("astrill_vlanmode"),
+            "dns_mode": settings.get("astrill_dnsserver"),
+        },
+        "discovered_lan_clients": len(clients),
+        "astrill_endpoints": len(servers),
+    }
+    if full:
+        result["native_entries"] = {
+            "websites": site_entries,
+            "devices": [
+                {
+                    "mac": device.mac,
+                    "address": device.address,
+                    "name": device.name,
+                }
+                for device in devices
+            ],
+            "lan_clients": clients,
+        }
+    return result
 
 
 def _services_for_domain(domain: str) -> set[str]:

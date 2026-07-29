@@ -5,8 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Projects/astrill-lazy
-ExecStart=%h/Projects/astrill-lazy/scripts/run-novnc-debug.sh
+ExecStart="@ROOT@/scripts/run-novnc-debug.sh"
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
