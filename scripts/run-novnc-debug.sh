@@ -95,4 +95,25 @@ dbus-run-session -- env DISPLAY="$DISPLAY_VALUE" GDK_BACKEND=x11 \
 app_pid=$!
 fit_app_window &
 fit_pid=$!
-wait "$app_pid"
+
+# Treat the display, VNC bridge, and controller as one supervised stack.
+while :; do
+    for component in \
+        "$xvfb_pid:Xvfb" \
+        "$wm_pid:openbox" \
+        "$vnc_pid:x11vnc" \
+        "$websockify_pid:websockify" \
+        "$app_pid:Astrill Lazy GUI"
+    do
+        pid=${component%%:*}
+        name=${component#*:}
+        if ! kill -0 "$pid" 2>/dev/null; then
+            status=0
+            wait "$pid" || status=$?
+            [ "$status" -ne 0 ] || status=1
+            printf '%s exited; restarting the noVNC stack\n' "$name" >&2
+            exit "$status"
+        fi
+    done
+    sleep 2
+done

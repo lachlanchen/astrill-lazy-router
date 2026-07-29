@@ -7,6 +7,12 @@
 - Astrill already installed and working
 - at least about 16 KB of free NVRAM for this release
 
+The GUI can prepare these prerequisites from the Router page: connection
+settings default to `192.168.1.1`, `root`, and port `22`; SSH authorization uses
+a transient password; and a missing Astrill applet accepts a user-provided,
+hash-reviewed installer. The CLI workflow below assumes setup is already
+complete.
+
 Password authentication remains disabled for SSH. Telnet was intentionally
 left available as a recovery path; its credentials are not stored here.
 Generate and verify a dedicated deployment key rather than copying a

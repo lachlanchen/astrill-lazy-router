@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from .models import MatchKind, RouteTarget, Rule
+from .ssh_setup import (
+    DEFAULT_IDENTITY_FILE,
+    DEFAULT_ROUTER_HOST,
+    DEFAULT_ROUTER_PORT,
+    DEFAULT_ROUTER_USER,
+)
 
 SCHEMA_VERSION = 1
 
@@ -18,7 +24,10 @@ class ConfigStore:
             / "astrill-lazy"
             / "config.json"
         )
-        self.router_host = "astrill-router"
+        self.router_host = DEFAULT_ROUTER_HOST
+        self.router_user = DEFAULT_ROUTER_USER
+        self.router_port = DEFAULT_ROUTER_PORT
+        self.router_identity = DEFAULT_IDENTITY_FILE
         self.rules: list[Rule] = []
         self.active_region = "active-astrill"
         self.enabled_extensions = ["core-catalog"]
@@ -36,7 +45,17 @@ class ConfigStore:
             document = json.load(handle)
         if document.get("schema_version") != SCHEMA_VERSION:
             raise ValueError("unsupported desktop configuration schema")
-        self.router_host = str(document.get("router_host", "astrill-router"))
+        self.router_host = str(document.get("router_host", DEFAULT_ROUTER_HOST))
+        self.router_user = str(document.get("router_user", DEFAULT_ROUTER_USER))
+        router_port = document.get("router_port", DEFAULT_ROUTER_PORT)
+        if not isinstance(router_port, int) or isinstance(router_port, bool):
+            raise TypeError("router_port must be an integer")
+        if not 1 <= router_port <= 65535:
+            raise ValueError("router_port must be between 1 and 65535")
+        self.router_port = router_port
+        self.router_identity = str(
+            document.get("router_identity", DEFAULT_IDENTITY_FILE)
+        )
         self.active_region = str(document.get("active_region", "active-astrill"))
         companion_enabled = document.get("companion_enabled", True)
         if not isinstance(companion_enabled, bool):
@@ -61,6 +80,9 @@ class ConfigStore:
         document: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "router_host": self.router_host,
+            "router_user": self.router_user,
+            "router_port": self.router_port,
+            "router_identity": self.router_identity,
             "active_region": self.active_region,
             "companion_enabled": self.companion_enabled,
             "read_only": self.read_only,
