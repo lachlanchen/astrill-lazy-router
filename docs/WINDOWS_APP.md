@@ -289,6 +289,27 @@ switch or reconnect the router endpoint. The result is not a bandwidth,
 download-speed, or VPN-throughput measurement. For a selected UDP protocol,
 the app tests the same endpoint family's TCP counterpart when available.
 
+Manual results are saved separately from router and policy configuration at:
+
+```text
+%LOCALAPPDATA%\Astrill Lazy Router\endpoint-latency.json
+```
+
+They survive application restarts and endpoint-catalog reloads until
+**Clear results** is selected or a new manual test replaces them. Loading a
+saved result never opens a connection. Results older than 24 hours are marked
+for retesting, and a saved result is not used for latency ordering when the
+current applet advertises a different address, port, or TCP counterpart. The
+cache is bounded, validated, and atomically replaced; damage to this derived
+file cannot prevent the application from starting.
+
+Use the endpoint **Sort** control to choose **Default order**, **Region
+(A–Z)**, or **PC latency (fastest)**. Latency sorting uses the numeric
+measurement rather than its displayed text, places current reachable results
+first, and leaves untested endpoints last. Search is applied before sorting,
+and the selected endpoint is retained when it is temporarily hidden by a
+filter.
+
 The guard is an accident-prevention feature, not an authorization boundary.
 A user who can edit the configuration or invoke `ssh.exe` directly can still
 change the router.

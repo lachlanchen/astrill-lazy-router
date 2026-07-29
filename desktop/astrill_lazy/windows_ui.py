@@ -6,6 +6,7 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
+from time import time
 from typing import Any
 
 from PySide6.QtCore import (
@@ -55,7 +56,16 @@ from PySide6.QtWidgets import (
 
 from . import __version__
 from .astrill import ASTRILL_PROTOCOL_NAMES, AstrillServer
+from .endpoint_list import EndpointListRow, sort_endpoint_rows
 from .endpoint_probe import EndpointProbeResult, EndpointProbeStatus, probe_servers
+from .endpoint_probe_store import (
+    SavedEndpointProbe,
+    SavedProbeState,
+    assess_saved_endpoint_probe,
+    endpoint_probe_cache_path,
+    load_endpoint_probe_cache,
+    save_endpoint_probe_cache,
+)
 from .models import MatchKind, RouteTarget, Rule
 from .native_settings import NativeAstrillSettings
 from .router import _openssh_config_path
@@ -537,9 +547,13 @@ class MainWindow(QMainWindow):
         self._endpoint_catalog_loading = False
         self._endpoint_catalog_loaded = False
         self._endpoint_probe_running = False
-        self._endpoint_probe_results: dict[
-            tuple[int, int], tuple[EndpointProbeResult, str]
-        ] = {}
+        self._endpoint_selected_server_id: int | None = None
+        self._endpoint_probe_cache_path = endpoint_probe_cache_path(
+            self.controller.store.path
+        )
+        self._endpoint_probe_results = load_endpoint_probe_cache(
+            self._endpoint_probe_cache_path
+        )
         self.native_settings: NativeAstrillSettings | None = None
         self._native_settings_loading = False
         self._syncing_access = False
@@ -900,6 +914,18 @@ class MainWindow(QMainWindow):
         self.protocol.activated.connect(self._endpoint_protocol_selected)
         self.protocol.currentIndexChanged.connect(self._endpoint_protocol_changed)
         row.addWidget(self.protocol)
+        row.addWidget(QLabel("Sort"))
+        self.endpoint_sort = QComboBox()
+        self.endpoint_sort.addItem("Default order", "default")
+        self.endpoint_sort.addItem("Region (A–Z)", "region")
+        self.endpoint_sort.addItem("PC latency (fastest)", "latency")
+        self.endpoint_sort.setToolTip(
+            "Sort locally. Default restores Astrill's catalog order."
+        )
+        self.endpoint_sort.currentIndexChanged.connect(
+            lambda _index: self._render_endpoints()
+        )
+        row.addWidget(self.endpoint_sort)
         self.load_endpoints_button = QPushButton("Load endpoints")
         self.load_endpoints_button.clicked.connect(self._load_endpoints)
         row.addWidget(self.load_endpoints_button)
@@ -952,8 +978,14 @@ class MainWindow(QMainWindow):
         latency_controls.addWidget(self.endpoint_probe_clear_button)
         latency_controls.addStretch(1)
         latency_layout.addLayout(latency_controls)
+        saved_count = len(self._endpoint_probe_results)
         self.endpoint_probe_status = QLabel(
-            "Not run · results appear only after you click Test PC latency."
+            (
+                f"Loaded {saved_count} saved result"
+                f"{'' if saved_count == 1 else 's'} · no automatic retest."
+            )
+            if saved_count
+            else "Not run · results appear only after you click Test PC latency."
         )
         self.endpoint_probe_status.setObjectName("latencyStatus")
         self.endpoint_probe_status.setWordWrap(True)
@@ -992,9 +1024,7 @@ class MainWindow(QMainWindow):
         self.endpoint_tree.itemDoubleClicked.connect(
             lambda _item, _column: self._connect_endpoint()
         )
-        self.endpoint_tree.currentItemChanged.connect(
-            lambda _current, _previous: self._sync_endpoint_action_ui()
-        )
+        self.endpoint_tree.currentItemChanged.connect(self._endpoint_selection_changed)
         layout.addWidget(self.endpoint_tree)
         self._sync_endpoint_action_ui()
         return page
@@ -1528,6 +1558,9 @@ class MainWindow(QMainWindow):
     def _endpoints_loaded(self, result: object) -> None:
         _catalog = result
         self._endpoint_catalog_loaded = True
+        available_ids = {server.id for server in self.controller.server_catalog.servers}
+        if self._endpoint_selected_server_id not in available_ids:
+            self._endpoint_selected_server_id = None
         self._render_endpoints()
         self._render_countries()
         self._update_status_metrics()
@@ -1539,27 +1572,57 @@ class MainWindow(QMainWindow):
     def _endpoint_protocol_changed(self, _index: int) -> None:
         self._render_endpoints()
 
+    def _endpoint_selection_changed(
+        self,
+        current: QTreeWidgetItem | None,
+        _previous: QTreeWidgetItem | None,
+    ) -> None:
+        if current is not None:
+            value = current.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(value, AstrillServer):
+                self._endpoint_selected_server_id = value.id
+        self._sync_endpoint_action_ui()
+
     def _render_endpoints(self) -> None:
         if not hasattr(self, "endpoint_tree"):
             return
         query = self.endpoint_search.text().strip().casefold()
         current_id = int(self.router_status.get("astrill_server_id", 0) or 0)
         connected = self.router_status.get("vpn_state") == "up"
-        selected_id = current_id
-        selected_item = self.endpoint_tree.currentItem()
-        if selected_item is not None:
-            selected_server = selected_item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(selected_server, AstrillServer):
-                selected_id = selected_server.id
+        selected_id = self._endpoint_selected_server_id
+        if selected_id is None:
+            selected_id = current_id
         group_by_id: dict[int, str] = {}
         for region_id, servers in self.controller.server_catalog.groups.items():
             for server in servers:
                 group_by_id.setdefault(server.id, region_id)
+        rows: list[EndpointListRow] = []
+        for source_index, server in enumerate(self.controller.server_catalog.servers):
+            region_id = group_by_id.get(server.id, "")
+            region_name = self._region_name(region_id)
+            searchable = f"{server.name} {region_name} {server.id}".casefold()
+            if query and query not in searchable:
+                continue
+            rows.append(
+                EndpointListRow(
+                    source_index=source_index,
+                    server=server,
+                    region_id=region_id,
+                    region_name=region_name,
+                )
+            )
+        rows = list(
+            sort_endpoint_rows(
+                rows,
+                str(self.endpoint_sort.currentData()),
+                self._endpoint_probe_results,
+                self.protocol.currentIndex(),
+            )
+        )
         self.endpoint_tree.clear()
         item_to_select: QTreeWidgetItem | None = None
-        for server in self.controller.server_catalog.servers:
-            if query and query not in server.name.casefold():
-                continue
+        for row in rows:
+            server = row.server
             configured = server.id == current_id
             state = (
                 "Connected"
@@ -1569,7 +1632,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem(
                 [
                     server.name,
-                    self._region_name(group_by_id.get(server.id, "")),
+                    row.region_name,
                     str(server.id),
                     state,
                     str(len(server.nodes)),
@@ -1586,12 +1649,20 @@ class MainWindow(QMainWindow):
         self._sync_endpoint_action_ui()
 
     def _endpoint_probe_cells(self, server: AstrillServer) -> list[str]:
-        cached = self._endpoint_probe_results.get(
+        saved = self._endpoint_probe_results.get(
             (server.id, self.protocol.currentIndex())
         )
-        if cached is None:
+        if saved is None:
             return ["—", "Not tested", "—"]
-        result, checked_at = cached
+        result = saved.result
+        checked_at = self._format_endpoint_probe_time(saved.checked_at)
+        saved_state = assess_saved_endpoint_probe(
+            saved,
+            server,
+            self.protocol.currentIndex(),
+        )
+        if saved_state is SavedProbeState.ENDPOINT_CHANGED:
+            return ["—", "Endpoint changed", checked_at]
         latency = (
             f"{result.latency_ms:.1f} ms"
             if result.status is EndpointProbeStatus.REACHABLE
@@ -1603,18 +1674,28 @@ class MainWindow(QMainWindow):
             EndpointProbeStatus.UNREACHABLE: "No reply",
             EndpointProbeStatus.UNAVAILABLE: "Unavailable",
         }[result.status]
+        if saved_state is SavedProbeState.STALE:
+            reach = "Saved · retest"
         return [latency, reach, checked_at]
 
     def _decorate_endpoint_probe_result(
         self, item: QTreeWidgetItem, server: AstrillServer
     ) -> None:
-        cached = self._endpoint_probe_results.get(
+        saved = self._endpoint_probe_results.get(
             (server.id, self.protocol.currentIndex())
         )
-        if cached is None:
+        if saved is None:
             return
-        result, checked_at = cached
-        if result.status is EndpointProbeStatus.REACHABLE:
+        result = saved.result
+        checked_at = self._format_endpoint_probe_time(saved.checked_at)
+        saved_state = assess_saved_endpoint_probe(
+            saved,
+            server,
+            self.protocol.currentIndex(),
+        )
+        if saved_state is not SavedProbeState.CURRENT:
+            color = COLORS["muted"]
+        elif result.status is EndpointProbeStatus.REACHABLE:
             latency = result.latency_ms or 0.0
             color = (
                 "#0f766e"
@@ -1636,13 +1717,27 @@ class MainWindow(QMainWindow):
             else "No usable mapped target"
         )
         tooltip = (
-            f"Tested from this Windows PC at {checked_at}\n"
+            f"Saved PC test from {checked_at}\n"
             f"Target: {target}\n"
             f"Method: {method}\n"
             f"{result.detail}"
         )
+        if saved_state is SavedProbeState.STALE:
+            tooltip += "\nSaved result is over 24 hours old; retest manually."
+        elif saved_state is SavedProbeState.ENDPOINT_CHANGED:
+            tooltip += (
+                "\nThe applet now advertises a different target; retest manually."
+            )
         for column in (5, 6, 7):
             item.setToolTip(column, tooltip)
+
+    @staticmethod
+    def _format_endpoint_probe_time(checked_at: int) -> str:
+        return (
+            datetime.fromtimestamp(checked_at)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M:%S")
+        )
 
     def _endpoint_probe_selection(self) -> tuple[AstrillServer, ...]:
         scope = self.endpoint_probe_scope.currentData()
@@ -1687,20 +1782,31 @@ class MainWindow(QMainWindow):
 
     def _endpoint_probe_completed(self, value: object) -> None:
         results = tuple(value)  # type: ignore[arg-type]
-        checked_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        checked_at = int(time())
         reachable = 0
         for result in results:
             if not isinstance(result, EndpointProbeResult):
                 continue
             self._endpoint_probe_results[
                 (result.server_id, result.selected_protocol)
-            ] = (result, checked_at)
+            ] = SavedEndpointProbe(result=result, checked_at=checked_at)
             if result.status is EndpointProbeStatus.REACHABLE:
                 reachable += 1
-        self.endpoint_probe_status.setText(
-            f"Manual PC test complete · {reachable}/{len(results)} reachable · "
-            "no DD-WRT commands sent."
-        )
+        try:
+            save_endpoint_probe_cache(
+                self._endpoint_probe_cache_path,
+                self._endpoint_probe_results,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            self.endpoint_probe_status.setText(
+                f"Test complete · {reachable}/{len(results)} reachable · "
+                f"could not save results: {exc}"
+            )
+        else:
+            self.endpoint_probe_status.setText(
+                f"Manual PC test saved · {reachable}/{len(results)} reachable · "
+                "no DD-WRT commands sent."
+            )
         self._render_endpoints()
 
     def _endpoint_probe_finished(self) -> None:
@@ -1709,9 +1815,20 @@ class MainWindow(QMainWindow):
 
     def _clear_endpoint_probe_results(self) -> None:
         self._endpoint_probe_results.clear()
-        self.endpoint_probe_status.setText(
-            "Results cleared · tests run only when you click Test PC latency."
-        )
+        try:
+            save_endpoint_probe_cache(
+                self._endpoint_probe_cache_path,
+                self._endpoint_probe_results,
+            )
+        except OSError as exc:
+            self.endpoint_probe_status.setText(
+                f"Results cleared in this window, but the saved cache could not "
+                f"be removed: {exc}"
+            )
+        else:
+            self.endpoint_probe_status.setText(
+                "Saved results cleared · tests run only when you click Test PC latency."
+            )
         self._render_endpoints()
 
     def _connect_endpoint(self) -> None:
@@ -1797,6 +1914,7 @@ class MainWindow(QMainWindow):
         self.load_endpoints_button.setEnabled(idle)
         self.endpoint_search.setEnabled(idle)
         self.protocol.setEnabled(idle)
+        self.endpoint_sort.setEnabled(idle)
         self.endpoint_tree.setEnabled(idle)
         self.endpoint_probe_scope.setEnabled(idle)
         self.endpoint_probe_button.setEnabled(

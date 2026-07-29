@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Persist validated Windows PC endpoint-latency results in a separate local
+  cache without triggering automatic probes or involving DD-WRT.
+- Add explicit Default, Region, and numeric PC-latency endpoint ordering while
+  retaining selection across filters and marking stale or changed targets for
+  a manual retest.
+
 ## 0.2.4 - 2026-07-29
 
 - Add a dedicated Connection view that mirrors Astrill's endpoint, protocol,

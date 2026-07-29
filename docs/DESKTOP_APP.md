@@ -292,6 +292,11 @@ visible, or all loaded endpoints. It runs only when clicked and opens bounded
 TCP connections from the Windows PC; it sends no command to DD-WRT and never
 switches the router endpoint. The displayed value is TCP-connect latency and
 reachability over the PC's current path, not bandwidth or VPN throughput.
+Results are saved in a validated local sidecar cache and restored without
+network activity when the app restarts. The view marks results older than 24
+hours or tied to a changed endpoint target for manual retesting. Its Sort
+control offers Astrill's default order, region order, and numeric fastest-first
+PC latency order; clearing results removes the saved cache.
 
 ### Router
 

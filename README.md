@@ -123,6 +123,11 @@ connect action changes DD-WRT only; it neither installs a VPN nor changes local
 PC routing. It uses the optional companion so a failed connection can restore
 the router's previous endpoint settings.
 
+Windows saves manual results locally until they are cleared or replaced, shows
+their tested time, and marks old or changed-target results for a manual retest.
+The endpoint list can restore Astrill's default order, group by region, or sort
+current results by numeric PC latency without running another test.
+
 The Astrill view owns native routing, device, interface, DNS, and advanced
 filters. Ubuntu and Windows present human-readable controls backed by an
 explicit NVRAM allowlist. Router state is read at launch and on explicit
