@@ -33,10 +33,11 @@ from .detector import (
 )
 from .installer import EnsureResult, RouterInstaller
 from .launcher import ApplicationLauncher, parse_command
-from .models import MatchKind, Region, RouteTarget, Rule
+from .models import MatchKind, Region, RouteTarget, Rule, Service
 from .native_page import NativeSettingsPage
 from .native_settings import NativeAstrillSettings
 from .router import RouterClient
+from .service_policy import ServiceRouteMode, service_policy_route
 from .store import ConfigStore
 
 APP_ID = "io.github.lachlanchen.AstrillLazyRouter"
@@ -77,6 +78,8 @@ CSS = """
 .catalog-count { color: #68747d; margin-left: 4px; }
 .location-current { background: #edf7f0; }
 .sidebar-status { padding: 12px 16px; border-top: 1px solid #d8dde1; }
+.batch-bar { background: #ffffff; border: 1px solid #d8dde1; border-radius: 6px; padding: 8px 10px; }
+.batch-count { color: #44515a; font-weight: 600; }
 """
 
 
@@ -132,9 +135,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.servers_loading = False
         self.server_groups: dict[str, tuple[AstrillServer, ...]] = {}
         self.clients: list[dict[str, Any]] = []
+        self.selected_service_ids: set[str] = set()
+        self.service_batch_route_mode = ServiceRouteMode.SUGGESTED
         self.busy_count = 0
         self.dirty = False
         self._region_filter = "all"
+        self._updating_service_selection = False
         self._updating_autostart = False
         self._updating_protocol = False
         self._updating_astrill_connection = False
@@ -376,15 +382,23 @@ class MainWindow(Adw.ApplicationWindow):
 
         filters = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.category_dropdown = Gtk.DropDown()
+        self.category_dropdown.set_tooltip_text("Filter by category")
         self.category_dropdown.connect(
             "notify::selected", lambda *_args: self._render_services()
         )
         filters.append(self.category_dropdown)
         self.profile_type_dropdown = Gtk.DropDown()
+        self.profile_type_dropdown.set_tooltip_text("Filter by profile type")
         self.profile_type_dropdown.connect(
             "notify::selected", lambda *_args: self._render_services()
         )
         filters.append(self.profile_type_dropdown)
+        self.service_country_dropdown = Gtk.DropDown()
+        self.service_country_dropdown.set_tooltip_text("Filter by provider country")
+        self.service_country_dropdown.connect(
+            "notify::selected", lambda *_args: self._render_services()
+        )
+        filters.append(self.service_country_dropdown)
         self.service_result_count = Gtk.Label()
         self.service_result_count.set_xalign(1)
         self.service_result_count.set_hexpand(True)
@@ -392,6 +406,71 @@ class MainWindow(Adw.ApplicationWindow):
         filters.append(self.service_result_count)
         content.append(filters)
         self._refresh_service_filters()
+
+        batch = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        batch.add_css_class("batch-bar")
+        self.select_visible_services = Gtk.CheckButton(label="Select visible")
+        self.select_visible_services.set_tooltip_text(
+            "Select every service matching the current filters"
+        )
+        self.select_visible_services.connect(
+            "toggled", self._toggle_visible_service_selection
+        )
+        batch.append(self.select_visible_services)
+        clear_selection = Gtk.Button.new_from_icon_name("edit-clear-all-symbolic")
+        clear_selection.set_tooltip_text("Clear service selection")
+        clear_selection.connect(
+            "clicked", lambda _button: self._clear_service_selection()
+        )
+        batch.append(clear_selection)
+        self.clear_service_selection_button = clear_selection
+        self.service_selection_count = Gtk.Label(label="0 selected")
+        self.service_selection_count.set_xalign(0)
+        self.service_selection_count.set_hexpand(True)
+        self.service_selection_count.add_css_class("batch-count")
+        batch.append(self.service_selection_count)
+
+        route_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        route_box.add_css_class("linked")
+        self.service_batch_route_buttons: dict[ServiceRouteMode, Gtk.ToggleButton] = {}
+        first_route_button: Gtk.ToggleButton | None = None
+        for mode, label in (
+            (ServiceRouteMode.SUGGESTED, "Suggested"),
+            (ServiceRouteMode.DIRECT, "Direct"),
+            (ServiceRouteMode.VPN, "Astrill"),
+        ):
+            button = Gtk.ToggleButton(label=label)
+            button.add_css_class("compact-button")
+            if mode is ServiceRouteMode.DIRECT:
+                button.add_css_class("route-direct")
+            elif mode is ServiceRouteMode.VPN:
+                button.add_css_class("route-vpn")
+            if first_route_button is None:
+                first_route_button = button
+            else:
+                button.set_group(first_route_button)
+            button.connect(
+                "toggled",
+                lambda item, route_mode=mode: self._set_service_batch_route(
+                    item, route_mode
+                ),
+            )
+            route_box.append(button)
+            self.service_batch_route_buttons[mode] = button
+        self.service_batch_route_buttons[ServiceRouteMode.SUGGESTED].set_active(True)
+        route_box.set_valign(Gtk.Align.CENTER)
+        batch.append(route_box)
+        self.add_selected_services_button = _button_with_icon(
+            "Add to Policies",
+            "list-add-symbolic",
+            self._add_selected_services,
+        )
+        self.add_selected_services_button.add_css_class("suggested-action")
+        self.add_selected_services_button.set_tooltip_text(
+            "Add new selected services and update selected existing policies"
+        )
+        batch.append(self.add_selected_services_button)
+        content.append(batch)
 
         self.service_list = Gtk.ListBox()
         self.service_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -713,6 +792,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.refresh_clients()
         if page_id == "locations" and self.servers is None:
             self.load_servers()
+        if page_id == "services":
+            self._render_services()
         if page_id == "astrill" and (
             self.native_settings is None or not self.native_page.dirty
         ):
@@ -843,26 +924,12 @@ class MainWindow(Adw.ApplicationWindow):
         if not hasattr(self, "service_list"):
             return
         _clear_list(self.service_list)
-        query = self.service_search.get_text().strip().casefold()
-        category_index = self.category_dropdown.get_selected()
-        category = self.service_categories[category_index]
-        profile_type_index = self.profile_type_dropdown.get_selected()
-        profile_type = self.service_profile_types[profile_type_index]
         existing = {
-            rule.selector
+            rule.selector: rule
             for rule in self.store.rules
             if rule.match_kind is MatchKind.SERVICE
         }
-        services = [
-            service
-            for service in self.catalog.services
-            if (not query or query in service.search_text)
-            and (category == "all" or service.category == category)
-            and (profile_type == "all" or service.profile_type == profile_type)
-        ]
-        services.sort(
-            key=lambda service: (service.company.casefold(), service.name.casefold())
-        )
+        services = self._filtered_services()
         self.service_result_count.set_label(
             f"{len(services)} of {len(self.catalog.services)}"
         )
@@ -871,34 +938,56 @@ class MainWindow(Adw.ApplicationWindow):
             row.set_use_markup(False)
             row.set_title(service.name)
             row.set_subtitle(
-                f"{service.company} · {service.category} · "
+                f"{service.company} · {service.provider_country} · {service.category} · "
                 f"{service.profile_type.title()} · {len(service.domains)} domains"
             )
+            selected = Gtk.CheckButton()
+            selected.set_tooltip_text("Select for a batch policy action")
+            selected.set_active(service.id in self.selected_service_ids)
+            selected.connect(
+                "toggled",
+                lambda button, service_id=service.id: self._toggle_service_selection(
+                    service_id, button.get_active()
+                ),
+            )
+            row.add_prefix(selected)
             row.add_prefix(
                 Gtk.Image.new_from_icon_name(_category_icon(service.category))
             )
-            default_target = self._incremental_default_target()
+            existing_rule = existing.get(service.id)
+            displayed_target = (
+                existing_rule.target
+                if existing_rule is not None
+                else service.default_route
+            )
             route = Gtk.Label(
-                label="DIRECT" if default_target is RouteTarget.DIRECT else "ASTRILL"
+                label=(
+                    "DIRECT" if displayed_target is RouteTarget.DIRECT else "ASTRILL"
+                )
+            )
+            route.set_tooltip_text(
+                "Current policy route"
+                if existing_rule is not None
+                else "Catalog suggestion"
             )
             route.add_css_class("catalog-route")
             route.add_css_class(
                 "catalog-direct"
-                if default_target is RouteTarget.DIRECT
+                if displayed_target is RouteTarget.DIRECT
                 else "catalog-vpn"
             )
             row.add_suffix(route)
             add = Gtk.Button.new_from_icon_name(
                 "object-select-symbolic"
-                if service.id in existing
+                if existing_rule is not None
                 else "list-add-symbolic"
             )
             add.set_tooltip_text(
                 "Policy already added"
-                if service.id in existing
+                if existing_rule is not None
                 else "Add service policy"
             )
-            add.set_sensitive(service.id not in existing)
+            add.set_sensitive(existing_rule is None)
             add.set_valign(Gtk.Align.CENTER)
             add.connect(
                 "clicked",
@@ -908,13 +997,25 @@ class MainWindow(Adw.ApplicationWindow):
             self.service_list.append(row)
         if not services:
             self.service_list.append(
-                _empty_row("No matching services", "Try a company name or domain.")
+                _empty_row(
+                    "No matching services",
+                    "Change the country, category, profile type, or search text.",
+                )
             )
+        self._update_service_batch_controls(services)
 
     def _refresh_service_filters(self) -> None:
         self.service_categories = [
             "all",
             *sorted({item.category for item in self.catalog.services}),
+        ]
+        self.service_profile_types = ["all", "company", "app", "website"]
+        self.service_countries = [
+            "all",
+            *sorted(
+                {item.provider_country for item in self.catalog.services},
+                key=str.casefold,
+            ),
         ]
         self.category_dropdown.set_model(
             Gtk.StringList.new(
@@ -925,11 +1026,164 @@ class MainWindow(Adw.ApplicationWindow):
             )
         )
         self.category_dropdown.set_selected(0)
-        self.service_profile_types = ["all", "company", "app", "website"]
         self.profile_type_dropdown.set_model(
             Gtk.StringList.new(["All profiles", "Companies", "Apps", "Websites"])
         )
         self.profile_type_dropdown.set_selected(0)
+        self.service_country_dropdown.set_model(
+            Gtk.StringList.new(["All countries", *self.service_countries[1:]])
+        )
+        self.service_country_dropdown.set_selected(0)
+        self.selected_service_ids.intersection_update(
+            service.id for service in self.catalog.services
+        )
+
+    def _filtered_services(self) -> list[Service]:
+        query = self.service_search.get_text().strip().casefold()
+        category = self.service_categories[self.category_dropdown.get_selected()]
+        profile_type = self.service_profile_types[
+            self.profile_type_dropdown.get_selected()
+        ]
+        country = self.service_countries[self.service_country_dropdown.get_selected()]
+        services = [
+            service
+            for service in self.catalog.services
+            if (not query or query in service.search_text)
+            and (category == "all" or service.category == category)
+            and (profile_type == "all" or service.profile_type == profile_type)
+            and (country == "all" or service.provider_country == country)
+        ]
+        services.sort(
+            key=lambda service: (service.company.casefold(), service.name.casefold())
+        )
+        return services
+
+    def _toggle_service_selection(self, service_id: str, selected: bool) -> None:
+        if self._updating_service_selection:
+            return
+        if selected:
+            self.selected_service_ids.add(service_id)
+        else:
+            self.selected_service_ids.discard(service_id)
+        self._update_service_batch_controls()
+
+    def _toggle_visible_service_selection(self, button: Gtk.CheckButton) -> None:
+        if self._updating_service_selection:
+            return
+        visible_ids = {service.id for service in self._filtered_services()}
+        if button.get_active():
+            self.selected_service_ids.update(visible_ids)
+        else:
+            self.selected_service_ids.difference_update(visible_ids)
+        self._render_services()
+
+    def _clear_service_selection(self) -> None:
+        self.selected_service_ids.clear()
+        self._render_services()
+
+    def _update_service_batch_controls(
+        self, visible_services: list[Service] | None = None
+    ) -> None:
+        if not hasattr(self, "select_visible_services"):
+            return
+        services = (
+            self._filtered_services() if visible_services is None else visible_services
+        )
+        visible_ids = {service.id for service in services}
+        selected_visible = visible_ids & self.selected_service_ids
+        all_visible_selected = bool(visible_ids) and selected_visible == visible_ids
+        partially_selected = bool(selected_visible) and not all_visible_selected
+        self._updating_service_selection = True
+        self.select_visible_services.set_inconsistent(partially_selected)
+        self.select_visible_services.set_active(all_visible_selected)
+        self._updating_service_selection = False
+        count = len(self.selected_service_ids)
+        self.service_selection_count.set_label(
+            f"{count} {'service' if count == 1 else 'services'} selected"
+        )
+        self.clear_service_selection_button.set_sensitive(count > 0)
+        self.add_selected_services_button.set_sensitive(count > 0)
+
+    def _set_service_batch_route(
+        self, button: Gtk.ToggleButton, mode: ServiceRouteMode
+    ) -> None:
+        if button.get_active():
+            self.service_batch_route_mode = mode
+
+    def _add_selected_services(self, _button: Gtk.Button | None = None) -> None:
+        selected_services = [
+            service
+            for service in self.catalog.services
+            if service.id in self.selected_service_ids
+        ]
+        if not selected_services:
+            self.toast("Select at least one service")
+            return
+
+        existing = {
+            rule.selector: rule
+            for rule in self.store.rules
+            if rule.match_kind is MatchKind.SERVICE
+        }
+        vpn_region_ids = {region.id for region in self._vpn_regions()}
+        added = 0
+        updated = 0
+        for service in selected_services:
+            rule = existing.get(service.id)
+            current_region: str | None = None
+            if rule is not None:
+                current_region = rule.region
+                if current_region == "direct":
+                    remembered = str(rule.metadata.get("country_override", ""))
+                    current_region = (
+                        remembered if remembered in vpn_region_ids else None
+                    )
+            target, region = service_policy_route(
+                service,
+                self.service_batch_route_mode,
+                current_region=current_region,
+            )
+            if rule is None:
+                rule = Rule.create(
+                    name=service.name,
+                    match_kind=MatchKind.SERVICE,
+                    selector=service.id,
+                    target=target,
+                    region=region,
+                    priority=self._next_priority(),
+                )
+                if service.id in MINIMUM_BYPASS_SERVICES:
+                    rule.metadata["minimum_bypass"] = True
+                self.store.rules.append(rule)
+                existing[service.id] = rule
+                added += 1
+                continue
+
+            if rule.target is target and rule.region == region:
+                continue
+            if target is RouteTarget.DIRECT and rule.region != "direct":
+                rule.metadata["country_override"] = rule.region
+            elif target is RouteTarget.VPN:
+                rule.metadata["country_override"] = region
+            rule.target = target
+            rule.region = region
+            rule.metadata.pop("route_recommendation", None)
+            updated += 1
+
+        self.selected_service_ids.clear()
+        if not added and not updated:
+            self._render_services()
+            self.toast("Selected policies already use this route")
+            return
+        self._changed()
+        self._render_rules()
+        self._render_services()
+        summary = []
+        if added:
+            summary.append(f"{added} added")
+        if updated:
+            summary.append(f"{updated} updated")
+        self.toast(f"Service policies: {', '.join(summary)}")
 
     def _render_devices(self) -> None:
         if not hasattr(self, "device_list"):
@@ -1292,6 +1546,7 @@ class MainWindow(Adw.ApplicationWindow):
         rule.metadata.pop("route_recommendation", None)
         dropdown.set_selected(region_ids.index(rule.region))
         self._changed()
+        self._render_services()
         self._update_recommendation_controls()
 
     def _set_rule_region(self, rule: Rule, region: str) -> None:
@@ -1322,13 +1577,13 @@ class MainWindow(Adw.ApplicationWindow):
         ):
             self.toast("This service already has a policy")
             return
-        target = self._incremental_default_target()
+        target, region = service_policy_route(service, ServiceRouteMode.SUGGESTED)
         rule = Rule.create(
             name=service.name,
             match_kind=MatchKind.SERVICE,
             selector=service.id,
             target=target,
-            region="direct" if target is RouteTarget.DIRECT else "active-astrill",
+            region=region,
             priority=self._next_priority(),
         )
         if service.id in MINIMUM_BYPASS_SERVICES:
@@ -1707,6 +1962,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.save()
         self.dirty = True
         self._render_rules()
+        self._render_services()
         self._render_countries()
         self.apply_configuration()
         self.toast(

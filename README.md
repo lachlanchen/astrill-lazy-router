@@ -16,8 +16,9 @@ The current deployment provides:
 - one-click Direct/Astrill path detection, per-policy recommendations, and
   explicit batch apply;
 - a companion page at DD-WRT `/MyPage.asp?3`;
-- an extension catalog with 261 company, app, and website profiles across 19
-  categories and 14 region groups;
+- an extension catalog with 261 company, app, and website profiles, provider
+  country/category/type filters, mixed route suggestions, and batch policy
+  actions;
 - guarded A/B policy activation, rollback, watchdog recovery, and fail-closed
   VPN routes;
 - desktop login startup and automatic companion installation or runtime repair;

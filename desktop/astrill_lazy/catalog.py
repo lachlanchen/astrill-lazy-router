@@ -148,15 +148,22 @@ def _load_catalog_extension(
 
     services: tuple[Service, ...] = ()
     regions: tuple[Region, ...] = ()
+    company_countries = _load_company_countries(root, extension.entrypoints)
     if "services" in extension.entrypoints:
         service_items: list[Service] = []
         for path in _entrypoint_paths(root, extension.entrypoints["services"]):
             services_document = _read_json(path)
             if services_document.get("schema_version") != 1:
                 raise ValueError("unsupported services catalog schema")
-            service_items.extend(
-                Service.from_dict(item) for item in services_document["services"]
-            )
+            for item in services_document["services"]:
+                value = dict(item)
+                value.setdefault(
+                    "provider_country",
+                    company_countries.get(
+                        str(value.get("company", "")), "Other / Global"
+                    ),
+                )
+                service_items.append(Service.from_dict(value))
         services = tuple(service_items)
     if "regions" in extension.entrypoints:
         region_items: list[Region] = []
@@ -171,6 +178,40 @@ def _load_catalog_extension(
     _ensure_unique((item.id for item in services), "service")
     _ensure_unique((item.id for item in regions), "region")
     return services, regions
+
+
+def _load_company_countries(
+    root: Path, entrypoints: dict[str, tuple[str, ...]]
+) -> dict[str, str]:
+    company_countries: dict[str, str] = {}
+    for path in _entrypoint_paths(root, entrypoints.get("service_countries", ())):
+        document = _read_json(path)
+        if document.get("schema_version") != 1:
+            raise ValueError("unsupported service country catalog schema")
+        countries = document.get("countries")
+        if not isinstance(countries, dict):
+            raise TypeError("service country catalog must contain a countries object")
+        for raw_country, raw_companies in countries.items():
+            country = str(raw_country).strip()
+            if not country:
+                raise ValueError("service country name cannot be empty")
+            if (
+                not isinstance(raw_companies, list)
+                or not raw_companies
+                or not all(
+                    isinstance(item, str) and item.strip() for item in raw_companies
+                )
+            ):
+                raise ValueError(
+                    f"service country {country!r} must contain company names"
+                )
+            for company in raw_companies:
+                if company in company_countries:
+                    raise ValueError(
+                        f"company {company!r} appears in more than one service country"
+                    )
+                company_countries[company] = country
+    return company_countries
 
 
 def _read_json(path: Path) -> dict:

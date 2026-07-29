@@ -22,6 +22,7 @@ example-catalog/
   manifest.json
   services-core.json
   services-extra.json
+  service-countries.json
   regions.json
 ```
 
@@ -43,6 +44,7 @@ example-catalog/
       "services-core.json",
       "services-extra.json"
     ],
+    "service_countries": "service-countries.json",
     "regions": "regions.json"
   }
 }
@@ -60,6 +62,7 @@ or `regions`; duplicate JSON keys and duplicate IDs are rejected.
   "id": "example-service",
   "name": "Example Service",
   "company": "Example Company",
+  "provider_country": "Singapore",
   "category": "Work",
   "profile_type": "app",
   "default_route": "vpn",
@@ -84,6 +87,25 @@ route/region combination is validated before the extension loads. A service
 can contain at most 16 unique seed hosts and 16 unique IPv4 endpoint networks.
 Literal networks are useful for documented signaling or relay fallbacks that
 do not consistently publish a hostname.
+
+`provider_country` drives the Services-page country filter and is independent
+of `preferred_region`, which is a routing preference. An extension can put it
+on each service or classify companies in one optional `service_countries`
+entrypoint:
+
+```json
+{
+  "schema_version": 1,
+  "countries": {
+    "Japan": ["Example Company"],
+    "Other / Global": ["Global Example"]
+  }
+}
+```
+
+An explicit service value wins over the company classification. Services from
+older extensions without either value remain available under
+`Other / Global`. A company may appear in only one country group per extension.
 
 Run the full catalog audit with:
 

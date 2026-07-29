@@ -36,6 +36,7 @@ where = ["desktop"]
   "extensions/core-catalog/services-global-communication.json",
   "extensions/core-catalog/services-global-daily.json",
   "extensions/core-catalog/services-china.json",
+  "extensions/core-catalog/service-countries.json",
   "extensions/core-catalog/regions.json"
 ]
 "share/astrill-lazy/router" = [

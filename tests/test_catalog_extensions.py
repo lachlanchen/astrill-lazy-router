@@ -48,10 +48,61 @@ def test_user_extension_is_discovered_and_merged(
     assert "example-catalog" in discover_extensions()
     catalog = load_catalog(["core-catalog", "example-catalog"])
     assert catalog.services_by_id["example-service"].domains == ("example.net",)
+    assert (
+        catalog.services_by_id["example-service"].provider_country == "Other / Global"
+    )
     assert [item.id for item in catalog.extensions] == [
         "core-catalog",
         "example-catalog",
     ]
+
+
+def test_extension_can_classify_services_by_company_country(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    extension = tmp_path / "country-catalog"
+    extension.mkdir()
+    _write_json(
+        extension / "manifest.json",
+        {
+            "schema_version": 1,
+            "id": "country-catalog",
+            "name": "Country Catalog",
+            "entrypoints": {
+                "services": "services.json",
+                "service_countries": "countries.json",
+            },
+        },
+    )
+    _write_json(
+        extension / "services.json",
+        {
+            "schema_version": 1,
+            "services": [
+                {
+                    "id": "country-service",
+                    "name": "Country Service",
+                    "company": "Country Company",
+                    "category": "Test",
+                    "default_route": "vpn",
+                    "preferred_region": "active-astrill",
+                    "domains": ["country.example"],
+                }
+            ],
+        },
+    )
+    _write_json(
+        extension / "countries.json",
+        {
+            "schema_version": 1,
+            "countries": {"Japan": ["Country Company"]},
+        },
+    )
+    monkeypatch.setenv("ASTRILL_LAZY_EXTENSION_PATH", str(tmp_path))
+
+    catalog = load_catalog(["core-catalog", "country-catalog"])
+
+    assert catalog.services_by_id["country-service"].provider_country == "Japan"
 
 
 def test_missing_enabled_extension_is_an_error() -> None:

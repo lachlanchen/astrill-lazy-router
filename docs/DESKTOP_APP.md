@@ -98,9 +98,16 @@ minimum Direct recommendations. Detection never changes routing;
 ### Services
 
 The 261-profile catalog can be searched by service, company, alias, or seed
-domain and filtered by category and profile type. It includes Chinese and
-global vendors, AI tools, development services, media, messaging, work, and
-common daily services.
+domain and filtered by provider country, category, and profile type. Catalog
+rows show the actual route for an existing policy and the mixed catalog
+suggestion otherwise. `Select visible` selects the current combined filter
+result. The Suggested, Direct, and Astrill batch modes then add new selections
+or update existing selected policies in one saved transaction.
+
+Suggested mode preserves each profile's catalog route and preferred endpoint
+country. Direct forces every selected service to WAN. Astrill preserves an
+existing VPN country, uses the catalog preference for a new VPN service, and
+uses the active Astrill endpoint when a Direct-only profile has no VPN country.
 
 ### Countries
 

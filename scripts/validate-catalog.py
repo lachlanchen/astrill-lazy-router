@@ -59,6 +59,7 @@ def main() -> int:
     catalog = load_catalog()
     categories = Counter(item.category for item in catalog.services)
     profile_types = Counter(item.profile_type for item in catalog.services)
+    provider_countries = Counter(item.provider_country for item in catalog.services)
     all_domains = [domain for service in catalog.services for domain in service.domains]
     domain_use = Counter(all_domains)
     unique_domains = sorted(domain_use)
@@ -75,6 +76,12 @@ def main() -> int:
     print(
         "categories="
         + ",".join(f"{key}:{categories[key]}" for key in sorted(categories))
+    )
+    print(
+        "provider_countries="
+        + ",".join(
+            f"{key}:{provider_countries[key]}" for key in sorted(provider_countries)
+        )
     )
 
     if not arguments.dns:

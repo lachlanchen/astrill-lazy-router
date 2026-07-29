@@ -16,6 +16,7 @@
       "services-global-daily.json",
       "services-china.json"
     ],
+    "service_countries": "service-countries.json",
     "regions": "regions.json"
   }
 }

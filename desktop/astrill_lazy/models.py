@@ -40,6 +40,7 @@ class Service:
     id: str
     name: str
     company: str
+    provider_country: str
     category: str
     profile_type: str
     default_route: RouteTarget
@@ -55,6 +56,7 @@ class Service:
             id=str(value["id"]),
             name=str(value["name"]),
             company=str(value["company"]),
+            provider_country=str(value.get("provider_country", "Other / Global")),
             category=str(value["category"]),
             profile_type=str(value.get("profile_type", "app")),
             default_route=RouteTarget(value["default_route"]),
@@ -72,10 +74,12 @@ class Service:
         if (
             not self.name.strip()
             or not self.company.strip()
+            or not self.provider_country.strip()
             or not self.category.strip()
         ):
             raise ValueError(
-                f"service {self.id!r} has an empty name, company, or category"
+                f"service {self.id!r} has an empty name, company, provider "
+                "country, or category"
             )
         if self.profile_type not in {"company", "app", "website"}:
             raise ValueError(
@@ -117,6 +121,7 @@ class Service:
             [
                 self.name,
                 self.company,
+                self.provider_country,
                 self.category,
                 self.profile_type,
                 *self.aliases,

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add provider-country filtering, persistent multi-selection, and Suggested,
+  Direct, or Astrill batch actions to the Services catalog.
+- Restore mixed per-service route suggestions while showing the actual route
+  for services that already have policies.
 - Add a strict device-local policy schema and read-only planner for Direct,
   fixed-tunnel, and health-selected three-endpoint routes.
 - Add application, service, domain, IP network, and ISO-country matching with
