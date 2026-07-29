@@ -37,7 +37,7 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "insufficient NVRAM headroom" in controller
     assert "watchdog_pids | grep -qx" in controller
     assert "cleanup_watchdog_pid" in controller
-    assert 'refresh_mode=${3:-0}' in controller
+    assert "refresh_mode=${3:-0}" in controller
     assert 'apply_runtime "$CURRENT" 1' in controller
     assert '"$RESOLVED"' in controller
     assert 'kill -9 "$pid"' in controller

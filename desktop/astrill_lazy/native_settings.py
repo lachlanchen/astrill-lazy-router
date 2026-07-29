@@ -92,12 +92,8 @@ MODE_KEYS = {
     "astrill_ifmode": frozenset({"0", "1", "2"}),
     "astrill_vlanmode": frozenset({"0", "1", "2"}),
     "astrill_iplistext": frozenset({"0", "1"}),
-    "astrill_dnsserver": frozenset(
-        {"0", "1", "2", "3", "7", "8", "9", "254", "255"}
-    ),
-    "astrill_cipher": frozenset(
-        {"default", "AES-128-CBC", "AES-256-CBC", "none"}
-    ),
+    "astrill_dnsserver": frozenset({"0", "1", "2", "3", "7", "8", "9", "254", "255"}),
+    "astrill_cipher": frozenset({"default", "AES-128-CBC", "AES-256-CBC", "none"}),
 }
 
 MAC_RE = re.compile(r"^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
@@ -140,9 +136,7 @@ class NativeAstrillSettings:
 
     @classmethod
     def from_dict(cls, values: dict[str, Any]) -> NativeAstrillSettings:
-        normalized = {
-            key: str(values.get(key, "")) for key in SAFE_NATIVE_ASTRILL_KEYS
-        }
+        normalized = {key: str(values.get(key, "")) for key in SAFE_NATIVE_ASTRILL_KEYS}
         return cls(normalized)
 
     def get(self, key: str, default: str = "") -> str:
@@ -192,9 +186,7 @@ def binary_native_mode(default: RouteTarget, *, has_exceptions: bool) -> str:
     return "2" if has_exceptions else "0"
 
 
-def site_policy_changes(
-    default: RouteTarget, raw_entries: str
-) -> dict[str, str]:
+def site_policy_changes(default: RouteTarget, raw_entries: str) -> dict[str, str]:
     entries = normalize_site_entries(raw_entries)
     return {
         "astrill_routingmode": binary_native_mode(
@@ -213,9 +205,7 @@ def device_policy_changes(
         unique[device.mac] = device
     ordered = sorted(unique.values(), key=lambda item: (item.address, item.mac))
     return {
-        "astrill_devmode": binary_native_mode(
-            default, has_exceptions=bool(ordered)
-        ),
+        "astrill_devmode": binary_native_mode(default, has_exceptions=bool(ordered)),
         "astrill_devices": ";".join(item.to_native() for item in ordered),
     }
 
@@ -289,10 +279,11 @@ def normalize_native_changes(changes: dict[str, Any]) -> dict[str, str]:
                 raise ValueError("Internet MTU must be a number") from exc
             if not 576 <= mtu <= 1500:
                 raise ValueError("Internet MTU must be between 576 and 1500")
-        if (
-            key in {"astrill_iflist", "astrill_ifexlist", "astrill_vlanlist"}
-            and not INTERFACE_LIST_RE.fullmatch(value)
-        ):
+        if key in {
+            "astrill_iflist",
+            "astrill_ifexlist",
+            "astrill_vlanlist",
+        } and not INTERFACE_LIST_RE.fullmatch(value):
             raise ValueError(f"{key} contains an invalid interface name")
         if key == "astrill_userdns" and value:
             addresses = value.split()
@@ -315,8 +306,7 @@ def _valid_site_selector(value: str) -> bool:
     if "-" in value:
         try:
             start, end = (
-                ipaddress.IPv4Address(item.strip())
-                for item in value.split("-", 1)
+                ipaddress.IPv4Address(item.strip()) for item in value.split("-", 1)
             )
         except ValueError:
             return False

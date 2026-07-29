@@ -92,7 +92,9 @@ class Service:
         if len(self.networks) > 16:
             raise ValueError(f"service {self.id!r} has more than 16 endpoint networks")
         if len(set(self.networks)) != len(self.networks):
-            raise ValueError(f"service {self.id!r} contains duplicate endpoint networks")
+            raise ValueError(
+                f"service {self.id!r} contains duplicate endpoint networks"
+            )
         for network in self.networks:
             validate_network(network)
         if any(not alias.strip() for alias in self.aliases):

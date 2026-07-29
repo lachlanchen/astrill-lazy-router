@@ -49,14 +49,16 @@ def test_route_recommendation_requires_a_meaningful_improvement() -> None:
 
 def test_route_recommendation_keeps_current_when_paths_cannot_be_compared() -> None:
     direct_only = RouteProbe("example.com", "203.0.113.1", 35.0, None)
-    assert recommend_target(
-        direct_only, current=RouteTarget.VPN
-    ) == (RouteTarget.VPN, "Paths could not be compared")
+    assert recommend_target(direct_only, current=RouteTarget.VPN) == (
+        RouteTarget.VPN,
+        "Paths could not be compared",
+    )
 
     no_probe = RouteProbe("example.com", "", None, None)
-    assert recommend_target(
-        no_probe, current=RouteTarget.VPN
-    ) == (RouteTarget.VPN, "No reliable probe")
+    assert recommend_target(no_probe, current=RouteTarget.VPN) == (
+        RouteTarget.VPN,
+        "No reliable probe",
+    )
 
 
 def test_service_profile_prevents_latency_only_access_regression() -> None:

@@ -9,9 +9,7 @@ from .catalog import Catalog
 from .models import MatchKind, RouteTarget, Rule, validate_domain
 from .router import RouterClient
 
-MINIMUM_BYPASS_SERVICES = frozenset(
-    {"uu-remote", "wechat", "taobao", "meituan"}
-)
+MINIMUM_BYPASS_SERVICES = frozenset({"uu-remote", "wechat", "taobao", "meituan"})
 
 
 @dataclass(frozen=True)
@@ -84,9 +82,7 @@ def detect_rules(
     return recommendations
 
 
-def probe_domains(
-    router: RouterClient, domains: list[str]
-) -> dict[str, RouteProbe]:
+def probe_domains(router: RouterClient, domains: list[str]) -> dict[str, RouteProbe]:
     unique = tuple(dict.fromkeys(domain.rstrip(".").lower() for domain in domains))
     for domain in unique:
         validate_domain(domain)

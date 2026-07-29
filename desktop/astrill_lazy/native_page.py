@@ -150,8 +150,7 @@ class NativeSettingsPage(Gtk.Box):
                 value for value in settings.get("astrill_favlist").split(",") if value
             ]
             self.favorites_row.set_subtitle(
-                f"{len(favorites)} saved endpoint"
-                f"{'' if len(favorites) == 1 else 's'}"
+                f"{len(favorites)} saved endpoint{'' if len(favorites) == 1 else 's'}"
             )
             compiled = settings.get("astrill_iplist").split()
             self.compiled_sites_row.set_subtitle(
@@ -324,15 +323,11 @@ class NativeSettingsPage(Gtk.Box):
         self.wifi_default.connect(
             "notify::selected", lambda *_args: self._mark_wifi_dirty()
         )
-        self.wifi_exceptions.connect(
-            "changed", lambda *_args: self._mark_wifi_dirty()
-        )
+        self.wifi_exceptions.connect("changed", lambda *_args: self._mark_wifi_dirty())
         self.vlan_default.connect(
             "notify::selected", lambda *_args: self._mark_vlan_dirty()
         )
-        self.vlan_exceptions.connect(
-            "changed", lambda *_args: self._mark_vlan_dirty()
-        )
+        self.vlan_exceptions.connect("changed", lambda *_args: self._mark_vlan_dirty())
         self.dmz_device.connect("changed", lambda *_args: self._mark_dirty())
 
     def _build_dns(self) -> None:
@@ -462,10 +457,14 @@ class NativeSettingsPage(Gtk.Box):
 
         self._device_controls = []
         if not devices:
-            self.device_list.append(_empty_row("No devices", "No native device records"))
+            self.device_list.append(
+                _empty_row("No devices", "No native device records")
+            )
             return
         policy = self.settings.device_policy
-        for device in sorted(devices.values(), key=lambda item: (item.address, item.mac)):
+        for device in sorted(
+            devices.values(), key=lambda item: (item.address, item.mac)
+        ):
             row = _control_row(device.name, f"{device.address} · {device.mac}")
             control = _route_dropdown()
             target = policy.exception if device.mac in selected else policy.default
@@ -478,7 +477,10 @@ class NativeSettingsPage(Gtk.Box):
             self._device_controls.append((device, control))
 
     def _update_site_title(self, policy: EffectivePolicy) -> None:
-        if self.settings is not None and self.settings.integer("astrill_routingmode") == 0:
+        if (
+            self.settings is not None
+            and self.settings.integer("astrill_routingmode") == 0
+        ):
             title = "Stored Website List"
         elif policy.automatic_mode is not None:
             title = "Native Automatic Website List"
@@ -541,7 +543,11 @@ def _filter_policy(mode: int) -> EffectivePolicy:
 
 def _option_index(options: tuple[tuple[str, str], ...], value: str) -> int:
     return next(
-        (index for index, (candidate, _label) in enumerate(options) if candidate == value),
+        (
+            index
+            for index, (candidate, _label) in enumerate(options)
+            if candidate == value
+        ),
         0,
     )
 

@@ -41,8 +41,7 @@ example.com
     assert changes["astrill_routingmode"] == "2"
     assert changes["astrill_iplistraw"] == normalize_site_entries(raw)
     networks = [
-        ipaddress.IPv4Network(value)
-        for value in changes["astrill_iplist"].split()
+        ipaddress.IPv4Network(value) for value in changes["astrill_iplist"].split()
     ]
     assert ipaddress.IPv4Network("192.0.2.8/31") in networks
     assert ipaddress.IPv4Network("198.51.100.4/30") in networks

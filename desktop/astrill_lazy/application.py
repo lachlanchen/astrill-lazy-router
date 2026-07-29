@@ -1288,9 +1288,7 @@ class MainWindow(Adw.ApplicationWindow):
             rule.region = "direct"
         elif rule.region == "direct":
             remembered = str(rule.metadata.get("country_override", "active-astrill"))
-            rule.region = (
-                remembered if remembered in region_ids else "active-astrill"
-            )
+            rule.region = remembered if remembered in region_ids else "active-astrill"
         rule.metadata.pop("route_recommendation", None)
         dropdown.set_selected(region_ids.index(rule.region))
         self._changed()
@@ -1627,8 +1625,7 @@ class MainWindow(Adw.ApplicationWindow):
         candidates = [
             rule
             for rule in self.store.rules
-            if rule.enabled
-            and rule.match_kind in {MatchKind.SERVICE, MatchKind.DOMAIN}
+            if rule.enabled and rule.match_kind in {MatchKind.SERVICE, MatchKind.DOMAIN}
         ]
         if not candidates:
             self.toast("No enabled service or website policies to detect")
@@ -1641,7 +1638,10 @@ class MainWindow(Adw.ApplicationWindow):
             return detect_rules(self.router, candidates, self.catalog)
 
         def success(recommendations: list[RouteRecommendation]) -> None:
-            by_id = {recommendation.rule_id: recommendation for recommendation in recommendations}
+            by_id = {
+                recommendation.rule_id: recommendation
+                for recommendation in recommendations
+            }
             for rule in self.store.rules:
                 recommendation = by_id.get(rule.id)
                 if recommendation is None:
@@ -1652,7 +1652,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.store.save()
             self._render_rules()
             changes = sum(
-                recommendation.target is not self._rule_by_id(recommendation.rule_id).target
+                recommendation.target
+                is not self._rule_by_id(recommendation.rule_id).target
                 for recommendation in recommendations
             )
             if changes:
@@ -1671,15 +1672,11 @@ class MainWindow(Adw.ApplicationWindow):
             "Network detection failed",
         )
 
-    def apply_route_recommendations(
-        self, _button: Gtk.Button | None = None
-    ) -> None:
+    def apply_route_recommendations(self, _button: Gtk.Button | None = None) -> None:
         recommendations = [
             (rule, value)
             for rule in self.store.rules
-            if isinstance(
-                (value := rule.metadata.get("route_recommendation")), dict
-            )
+            if isinstance((value := rule.metadata.get("route_recommendation")), dict)
             and not value.get("applied")
         ]
         if not recommendations:
@@ -1713,8 +1710,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_countries()
         self.apply_configuration()
         self.toast(
-            f"Applying {changed} recommended route change"
-            f"{'' if changed == 1 else 's'}"
+            f"Applying {changed} recommended route change{'' if changed == 1 else 's'}"
         )
 
     def _rule_by_id(self, rule_id: str) -> Rule:
@@ -1729,9 +1725,7 @@ class MainWindow(Adw.ApplicationWindow):
             for rule in self.store.rules
         )
         idle = self.busy_count == 0
-        self.detect_routes_button.set_sensitive(
-            self.store.companion_enabled and idle
-        )
+        self.detect_routes_button.set_sensitive(self.store.companion_enabled and idle)
         self.apply_recommendations_button.set_sensitive(
             self.store.companion_enabled and idle and pending
         )
