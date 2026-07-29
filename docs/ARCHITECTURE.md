@@ -95,15 +95,20 @@ verifies its MD5 value using tools available in this firmware, extracts it, and
 starts the controller. The host installer also records SHA-256 for release
 verification.
 
-The desktop reconciles the companion at launch and every 60 seconds. It first
-reads status over SSH. A matching version with its jump and watchdog present is
-left untouched; a stopped current runtime may be started in place; and a
-current package can be reconstructed from its stored bootstrap without a
-rewrite. A missing, outdated, fingerprint-mismatched, or non-repairable package
-only opens the Install/Upgrade confirmation. The monitor cannot invoke the
-NVRAM installer, preventing silent or repeated package writes. This lifecycle
-is separate from Astrill connection management and does not change
-`astrill_autostart`.
+At launch and every 60 seconds, one read-only SSH snapshot carries native
+status, allowlisted native settings, companion markers, and companion status.
+A matching version with its jump and watchdog present needs no further router
+call. Detected degradation enters the fuller reconciliation path: a stopped
+current runtime may be started in place and a current package can be
+reconstructed from its stored bootstrap without a rewrite. A missing, outdated,
+fingerprint-mismatched, or non-repairable package only opens the Install/Upgrade
+confirmation. The monitor cannot invoke the NVRAM installer, preventing silent
+or repeated package writes. This lifecycle is separate from Astrill connection
+management and does not change `astrill_autostart`.
+
+The applet endpoint payload is a separate, larger read. Startup queues it only
+after the health snapshot completes instead of opening both SSH sessions
+concurrently.
 
 ## Native Connection Mirror
 
@@ -121,10 +126,10 @@ native-only mode, the desktop stops an active tunnel, writes the complete
 selection, starts it again, and restores both the prior values and active
 session if startup fails.
 
-Startup and the 60-second monitor read status and settings in both companion
-and native-only modes. Clean controls follow router-side applet changes.
-Unsaved desktop edits retain their baseline and expose a reload conflict when
-the router changes concurrently.
+The combined startup and 60-second snapshots read status and settings in both
+companion and native-only modes. Clean controls follow router-side applet
+changes. Unsaved desktop edits retain their baseline and expose a reload
+conflict when the router changes concurrently.
 
 `Restore Astrill Only` records native tunnel state, removes all
 companion-owned runtime and persistent objects, audits that cleanup, and then

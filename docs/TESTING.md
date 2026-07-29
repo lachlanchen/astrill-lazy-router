@@ -18,9 +18,9 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-77 tests passed
+95 tests passed
 Ruff: all checks passed
-Catalog: 261 profiles, 649/649 unique seed hosts resolved to IPv4
+Catalog: 261 profiles, 650/650 unique seed hosts resolved to IPv4
 ShellCheck: no findings
 Desktop entry: valid
 AppStream metadata: valid
@@ -116,6 +116,31 @@ The following checks were performed against the Linksys E4200:
   read-only SSH;
 - a read-only GTK run showing the safety banner, disabled native/router write
   controls, and the companion-free Devices inventory.
+- one combined healthy monitor snapshot carrying 34 native settings plus
+  native and companion health in a single SSH session.
+
+### 2026-07-29 UU And Endpoint Check
+
+The active Ubuntu UU/GameViewer server flow was
+`192.168.1.100 -> 34.95.122.33:443`. The enabled `UU Remote -> Direct` rule had
+no source restriction, so it applied to every LAN device. A controlled HTTPS
+probe increased both its Direct mark and return rules from 0 to 22 packets.
+Policy table `213` pointed to the WAN interface while Astrill table `212`
+pointed to `tun0`; the matching traffic therefore bypassed Astrill rather than
+merely matching a displayed GUI rule.
+
+Ubuntu and macOS simultaneously observed the same VPN egress while the router
+was connected to Los Angeles A with RouterPro UDP:
+
+| Client | 1.1.1.1 average | Loss | Download | Upload |
+| --- | ---: | ---: | ---: | ---: |
+| Ubuntu | 173.3 ms | 20% | 8.17 Mbit/s | 7.80 Mbit/s |
+| macOS | 173.8 ms | 10% | 7.14 Mbit/s | 5.21 Mbit/s |
+
+Throughput used sequential Cloudflare 25 MB download and 10 MB upload probes.
+These are a point-in-time path check, not a server capacity benchmark. The
+matching UU rule covers catalogued destinations; a newly introduced UU
+hostname or address still requires a catalog update before it can bypass.
 
 The bootstrap was exercised directly, during multiple upgrades, and through a
 physical reboot. Astrill was later connected using its own upstream state while

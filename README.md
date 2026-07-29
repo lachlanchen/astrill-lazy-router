@@ -118,8 +118,8 @@ disconnected; a changed connected session uses a confirmed, verified
 The Endpoints view remains the searchable country-grouped browser and quick
 connect surface. The Astrill view owns native routing, device, interface, DNS,
 and advanced filters. Router-side changes are read at launch and every 60
-seconds; pending desktop edits are retained and a reload conflict is shown
-instead of silently replacing them.
+seconds through one combined read-only SSH snapshot; pending desktop edits are
+retained and a reload conflict is shown instead of silently replacing them.
 
 ### Devices and applications
 

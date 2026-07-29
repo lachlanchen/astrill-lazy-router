@@ -50,13 +50,15 @@ The `clients --json` operation is read-only. It merges DHCP leases, static
 reservations, and complete ARP neighbors on the configured LAN bridge,
 deduplicates by MAC address, and excludes WAN-interface neighbors.
 
-The desktop GUI calls a lighter reconciliation path at startup and every 60
-seconds. It performs no NVRAM write when the installed version, active jump,
-and watchdog are current. It attempts `alctl start` before reinstalling a
-degraded current version and can reconstruct a matching stored package without
-rewriting it. If that identical package still fails, automatic reconciliation
-reports the error instead of repeatedly writing NVRAM; use Install/Upgrade to
-request an explicit rewrite.
+At startup and every 60 seconds, the desktop GUI reads native status,
+allowlisted settings, companion markers, and companion status in one SSH
+session. It performs no deeper package audit or NVRAM write while the installed
+version, active jump, and watchdog are current. Degradation triggers the fuller
+reconciliation path, which attempts `alctl start` before reinstalling a current
+version and can reconstruct a matching stored package without rewriting it. If
+that identical package still fails, automatic reconciliation reports the error
+instead of repeatedly writing NVRAM; use Install/Upgrade to request an explicit
+rewrite.
 
 Current integration values:
 

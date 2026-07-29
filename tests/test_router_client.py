@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
 from astrill_lazy.astrill import AstrillConnectionSelection
-from astrill_lazy.native_settings import NativeAstrillSettings
+from astrill_lazy.native_settings import (
+    SAFE_NATIVE_ASTRILL_KEYS,
+    NativeAstrillSettings,
+)
 from astrill_lazy.router import (
     DOMAIN_REFRESH_TIMEOUT,
     CommandResult,
@@ -77,6 +81,104 @@ def test_remote_commands_use_stable_key_only_ssh_options(
     assert captured[captured.index("-p") + 1] == "2222"
     assert captured[captured.index("-i") + 1].endswith("/.ssh/router-key")
     assert "root@192.168.1.1" in captured
+
+
+def test_monitor_snapshot_combines_status_settings_and_companion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+    calls = 0
+
+    def tagged(name: str, value: str) -> str:
+        return f"{name}\t{value.encode().hex()}\n"
+
+    settings = {key: "" for key in SAFE_NATIVE_ASTRILL_KEYS}
+    settings.update(
+        {
+            "astrill_serverid": "1109",
+            "astrill_protocol": "2",
+            "astrill_status": "3",
+        }
+    )
+    companion = {
+        "version": "0.2.3",
+        "health": "healthy",
+        "vpn_state": "up",
+        "jump_installed": True,
+        "watchdog": True,
+    }
+    output = "".join(
+        (
+            "meta:vpn_state\tup\n",
+            "meta:applet\ttrue\n",
+            "presence:runtime\ttrue\n",
+            tagged("meta:wan_iface", "vlan2"),
+            tagged("presence:astrill_lazy_installed", "1"),
+            tagged("presence:astrill_lazy_version", "0.2.3"),
+            tagged("presence:astrill_lazy_pkg_md5", "abc123"),
+            *(tagged(f"setting:{key}", value) for key, value in settings.items()),
+            tagged("companion_status", json.dumps(companion)),
+        )
+    )
+
+    def run_script(script: str, *, timeout: int = 60) -> str:
+        nonlocal calls
+        calls += 1
+        assert timeout == 30
+        assert "/tmp/astrill-lazy/alctl status --json" in script
+        return output
+
+    monkeypatch.setattr(client, "run_script", run_script)
+    snapshot = client.monitor_snapshot(include_companion=True)
+
+    assert calls == 1
+    assert snapshot.native_status["health"] == "healthy"
+    assert snapshot.native_status["vpn_state"] == "up"
+    assert snapshot.native_status["astrill_server_id"] == 1109
+    assert snapshot.native_status["astrill_protocol"] == 2
+    assert snapshot.settings.get("astrill_status") == "3"
+    assert snapshot.companion_presence == {
+        "installed": True,
+        "version": "0.2.3",
+        "runtime": True,
+        "package_md5": "abc123",
+    }
+    assert snapshot.companion_status == companion
+    assert snapshot.selected_status(companion_enabled=True) == companion
+    assert snapshot.selected_status(companion_enabled=False) == (snapshot.native_status)
+
+
+def test_monitor_snapshot_can_skip_companion_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+
+    def tagged(name: str, value: str) -> str:
+        return f"{name}\t{value.encode().hex()}\n"
+
+    output = "".join(
+        (
+            "meta:vpn_state\tdown\n",
+            "meta:applet\ttrue\n",
+            "presence:runtime\tfalse\n",
+            tagged("meta:wan_iface", "vlan2"),
+            tagged("presence:astrill_lazy_installed", ""),
+            tagged("presence:astrill_lazy_version", ""),
+            tagged("presence:astrill_lazy_pkg_md5", ""),
+            *(tagged(f"setting:{key}", "") for key in SAFE_NATIVE_ASTRILL_KEYS),
+        )
+    )
+
+    def run_script(script: str, *, timeout: int = 60) -> str:
+        assert timeout == 30
+        assert "alctl status --json" not in script
+        return output
+
+    monkeypatch.setattr(client, "run_script", run_script)
+    snapshot = client.monitor_snapshot(include_companion=False)
+
+    assert snapshot.companion_status is None
+    assert snapshot.native_status["vpn_state"] == "down"
 
 
 def test_native_clients_merge_read_only_router_sources() -> None:

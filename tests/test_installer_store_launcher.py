@@ -161,6 +161,31 @@ def test_companion_check_requires_confirmation_when_not_installed() -> None:
     assert "not installed" in check.reason
 
 
+def test_companion_check_reuses_preloaded_healthy_snapshot() -> None:
+    class SnapshotOnlyClient:
+        def companion_presence(self) -> dict[str, object]:
+            raise AssertionError("presence must come from the monitor snapshot")
+
+        def status(self) -> dict[str, object]:
+            raise AssertionError("status must come from the monitor snapshot")
+
+    check = RouterInstaller(SnapshotOnlyClient()).check(  # type: ignore[arg-type]
+        presence={
+            "installed": True,
+            "version": ROUTER_VERSION,
+            "runtime": True,
+        },
+        status={
+            "version": ROUTER_VERSION,
+            "jump_installed": True,
+            "watchdog": True,
+        },
+    )
+
+    assert check.action == "none"
+    assert check.installed_version == ROUTER_VERSION
+
+
 def test_automatic_reconcile_cannot_install_without_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

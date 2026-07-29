@@ -33,11 +33,13 @@ astrill-lazy autostart status
 astrill-lazy autostart disable
 ```
 
-At startup and every 60 seconds, the GUI checks key-only SSH, the native Astrill
-applet, and the DD-WRT companion. A healthy current companion is only read. A
-current stored package with a stopped runtime can be repaired in place. A
-missing, outdated, or non-repairable package opens a confirmation dialog and is
-never installed silently.
+At startup and every 60 seconds, the GUI obtains native status, all allowlisted
+native settings, companion presence, and companion health through one
+read-only key-only SSH session. A healthy current companion receives no deeper
+audit or write. A degraded current runtime can be repaired in place. A missing,
+outdated, or non-repairable package opens a confirmation dialog and is never
+installed silently. The larger applet endpoint catalog is fetched afterward,
+so startup does not place two concurrent SSH handshakes on the router.
 The package fingerprint prevents an identical broken package from being
 automatically written on every monitor cycle; the Install/Upgrade action is the
 explicit recovery override.
@@ -206,10 +208,10 @@ GUI reports success. In native-only writable mode, reconnect stops the current
 tunnel first and restores the previous settings and connection after a failed
 start.
 
-Connection state and native values are read at startup and by the 60-second
-router monitor. A remote change updates a clean page immediately. If local
-edits are pending, the GUI retains them and shows a Reload conflict instead of
-silently overwriting the form.
+Connection state and native values are read from the combined startup and
+60-second monitor snapshots. A remote change updates a clean page immediately.
+If local edits are pending, the GUI retains them and shows a Reload conflict
+instead of silently overwriting the form.
 
 ### Endpoints
 

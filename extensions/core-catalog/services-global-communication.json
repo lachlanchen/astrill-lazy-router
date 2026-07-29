@@ -241,7 +241,8 @@
       "preferred_region": "japan",
       "domains": [
         "line.me",
-        "line-apps.com",
+        "liff.line.me",
+        "miniapp.line.me",
         "lin.ee"
       ],
       "aliases": [

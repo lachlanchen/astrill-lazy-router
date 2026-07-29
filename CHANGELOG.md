@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.5 - 2026-07-29
+
+- Collapse native status, allowlisted settings, companion presence, and
+  companion health into one read-only SSH snapshot per monitor interval.
+- Reuse the startup snapshot for the connection mirror and reserve additional
+  package and repair checks for detected companion degradation.
+- Sequence the larger endpoint-catalog transfer after startup health checks so
+  the router does not process concurrent SSH sessions during GUI launch.
+- Add live verification evidence for all-device UU Remote Direct routing and
+  matched Ubuntu/macOS performance through the active Astrill endpoint.
+- Replace LINE's non-resolving legacy app domain with its current official
+  LIFF and Mini App hosts.
+
 ## 0.2.4 - 2026-07-29
 
 - Add a dedicated Connection view that mirrors Astrill's endpoint, protocol,

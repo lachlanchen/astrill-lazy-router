@@ -44,7 +44,11 @@ from .launcher import ApplicationLauncher, parse_command
 from .models import MatchKind, Region, RouteTarget, Rule, Service
 from .native_page import NativeSettingsPage
 from .native_settings import NativeAstrillSettings
-from .router import AstrillConnectionResult, RouterClient, RouterError
+from .router import (
+    AstrillConnectionResult,
+    RouterClient,
+    RouterMonitorSnapshot,
+)
 from .service_policy import ServiceRouteMode, service_policy_route
 from .ssh_setup import authorize_router_key, ensure_local_identity
 from .store import ConfigStore
@@ -181,12 +185,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.native_page.set_read_only(self.store.read_only)
         self.connection_page.set_read_only(self.store.read_only)
         self.check_router_environment(quiet=False)
-        self.load_servers()
-        self.refresh_native_settings(
-            quiet=True,
-            force_native=True,
-            force_connection=True,
-        )
         self.router_monitor_id = GLib.timeout_add_seconds(
             60, self._monitor_router_companion
         )
@@ -2485,17 +2483,14 @@ class MainWindow(Adw.ApplicationWindow):
         def check() -> tuple[
             dict[str, Any],
             CompanionCheck,
-            NativeAstrillSettings | None,
+            NativeAstrillSettings,
         ]:
-            if not self.router.ping():
-                raise RuntimeError("router did not acknowledge SSH")
-            native_status = self.router.native_astrill_status()
-            companion = RouterInstaller(self.router).check()
-            try:
-                settings = self.router.native_astrill_settings()
-            except RouterError:
-                settings = None
-            return native_status, companion, settings
+            snapshot = self.router.monitor_snapshot(include_companion=True)
+            companion = RouterInstaller(self.router).check(
+                presence=snapshot.companion_presence,
+                status=snapshot.companion_status,
+            )
+            return snapshot.native_status, companion, snapshot.settings
 
         self._run_task(
             check,
@@ -2509,18 +2504,19 @@ class MainWindow(Adw.ApplicationWindow):
         result: tuple[
             dict[str, Any],
             CompanionCheck,
-            NativeAstrillSettings | None,
+            NativeAstrillSettings,
         ],
     ) -> None:
         native_status, companion, settings = result
         self.astrill_applet_available = native_status.get("health") == "healthy"
         self.router_companion_check = companion
-        if settings is not None:
-            self._native_settings_refreshed(settings, notify=False)
+        self._native_settings_refreshed(settings, notify=False)
         self.router_ssh_icon.set_from_icon_name("object-select-symbolic")
         self.router_ssh_row.set_subtitle(
             f"Connected as {self.store.router_user} on port {self.store.router_port}"
         )
+        if self.astrill_applet_available and self.servers is None:
+            self.load_servers()
 
         if native_status.get("health") != "healthy":
             self._router_refreshed(native_status)
@@ -2578,8 +2574,41 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _monitor_router_companion(self) -> bool:
         if self.busy_count == 0:
-            self.check_router_environment()
+            self._run_task(
+                lambda: self.router.monitor_snapshot(
+                    include_companion=self.store.companion_enabled
+                ),
+                self._router_monitor_refreshed,
+                "Could not monitor router",
+                quiet=True,
+            )
         return GLib.SOURCE_CONTINUE
+
+    def _router_monitor_refreshed(self, snapshot: RouterMonitorSnapshot) -> None:
+        self.astrill_applet_available = (
+            snapshot.native_status.get("health") == "healthy"
+        )
+        self._router_refreshed(snapshot.selected_status(self.store.companion_enabled))
+        self._native_settings_refreshed(snapshot.settings, notify=False)
+
+        if snapshot.native_status.get("health") != "healthy":
+            self.check_router_environment()
+            return
+        if not self.store.companion_enabled:
+            return
+        expected_version = RouterInstaller(self.router).expected_version
+        status = snapshot.companion_status
+        runtime_current = (
+            snapshot.companion_presence.get("installed") is True
+            and snapshot.companion_presence.get("version") == expected_version
+            and snapshot.companion_presence.get("runtime") is True
+            and status is not None
+            and status.get("version") == expected_version
+            and status.get("jump_installed") is True
+            and status.get("watchdog") is True
+        )
+        if not runtime_current and self.busy_count == 0:
+            self.check_router_environment()
 
     def _router_refreshed(self, status: dict[str, Any]) -> None:
         self.router_status = status
@@ -2956,8 +2985,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.astrill_applet_available = True
         self._router_refreshed(status)
         self.toast("Astrill applet installed")
-        self.load_servers()
-        self.refresh_native_settings(quiet=True)
+        self.servers = None
+        self.server_groups = {}
         self.check_router_environment(quiet=False)
 
     def _confirm_use_detected_companion(self, check: CompanionCheck) -> None:
@@ -3121,7 +3150,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._task_finished()
         if not quiet or not self.router_status:
             self.toast(f"{prefix}: {message}")
-        if prefix == "Could not reach the router":
+        if prefix in {"Could not reach the router", "Could not monitor router"}:
             self.sidebar_status_icon.set_from_icon_name("network-offline-symbolic")
             self.sidebar_status_label.set_label("Router unavailable")
         if prefix in {"Could not check router setup", "Router SSH setup failed"}:
