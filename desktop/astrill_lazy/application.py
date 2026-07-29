@@ -40,6 +40,7 @@ from .detector import (
     detect_rules,
 )
 from .installer import CompanionCheck, EnsureResult, RouterInstaller
+from .latency import LatencyTarget, probe_endpoint_latencies
 from .launcher import ApplicationLauncher, parse_command
 from .models import MatchKind, Region, RouteTarget, Rule, Service
 from .native_page import NativeSettingsPage
@@ -155,6 +156,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.servers: tuple[AstrillServer, ...] | None = None
         self.servers_loading = False
         self.server_groups: dict[str, tuple[AstrillServer, ...]] = {}
+        self.endpoint_latencies: dict[int, float | None] = {}
+        self.endpoint_latency_pending: set[int] = set()
         self.clients: list[dict[str, Any]] = []
         self.selected_service_ids: set[str] = set()
         self.service_batch_route_mode = ServiceRouteMode.SUGGESTED
@@ -604,6 +607,16 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.protocol_dropdown.connect("notify::selected", self._on_protocol_selected)
         controls.append(self.protocol_dropdown)
+        self.endpoint_latency_button = _button_with_icon(
+            "Ping",
+            "network-transmit-receive-symbolic",
+            self.measure_endpoint_latencies,
+        )
+        self.endpoint_latency_button.set_tooltip_text(
+            "Measure visible endpoints over the current network path"
+        )
+        self.endpoint_latency_button.set_sensitive(False)
+        controls.append(self.endpoint_latency_button)
         content.append(controls)
         self.location_list = Gtk.ListBox()
         self.location_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -918,6 +931,13 @@ class MainWindow(Adw.ApplicationWindow):
             self.refresh_clients()
         if page_id in {"connection", "locations"} and self.servers is None:
             self.load_servers()
+        if (
+            page_id == "locations"
+            and self.servers is not None
+            and not self.endpoint_latencies
+            and not self.endpoint_latency_pending
+        ):
+            self.measure_endpoint_latencies()
         if page_id == "services":
             self._render_services()
         if page_id == "astrill" and (
@@ -1483,21 +1503,9 @@ class MainWindow(Adw.ApplicationWindow):
                 )
             )
             return
-        query = self.location_search.get_text().strip().casefold()
-        region_id = self._region_filter
-        allowed = (
-            {server.id for server in self.server_groups.get(region_id, ())}
-            if region_id not in {"all", "active-astrill"}
-            else None
-        )
         current_id = int(self.router_status.get("astrill_server_id", 0))
         tunnel_connected = self.router_status.get("vpn_state") == "up"
-        visible = [
-            server
-            for server in self.servers
-            if (not query or query in server.name.casefold())
-            and (allowed is None or server.id in allowed)
-        ]
+        visible = self._visible_location_servers()
         for server in visible:
             configured = server.id == current_id
             connected = configured and tunnel_connected
@@ -1522,9 +1530,20 @@ class MainWindow(Adw.ApplicationWindow):
                 row.add_prefix(configured_icon)
             else:
                 row.add_prefix(Gtk.Image.new_from_icon_name("network-vpn-symbolic"))
+            latency = Gtk.Label(label=self._endpoint_latency_label(server))
+            latency.add_css_class("catalog-route")
+            latency.set_size_request(92, -1)
+            latency.set_xalign(1)
+            latency.set_valign(Gtk.Align.CENTER)
+            latency.set_tooltip_text(self._endpoint_latency_tooltip(server))
+            row.add_suffix(latency)
             connect = Gtk.Button(label="Connected" if connected else "Connect")
             connect.add_css_class("compact-button")
-            connect.set_sensitive(not self.store.read_only and not connected)
+            connect.set_sensitive(
+                not self.store.read_only
+                and not connected
+                and not self.endpoint_latency_pending
+            )
             connect.set_valign(Gtk.Align.CENTER)
             connect.connect(
                 "clicked",
@@ -1538,6 +1557,82 @@ class MainWindow(Adw.ApplicationWindow):
                     "No matching endpoints", "Change the country or search text."
                 )
             )
+
+    def _visible_location_servers(self) -> list[AstrillServer]:
+        if self.servers is None:
+            return []
+        query = self.location_search.get_text().strip().casefold()
+        region_id = self._region_filter
+        allowed = (
+            {server.id for server in self.server_groups.get(region_id, ())}
+            if region_id not in {"all", "active-astrill"}
+            else None
+        )
+        return [
+            server
+            for server in self.servers
+            if (not query or query in server.name.casefold())
+            and (allowed is None or server.id in allowed)
+        ]
+
+    def _endpoint_latency_label(self, server: AstrillServer) -> str:
+        if server.id in self.endpoint_latency_pending:
+            return "Measuring"
+        if server.id not in self.endpoint_latencies:
+            return "Not measured"
+        latency = self.endpoint_latencies[server.id]
+        return "No reply" if latency is None else f"{latency:.0f} ms"
+
+    def _endpoint_latency_tooltip(self, server: AstrillServer) -> str:
+        target = server.tcp_probe_target()
+        if target is None:
+            return "This endpoint has no fixed TCP probe target"
+        address, port = target
+        return (
+            f"TCP connection latency to {address}:{port} over the current network path"
+        )
+
+    def measure_endpoint_latencies(
+        self,
+        _button: Gtk.Button | None = None,
+    ) -> None:
+        if self.endpoint_latency_pending:
+            return
+        if self.servers is None:
+            self.toast("Astrill endpoints are still loading")
+            self.load_servers()
+            return
+
+        targets: list[LatencyTarget] = []
+        for server in self._visible_location_servers():
+            target = server.tcp_probe_target()
+            if target is None:
+                continue
+            address, port = target
+            targets.append(LatencyTarget(server.id, address, port))
+        if not targets:
+            self.toast("No visible endpoint has a TCP latency target")
+            return
+
+        self.endpoint_latency_pending = {target.server_id for target in targets}
+        self.endpoint_latency_button.set_sensitive(False)
+        self._render_locations()
+        self._run_task(
+            lambda: probe_endpoint_latencies(targets),
+            self._endpoint_latencies_measured,
+            "Could not measure endpoint latency",
+        )
+
+    def _endpoint_latencies_measured(
+        self,
+        results: dict[int, float | None],
+    ) -> None:
+        self.endpoint_latencies.update(results)
+        self.endpoint_latency_pending.clear()
+        self.endpoint_latency_button.set_sensitive(self.servers is not None)
+        self._render_locations()
+        replies = sum(value is not None for value in results.values())
+        self.toast(f"Measured {replies} of {len(results)} visible endpoints")
 
     def _render_extensions(self) -> None:
         if not hasattr(self, "extension_list"):
@@ -2777,6 +2872,9 @@ class MainWindow(Adw.ApplicationWindow):
         ) -> None:
             self.servers_loading = False
             self.servers, self.server_groups = result
+            self.endpoint_latencies.clear()
+            self.endpoint_latency_pending.clear()
+            self.endpoint_latency_button.set_sensitive(True)
             if self.native_settings is not None:
                 self.connection_page.sync(
                     self.native_settings,
@@ -2786,6 +2884,11 @@ class MainWindow(Adw.ApplicationWindow):
             self._render_countries()
             self._render_locations()
             self._update_status()
+            if (
+                self.stack.get_visible_child_name() == "locations"
+                and not self.endpoint_latencies
+            ):
+                self.measure_endpoint_latencies()
 
         self._run_task(load, success, "Could not load Astrill endpoints")
 
@@ -3166,6 +3269,10 @@ class MainWindow(Adw.ApplicationWindow):
                 self.confirm_authorize_router_key()
         if prefix == "Could not load Astrill endpoints":
             self.servers_loading = False
+        if prefix == "Could not measure endpoint latency":
+            self.endpoint_latency_pending.clear()
+            self.endpoint_latency_button.set_sensitive(self.servers is not None)
+            self._render_locations()
         if prefix in {
             "Could not apply Astrill connection",
             "Could not change Astrill connection",

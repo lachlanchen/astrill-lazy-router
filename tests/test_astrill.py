@@ -100,11 +100,36 @@ def test_connection_options_follow_protocol_and_port_records() -> None:
     }
 
 
+def test_applet_address_map_exposes_a_tcp_latency_target() -> None:
+    server = parse_applet(
+        b"_AS42=';102=203.0.113.42;103=203.0.113.43;';\n"
+        b"this.list = [{id:9,name:'Test',servers:["
+        b"{id:70,lf:1,ips:["
+        b"{ip:102,port:443,mode:1,proto:1,index:1,protop:6},"
+        b"{ip:103,port:'1-65535',mode:1,proto:134,index:0}"
+        b"]}]}];"
+    )[0]
+
+    assert server.nodes[0].endpoints[0].address == "203.0.113.42"
+    assert server.nodes[0].endpoints[1].address == "203.0.113.43"
+    assert server.tcp_probe_target() == ("203.0.113.42", 443)
+
+    range_only = parse_applet(
+        b"_AS42=';103=203.0.113.43;';\n"
+        b"this.list = [{id:10,name:'Range',servers:["
+        b"{id:71,lf:1,ips:["
+        b"{ip:103,port:'1-65535',mode:1,proto:134,index:0}"
+        b"]}]}];"
+    )[0]
+    assert range_only.tcp_probe_target() == ("203.0.113.43", 443)
+
+
 def test_empty_server_has_no_connection_options() -> None:
     server = AstrillServer(9, "Empty", ())
 
     assert server.supported_protocols() == ()
     assert server.port_options(0) == ()
+    assert server.tcp_probe_target() is None
 
 
 def test_favorites_round_trip_in_native_applet_format() -> None:

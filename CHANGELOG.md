@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.6 - 2026-07-29
+
+- Parse Astrill's encoded endpoint-address map and expose a validated TCP probe
+  target for every current applet location.
+- Add on-demand, visible-row endpoint latency measurements with bounded desktop
+  concurrency, stable result labels, timeout reporting, and no router write or
+  additional monitor polling.
+- Prefer the current OptiPlex 7090 hostname, LAN address, and macOS SSH alias in
+  the secure Mac and Windows noVNC launchers.
+
 ## 0.2.5 - 2026-07-29
 
 - Collapse native status, allowlisted settings, companion presence, and

@@ -126,7 +126,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 The macOS installer adds the application to the Dock. The Windows installer
 creates both Desktop and Start Menu shortcuts. The launchers do not run or
-take focus until opened by the user.
+take focus until opened by the user. Current defaults prefer
+`glassagent-ubuntu`, `OptiPlex-7090.local`, and `192.168.1.100`, with the prior
+server addresses retained as fallbacks.
 
 ## Views
 
@@ -219,6 +221,14 @@ The app reads the installed Astrill applet, groups its servers by configured
 country tokens, identifies the current endpoint, and provides a quick
 confirmed reconnect using a selected Astrill protocol. The Connection view is
 the full endpoint-specific editor.
+
+The applet's encoded address map is parsed into validated IPv4 probe targets.
+The first visit to Endpoints measures the visible rows once; Ping explicitly
+refreshes them after filtering. It uses TCP connection timing because the
+current endpoints do not reliably answer ICMP, limits work to 12 desktop
+threads with a 1.5-second timeout, and caches results until the endpoint
+catalog is reloaded. The measurement follows the desktop's current path; it
+performs no router SSH, firewall change, or periodic background scan.
 
 ### Router
 

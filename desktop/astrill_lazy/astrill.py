@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import ipaddress
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ IP_RE = re.compile(
     r"\{ip:(-?\d+),port:(?:'([^']+)'|(\d+)),mode:(\d+),"
     r"proto:(\d+),index:(\d+)(?:,protop:(\d+))?\}"
 )
+ENDPOINT_ADDRESS_RE = re.compile(r"(?<![0-9-])(-?\d+)=((?:\d{1,3}\.){3}\d{1,3})(?=;)")
 PORT_RE = re.compile(r"^\d{1,5}(?:-\d{1,5})?$")
 
 
@@ -149,6 +151,7 @@ class AstrillEndpoint:
     protocol_code: int
     port_index: int
     protocol_original: int | None = None
+    address: str | None = None
 
     @property
     def router_pro(self) -> bool:
@@ -236,6 +239,26 @@ class AstrillServer:
             for index in sorted(common_indexes)
         )
 
+    def tcp_probe_target(self) -> tuple[str, int] | None:
+        candidates = [
+            endpoint
+            for node in self.nodes
+            for endpoint in node.endpoints
+            if endpoint.address is not None and endpoint.mode == 1
+        ]
+        if not candidates:
+            return None
+        endpoint = min(
+            candidates,
+            key=lambda item: (
+                _probe_port(item) != 443,
+                item.router_pro,
+                item.port_index,
+                item.address or "",
+            ),
+        )
+        return endpoint.address, _probe_port(endpoint)
+
 
 def parse_astrill_favorites(value: str) -> tuple[AstrillFavorite, ...]:
     if not value:
@@ -261,7 +284,11 @@ def serialize_astrill_favorites(
 def parse_applet(payload: bytes) -> tuple[AstrillServer, ...]:
     script = unpack_applet(payload)
     literal = _extract_list_literal(script)
-    servers = tuple(_parse_server(item) for item in _split_top_level_objects(literal))
+    endpoint_addresses = _extract_endpoint_addresses(script)
+    servers = tuple(
+        _parse_server(item, endpoint_addresses)
+        for item in _split_top_level_objects(literal)
+    )
     if not servers:
         raise ValueError("Astrill server list was empty")
     return servers
@@ -316,6 +343,15 @@ def _validate_port(value: str) -> None:
         raise ValueError("Astrill port must be between 1 and 65535")
     if len(bounds) == 2 and bounds[0] > bounds[1]:
         raise ValueError("Astrill port range is reversed")
+
+
+def _probe_port(endpoint: AstrillEndpoint) -> int:
+    bounds = [int(part) for part in endpoint.port.split("-", 1)]
+    if len(bounds) == 1:
+        return bounds[0]
+    if bounds[0] <= 443 <= bounds[1]:
+        return 443
+    return bounds[0]
 
 
 def _extract_list_literal(script: str) -> str:
@@ -386,7 +422,21 @@ def _split_top_level_objects(literal: str) -> Iterable[str]:
         raise ValueError("unterminated Astrill server object")
 
 
-def _parse_server(value: str) -> AstrillServer:
+def _extract_endpoint_addresses(script: str) -> dict[int, str]:
+    addresses: dict[int, str] = {}
+    for encoded, raw_address in ENDPOINT_ADDRESS_RE.findall(script):
+        try:
+            address = str(ipaddress.IPv4Address(raw_address))
+        except ipaddress.AddressValueError:
+            continue
+        addresses[int(encoded)] = address
+    return addresses
+
+
+def _parse_server(
+    value: str,
+    endpoint_addresses: dict[int, str],
+) -> AstrillServer:
     head = SERVER_HEAD_RE.search(value)
     if head is None:
         raise ValueError("malformed Astrill server header")
@@ -407,6 +457,7 @@ def _parse_server(value: str) -> AstrillServer:
                 protocol_original=(
                     int(match.group(7)) if match.group(7) is not None else None
                 ),
+                address=endpoint_addresses.get(int(match.group(1))),
             )
             for match in IP_RE.finditer(value[node_start + 1 : node_end])
         )

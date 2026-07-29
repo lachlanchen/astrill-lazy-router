@@ -20,7 +20,7 @@ end stopOwnedTunnel
 on run
 	set localPort to "16087"
 	set remotePort to "6087"
-	set sshHosts to {"lachlan@lachlanserver.local", "lachlan@lachlanserver", "lachlan@192.168.1.99", "lachlan@192.168.24.108"}
+	set sshHosts to {"glassagent-ubuntu", "lachlan@OptiPlex-7090.local", "lachlan@192.168.1.100", "lachlan@lachlanserver.local", "lachlan@lachlanserver", "lachlan@192.168.24.108"}
 	set healthURL to "http://127.0.0.1:" & localPort & "/vnc.html"
 	set controllerURL to healthURL & "?host=127.0.0.1&port=" & localPort & "&autoconnect=1&resize=scale"
 	set cacheDirectory to POSIX path of (path to library folder from user domain) & "Caches/AstrillLazyRouter"

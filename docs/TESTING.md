@@ -18,7 +18,7 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-95 tests passed
+100 tests passed
 Ruff: all checks passed
 Catalog: 261 profiles, 650/650 unique seed hosts resolved to IPv4
 ShellCheck: no findings
@@ -118,6 +118,13 @@ The following checks were performed against the Linksys E4200:
   controls, and the companion-free Devices inventory.
 - one combined healthy monitor snapshot carrying 34 native settings plus
   native and companion health in a single SSH session.
+- applet address-map parsing, fixed and ranged TCP probe selection, bounded
+  endpoint latency validation, successful connection timing, and no-reply
+  handling.
+- a live current-path run receiving TCP latency from all 173 applet locations,
+  with observed values from 172.3 ms to 487.2 ms at inspection time.
+- Endpoints latency rendering at both `1180x760` and `880x600` without control,
+  row-label, or result overlap.
 
 ### 2026-07-29 UU And Endpoint Check
 
