@@ -123,6 +123,12 @@ run on the desktop with bounded concurrency and are never part of router
 reconciliation. They therefore report current desktop-path connection latency
 without changing router marks, tables, routes, or Astrill state.
 
+The Ubuntu endpoint browser also derives a display country from Astrill's own server
+name, normalizing its USA, UK, Korea, Czechia, bracketed China, and city-only
+aliases. Country and latency ordering operate only on the loaded in-memory
+catalog. Unsuccessful and incomplete measurements are ranked after successful
+latencies, including when measured values are sorted slowest first.
+
 ## Native Connection Mirror
 
 The desktop reads an explicit NVRAM allowlist and the installed applet's server

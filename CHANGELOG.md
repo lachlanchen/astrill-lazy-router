@@ -1,12 +1,21 @@
 # Changelog
 
-## 0.2.7 - 2026-07-30
+## 0.2.8 - 2026-07-30
 
 - Persist validated Windows PC endpoint-latency results in a separate local
   cache without triggering automatic probes or involving DD-WRT.
 - Add explicit Default, Region, and numeric PC-latency endpoint ordering while
   retaining selection across filters and marking stale or changed targets for
   a manual retest.
+
+## 0.2.7 - 2026-07-30
+
+- Add stable Country, Ping, and Action columns to the Endpoints view using
+  normalized country names from Astrill's installed server catalog.
+- Make the Country and Ping headers sortable in both directions while keeping
+  pending, no-reply, and unmeasured endpoints below valid latency results.
+- Preserve Astrill's applet order by default and keep measurement behind the
+  explicit filtered Ping action.
 
 ## 0.2.6 - 2026-07-29
 

@@ -25,11 +25,18 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.2.7" date="2026-07-30">
+    <release version="0.2.8" date="2026-07-30">
       <description>
         <p>Persists validated Windows PC endpoint-latency results and adds
         Default, Region, and numeric latency endpoint sorting without
         automatic tests or recurring router polling.</p>
+      </description>
+    </release>
+    <release version="0.2.7" date="2026-07-30">
+      <description>
+        <p>Adds sortable Country and Ping columns to the endpoint browser while
+        keeping bounded desktop-path measurements behind the explicit Ping
+        action.</p>
       </description>
     </release>
     <release version="0.2.6" date="2026-07-29">

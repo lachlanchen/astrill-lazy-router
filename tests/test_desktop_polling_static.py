@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -33,3 +34,18 @@ def test_pc_latency_probe_is_only_started_by_its_button() -> None:
         in WINDOWS_UI
     )
     assert WINDOWS_UI.count("probe_servers(servers, protocol)") == 1
+
+
+def test_ubuntu_latency_probe_is_only_started_by_its_button() -> None:
+    assert "self.measure_endpoint_latencies," in UBUNTU_UI
+    tree = ast.parse(UBUNTU_UI)
+    automatic_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+        and node.func.attr == "measure_endpoint_latencies"
+    ]
+    assert automatic_calls == []

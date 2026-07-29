@@ -118,12 +118,16 @@ disconnected; a changed connected session uses a confirmed, verified
 The Endpoints view remains the searchable country-grouped browser and quick
 connect surface. Both frontends offer a manual-only bounded TCP reachability
 test from the desktop's current network path. Ubuntu's **Ping** action measures
-the visible rows; Windows **Test PC latency** can measure the selected, visible,
-or all loaded rows. The tests send no command to DD-WRT, do not measure
-bandwidth, and never switch the endpoint. The separately confirmed Windows
-connect action changes DD-WRT only; it neither installs a VPN nor changes local
-PC routing. It uses the optional companion so a failed connection can restore
-the router's previous endpoint settings.
+the visible rows. Its aligned Country, Ping, and Action columns can be sorted
+by country or by fastest/slowest measured latency, with unavailable results
+kept below valid measurements. Windows **Test PC latency** can measure the
+selected, visible, or all loaded rows.
+
+The tests send no command to DD-WRT, do not measure bandwidth, and never switch
+the endpoint. The separately confirmed Windows connect action changes DD-WRT
+only; it neither installs a VPN nor changes local PC routing. It uses the
+optional companion so a failed connection can restore the router's previous
+endpoint settings.
 
 Windows saves manual results locally until they are cleared or replaced, shows
 their tested time, and marks old or changed-target results for a manual retest.

@@ -40,7 +40,12 @@ from .detector import (
     detect_rules,
 )
 from .installer import CompanionCheck, EnsureResult, RouterInstaller
-from .latency import LatencyTarget, probe_endpoint_latencies
+from .latency import (
+    EndpointSortField,
+    LatencyTarget,
+    probe_endpoint_latencies,
+    sort_endpoint_ids,
+)
 from .launcher import ApplicationLauncher, parse_command
 from .models import MatchKind, Region, RouteTarget, Rule, Service
 from .native_page import NativeSettingsPage
@@ -87,6 +92,10 @@ CSS = """
 .catalog-vpn { background: #dce8f3; color: #145789; }
 .catalog-count { color: #68747d; margin-left: 4px; }
 .location-current { background: #edf7f0; }
+.endpoint-header { background: #f2f4f5; color: #44515a; }
+.endpoint-header label { font-size: 12px; font-weight: 700; }
+.endpoint-header-button { min-height: 28px; padding: 2px 6px; }
+.endpoint-country { color: #44515a; font-size: 12px; }
 .sidebar-status { padding: 12px 16px; border-top: 1px solid #d8dde1; }
 .batch-bar { background: #ffffff; border: 1px solid #d8dde1; border-radius: 6px; padding: 8px 10px; }
 .batch-count { color: #44515a; font-weight: 600; }
@@ -154,6 +163,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.server_groups: dict[str, tuple[AstrillServer, ...]] = {}
         self.endpoint_latencies: dict[int, float | None] = {}
         self.endpoint_latency_pending: set[int] = set()
+        self.endpoint_sort_field: EndpointSortField = "applet"
+        self.endpoint_sort_descending = False
         self.clients: list[dict[str, Any]] = []
         self._clients_loading = False
         self._clients_loaded = False
@@ -577,9 +588,10 @@ class MainWindow(Adw.ApplicationWindow):
         )
         banner.set_revealed(True)
         content.append(banner)
-        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.location_search = Gtk.SearchEntry()
         self.location_search.set_placeholder_text("Search Astrill endpoints")
+        self.location_search.set_size_request(180, -1)
         self.location_search.set_hexpand(True)
         self.location_search.connect(
             "search-changed", lambda _entry: self._render_locations()
@@ -599,7 +611,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.protocol_dropdown = Gtk.DropDown.new_from_strings(
             list(ASTRILL_PROTOCOL_NAMES)
         )
-        self.protocol_dropdown.set_size_request(180, -1)
+        self.protocol_dropdown.set_size_request(150, -1)
         self.protocol_dropdown.set_tooltip_text(
             "Protocol for the next Astrill connection"
         )
@@ -1493,6 +1505,7 @@ class MainWindow(Adw.ApplicationWindow):
         current_id = int(self.router_status.get("astrill_server_id", 0))
         tunnel_connected = self.router_status.get("vpn_state") == "up"
         visible = self._visible_location_servers()
+        self.location_list.append(self._endpoint_header_row())
         for server in visible:
             configured = server.id == current_id
             connected = configured and tunnel_connected
@@ -1517,6 +1530,14 @@ class MainWindow(Adw.ApplicationWindow):
                 row.add_prefix(configured_icon)
             else:
                 row.add_prefix(Gtk.Image.new_from_icon_name("network-vpn-symbolic"))
+            country = Gtk.Label(label=server.country_name())
+            country.add_css_class("endpoint-country")
+            country.set_size_request(126, -1)
+            country.set_xalign(0)
+            country.set_valign(Gtk.Align.CENTER)
+            country.set_ellipsize(Pango.EllipsizeMode.END)
+            country.set_tooltip_text(server.country_name())
+            row.add_suffix(country)
             latency = Gtk.Label(label=self._endpoint_latency_label(server))
             latency.add_css_class("catalog-route")
             latency.set_size_request(92, -1)
@@ -1526,6 +1547,7 @@ class MainWindow(Adw.ApplicationWindow):
             row.add_suffix(latency)
             connect = Gtk.Button(label="Connected" if connected else "Connect")
             connect.add_css_class("compact-button")
+            connect.set_size_request(88, -1)
             connect.set_sensitive(
                 not self.store.read_only
                 and not connected
@@ -1545,6 +1567,70 @@ class MainWindow(Adw.ApplicationWindow):
                 )
             )
 
+    def _endpoint_header_row(self) -> Adw.ActionRow:
+        row = Adw.ActionRow(title="Endpoint")
+        row.set_use_markup(False)
+        row.set_activatable(False)
+        row.set_selectable(False)
+        row.add_css_class("endpoint-header")
+        row.add_prefix(Gtk.Image.new_from_icon_name("network-server-symbolic"))
+        row.add_suffix(self._endpoint_sort_button("Country", "country", 126))
+        row.add_suffix(self._endpoint_sort_button("Ping", "latency", 92))
+        action = Gtk.Label(label="Action")
+        action.set_size_request(88, -1)
+        action.set_xalign(0.5)
+        row.add_suffix(action)
+        return row
+
+    def _endpoint_sort_button(
+        self,
+        label: str,
+        field: EndpointSortField,
+        width: int,
+    ) -> Gtk.Button:
+        active = self.endpoint_sort_field == field
+        content = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=4,
+            halign=Gtk.Align.CENTER,
+        )
+        content.append(Gtk.Label(label=label))
+        direction = Gtk.Image.new_from_icon_name(
+            "pan-down-symbolic" if self.endpoint_sort_descending else "pan-up-symbolic"
+        )
+        direction.set_visible(active)
+        content.append(direction)
+        button = Gtk.Button(child=content)
+        button.add_css_class("flat")
+        button.add_css_class("endpoint-header-button")
+        button.set_size_request(width, -1)
+        button.set_valign(Gtk.Align.CENTER)
+        if field == "country":
+            next_order = (
+                "Z to A" if active and not self.endpoint_sort_descending else "A to Z"
+            )
+            button.set_tooltip_text(f"Sort countries {next_order}")
+        else:
+            next_order = (
+                "slowest first"
+                if active and not self.endpoint_sort_descending
+                else "fastest first"
+            )
+            button.set_tooltip_text(f"Sort measured ping {next_order}")
+        button.connect(
+            "clicked",
+            lambda _button, sort_field=field: self._sort_endpoints(sort_field),
+        )
+        return button
+
+    def _sort_endpoints(self, field: EndpointSortField) -> None:
+        if self.endpoint_sort_field == field:
+            self.endpoint_sort_descending = not self.endpoint_sort_descending
+        else:
+            self.endpoint_sort_field = field
+            self.endpoint_sort_descending = False
+        self._render_locations()
+
     def _visible_location_servers(self) -> list[AstrillServer]:
         if self.servers is None:
             return []
@@ -1555,12 +1641,23 @@ class MainWindow(Adw.ApplicationWindow):
             if region_id not in {"all", "active-astrill"}
             else None
         )
-        return [
+        visible = [
             server
             for server in self.servers
             if (not query or query in server.name.casefold())
             and (allowed is None or server.id in allowed)
         ]
+        ordered_ids = sort_endpoint_ids(
+            [server.id for server in visible],
+            names={server.id: server.name for server in visible},
+            countries={server.id: server.country_name() for server in visible},
+            latencies=self.endpoint_latencies,
+            pending=self.endpoint_latency_pending,
+            field=self.endpoint_sort_field,
+            descending=self.endpoint_sort_descending,
+        )
+        servers_by_id = {server.id: server for server in visible}
+        return [servers_by_id[server_id] for server_id in ordered_ids]
 
     def _endpoint_latency_label(self, server: AstrillServer) -> str:
         if server.id in self.endpoint_latency_pending:

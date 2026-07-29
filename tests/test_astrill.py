@@ -7,6 +7,7 @@ from astrill_lazy.astrill import (
     AstrillConnectionSelection,
     AstrillFavorite,
     AstrillServer,
+    endpoint_country_name,
     group_by_region,
     parse_applet,
     parse_astrill_favorites,
@@ -55,6 +56,21 @@ def test_servers_group_by_catalog_region_tokens() -> None:
     grouped = group_by_region(servers, regions)
     assert grouped["united-states"] == servers
     assert grouped["other"] == ()
+
+
+def test_endpoint_country_uses_applet_country_names_and_aliases() -> None:
+    assert endpoint_country_name("*USA - Los Angeles 10G") == "United States"
+    assert endpoint_country_name("*UK - London VX1") == "United Kingdom"
+    assert endpoint_country_name("*Hong Kong Supercharged 2") == "Hong Kong"
+    assert endpoint_country_name("[China] Supercharged 4") == "China"
+    assert endpoint_country_name("*Czechia - Prague VX1") == "Czech Republic"
+    assert endpoint_country_name("Korea 2") == "South Korea"
+
+
+def test_endpoint_country_normalizes_city_only_us_locations() -> None:
+    assert endpoint_country_name("*Los Angeles Supercharged 3") == "United States"
+    assert endpoint_country_name("*Seattle Supercharged 2") == "United States"
+    assert endpoint_country_name("*Buffalo") == "United States"
 
 
 def test_protocol_names_match_applet_codes() -> None:
