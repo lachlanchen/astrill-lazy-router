@@ -1,0 +1,15 @@
+[Unit]
+Description=Astrill Lazy Router isolated noVNC controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/astrill-lazy
+ExecStart=%h/Projects/astrill-lazy/scripts/run-novnc-debug.sh
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

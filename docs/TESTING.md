@@ -18,7 +18,7 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-39 tests passed
+62 tests passed
 Ruff: all checks passed
 Catalog: 261 profiles, 649/649 unique seed hosts resolved to IPv4
 ShellCheck: no findings
@@ -50,6 +50,10 @@ Tests cover:
 - route probe parsing, noise thresholds, minimum bypasses, and service-aware
   recommendations;
 - complete native-only removal and preserved Astrill state.
+- device-local policy validation, deterministic precedence, domain matching,
+  three-slot limits, Auto path health scoring, hold and hysteresis behavior,
+  fallback safety, duplicate-key rejection, and country-prefix collapsing;
+- long-running router refresh timeouts and clean timeout errors.
 
 ## Live Router Verification
 
@@ -78,6 +82,8 @@ The following checks were performed against the Linksys E4200:
 - physical router reboot reconstruction from NVRAM, with one startup entry,
   one watchdog, both policy rules, and retained MyPage commands;
 - direct Internet requests to UU Remote, Cloudflare, and Google after reboot;
+- preservation of Astrill's active-session DNS across a dnsmasq restart,
+  followed by correct YouTube resolution without a tunnel reconnect;
 - connected tests of Google, YouTube, Instagram, UU Remote, WeChat, Taobao,
   and Meituan from Ubuntu and macOS;
 - exact live Direct mark and return counters for all four bypass services;
@@ -86,8 +92,9 @@ The following checks were performed against the Linksys E4200:
 - full native-only restoration with no remaining companion NVRAM, MyPage,
   firewall, policy-rule, watchdog, or runtime object, followed by explicit
   reinstall and policy restore;
-- six deduplicated LAN devices from four leases and five active LAN neighbors,
-  with the WAN neighbor excluded;
+- 19 deduplicated LAN entries after the guarded static migration, combining 18
+  reservations, five current leases, and four active LAN neighbors, with the
+  WAN neighbor excluded;
 - router MyPage rendering at `1280x900` and `390x844` with loaded status and
   no control/text overlap;
 - native GTK rendering of policies, all 261 services, country routes, LAN
@@ -96,6 +103,8 @@ The following checks were performed against the Linksys E4200:
   `1180x760` and `880x600`;
 - isolated GUI debugging through noVNC without opening a window in the active
   Ubuntu desktop session.
+- boot-persistent loopback-only noVNC startup and a nonblank direct capture of
+  its isolated X display.
 
 The bootstrap was exercised directly, during multiple upgrades, and through a
 physical reboot. Astrill was later connected using its own upstream state while

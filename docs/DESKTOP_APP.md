@@ -54,6 +54,22 @@ them with `ASTRILL_LAZY_NOVNC_DISPLAY`, `ASTRILL_LAZY_VNC_PORT`, and
 `ASTRILL_LAZY_NOVNC_PORT`. Both listeners bind only to loopback, and the
 separate X display cannot move or focus windows in the active desktop session.
 
+The current deployment keeps this isolated controller available after reboot
+through the lingering user systemd instance:
+
+```bash
+./scripts/install-novnc-service.sh
+systemctl --user status \
+  io.github.lachlanchen.AstrillLazyRouter.NoVNC.service
+```
+
+The Mac desktop application `Astrill Lazy Router.app` creates a passwordless
+SSH local forward from `127.0.0.1:16086` to this loopback-only web port and
+then opens the controller. It never exposes noVNC to the LAN. Its auditable
+source is
+[`contrib/macos/open-astrill-lazy.applescript`](../contrib/macos/open-astrill-lazy.applescript).
+The application does not launch or take focus until it is opened by the user.
+
 ## Views
 
 ### Policies

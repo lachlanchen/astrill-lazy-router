@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Add a strict device-local policy schema and read-only planner for Direct,
+  fixed-tunnel, and health-selected three-endpoint routes.
+- Add application, service, domain, IP network, and ISO-country matching with
+  named country groups, deterministic precedence, route fallback, hysteresis,
+  and country-prefix compilation.
+- Extend router refresh operations to 180 seconds and report SSH command
+  timeouts cleanly, because a complete DNS refresh can exceed the normal
+  interactive timeout.
+- Add a boot-persistent isolated noVNC service and a secure Mac controller
+  launcher source.
+
 ## 0.2.2 - 2026-07-29
 
 - Mirror native Astrill website, device, Wi-Fi, VLAN, DNS, connection, and

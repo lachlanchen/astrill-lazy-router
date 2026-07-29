@@ -73,6 +73,16 @@ The applet watchdog had also accumulated duplicate `tun0` MASQUERADE entries.
 This project records that condition but does not rewrite Astrill-owned NAT
 rules.
 
+Astrill writes the DNS servers pushed by OpenVPN into
+`/tmp/resolv.dnsmasq`. A later DD-WRT `stopservice dnsmasq` /
+`startservice dnsmasq` cycle regenerates that file from WAN state and does not
+rerun Astrill's tunnel-up handler. During the static DHCP migration this
+replaced Astrill DNS with the ISP resolver, whose answer for
+`www.youtube.com` was incorrect. The active session's own logged pushed DNS
+was restored and dnsmasq was sent `SIGHUP`; the tunnel was not reconnected.
+The private DHCP apply and restore scripts now preserve this runtime DNS state
+around their service restart.
+
 ## DD-WRT MyPage Integration
 
 DD-WRT's `do_mypage` implementation interprets the numeric query as an index

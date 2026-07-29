@@ -1,5 +1,20 @@
 # Backup And Restore
 
+## Private DHCP Change Record
+
+The current static DHCP migration is intentionally not committed because it
+contains device MAC addresses. Its before state, requested table, validated
+applied table, guarded apply script, restore script, and after verification
+are stored locally with mode `0700` under:
+
+```text
+~/Documents/Private Router/static-leases-2026-07-29
+```
+
+The router had no static leases before the migration. The restore script
+returns to that captured empty static table and restarts only dnsmasq; it does
+not change Astrill, firewall, SSH, WAN, or companion state.
+
 ## Snapshot
 
 The private snapshot was captured before installing the router plugin:
