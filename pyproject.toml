@@ -17,10 +17,17 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.5"
 ]
+windows = [
+  "PySide6>=6.8; sys_platform == 'win32'",
+  "pyinstaller>=6.10; sys_platform == 'win32'"
+]
 
 [project.scripts]
 astrill-lazy = "astrill_lazy.cli:main"
 astrill-lazy-gui = "astrill_lazy.application:main"
+
+[project.gui-scripts]
+astrill-lazy-windows = "astrill_lazy.windows_app:main"
 
 [tool.setuptools]
 package-dir = { "" = "desktop" }

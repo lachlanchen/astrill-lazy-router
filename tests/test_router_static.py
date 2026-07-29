@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from astrill_lazy.router import _clean_ssh_stderr
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.skipif(shutil.which("sh") is None, reason="POSIX shell is unavailable")
 def test_router_and_helper_scripts_parse_with_posix_shell() -> None:
     scripts = [
         ROOT / "router" / "alctl",
@@ -96,6 +99,7 @@ def test_ddwrt_banner_is_removed_from_ssh_errors() -> None:
     assert _clean_ssh_stderr(output) == "actual failure"
 
 
+@pytest.mark.skipif(shutil.which("sh") is None, reason="POSIX shell is unavailable")
 def test_router_clients_merge_lan_sources_and_exclude_wan(tmp_path: Path) -> None:
     leases = tmp_path / "dnsmasq.leases"
     leases.write_text(

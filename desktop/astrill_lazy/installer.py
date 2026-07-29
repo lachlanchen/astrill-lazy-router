@@ -262,7 +262,9 @@ class RouterInstaller:
 
 def find_router_root() -> Path:
     package_file = Path(__file__).resolve()
+    frozen_root = getattr(sys, "_MEIPASS", None)
     candidates = (
+        *((Path(frozen_root) / "router",) if frozen_root else ()),
         package_file.parents[2] / "router",
         Path(sys.prefix) / "share" / "astrill-lazy" / "router",
         Path("/usr/local/share/astrill-lazy/router"),

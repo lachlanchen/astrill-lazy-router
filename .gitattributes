@@ -5,3 +5,7 @@
 *.md text eol=lf
 *.py text eol=lf
 *.sh text eol=lf
+helpers/astrill-lazy-netns text eol=lf
+router/alapi text eol=lf
+router/alctl text eol=lf
+router/alpage text eol=lf

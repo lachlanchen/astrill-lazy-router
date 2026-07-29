@@ -52,6 +52,9 @@ def extension_roots() -> Iterable[Path]:
                 yield Path(item).expanduser()
 
     package_file = Path(__file__).resolve()
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        yield Path(frozen_root) / "extensions"
     yield Path.home() / ".local" / "share" / "astrill-lazy" / "extensions"
     yield package_file.parents[2] / "extensions"
     yield Path(sys.prefix) / "share" / "astrill-lazy" / "extensions"

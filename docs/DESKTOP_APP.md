@@ -1,6 +1,12 @@
 # Desktop Application
 
-## Installation
+Astrill Lazy Router has two native frontends: GTK 4/Libadwaita on Ubuntu and
+PySide6/Qt on Windows. Both use key-only SSH to inspect native Astrill and
+control the optional DD-WRT companion. Windows installation, SSH host-key
+verification, and platform limitations are covered in
+[Native Windows Application](WINDOWS_APP.md).
+
+## Ubuntu Installation
 
 The source deployment is installed without root:
 
@@ -33,16 +39,52 @@ astrill-lazy autostart status
 astrill-lazy autostart disable
 ```
 
-At startup and every 60 seconds, a native-only or read-only GUI performs status
-reads only. A writable configuration with companion mode enabled checks the
-DD-WRT companion: a missing or outdated companion is installed, while a
-current companion with a stopped watchdog is repaired in place. A healthy
-runtime is only read, not rewritten.
+At startup and every 60 seconds, a native-only or read-only Ubuntu GUI performs
+status reads only. A writable Ubuntu configuration with companion mode enabled
+checks the DD-WRT companion: a missing or outdated companion is installed,
+while a current companion with a stopped watchdog is repaired in place. A
+healthy runtime is only read, not rewritten.
 The package fingerprint prevents an identical broken package from being
 automatically written on every monitor cycle; the Install/Upgrade action is the
 explicit recovery override.
 
-## Isolated noVNC Debugging
+## Native Windows Installation
+
+Build and install the Qt frontend from Windows PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\contrib\windows\build-native.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\contrib\windows\install-native.ps1
+```
+
+The application is installed under
+`%LOCALAPPDATA%\Programs\Astrill Lazy Router`. The installer creates one
+Desktop shortcut, removes the older same-named Start Menu shortcut, creates no
+new Start Menu entry, and does not launch the application. It needs Windows
+OpenSSH Client at runtime but does not need WSL, GTK, or noVNC.
+
+The Windows frontend refreshes status every 60 seconds but does not
+automatically install or repair the companion. Those actions remain explicit
+in its Router view. Follow the
+[Windows build, install, and verified SSH setup](WINDOWS_APP.md) before first
+use.
+
+## Frontend Differences
+
+| Capability | Ubuntu GTK frontend | Windows Qt frontend |
+| --- | --- | --- |
+| Native Astrill inspection | Yes | Yes |
+| Companion policies and recovery | Yes | Yes |
+| Service, domain, network, and device policy | Yes | Yes |
+| Endpoint and safe native-setting controls | Yes | Yes |
+| Per-application routing identity | Linux macvlan namespace | Not available; no Windows WFP backend |
+| Route detection and recommendations | Yes | Not exposed |
+| Extension and login-startup controls | Yes | Not exposed |
+| Isolated noVNC session | Optional | Not needed |
+
+## Isolated Ubuntu noVNC Debugging
 
 Run visual tests without opening a window in the active Ubuntu session:
 
@@ -80,7 +122,8 @@ port `6086`, which another virtual desktop already owns on this workstation:
 ./scripts/install-novnc-service.sh
 ```
 
-The Mac desktop application `Astrill Lazy Router.app` and Windows shortcuts
+The Mac desktop application `Astrill Lazy Router.app` and legacy Windows
+shortcuts
 create a passwordless SSH local forward from `127.0.0.1:16087` to the
 workstation's loopback-only port `6087`, then open the controller. They never
 expose noVNC to the LAN. Their auditable sources are
@@ -98,11 +141,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\contrib\windows\install-launcher.ps1
 ```
 
-The macOS installer adds the application to the Dock. The Windows installer
-creates both Desktop and Start Menu shortcuts. The launchers do not run or
-take focus until opened by the user.
+The macOS installer adds the application to the Dock. The legacy Windows
+noVNC installer creates both Desktop and Start Menu shortcuts. It is separate
+from `install-native.ps1`, which installs the Qt application with a Desktop
+shortcut only and removes its same-named Start Menu shortcut. Do not install
+both Windows options unless replacing the same-named shortcut is intentional.
+The launchers do not run or take focus until opened by the user.
 
-## Views
+## Ubuntu Views
+
+The detailed views below describe the full Ubuntu frontend. The native Windows
+frontend provides Policies, Services, Countries, Devices, Endpoints, Astrill,
+Router, and Settings with the boundaries summarized above and detailed in
+[its platform guide](WINDOWS_APP.md).
 
 ### Policies
 
@@ -196,7 +247,7 @@ manager. The core catalog is mandatory. The same view controls login startup,
 reports whether the DD-WRT companion is installed, and can perform an
 idempotent upgrade.
 
-## Application Profiles
+## Ubuntu Application Profiles
 
 Add an Application policy with an absolute executable and optional arguments.
 The first Launch action:
@@ -219,7 +270,12 @@ lease.
 
 ## Configuration
 
-`~/.config/astrill-lazy/config.json` is mode `0600` and uses schema version 1.
+The Ubuntu configuration is
+`~/.config/astrill-lazy/config.json` and is written with mode `0600`. The
+Windows configuration is
+`%LOCALAPPDATA%\Astrill Lazy Router\config.json`; it is separate from the
+installed program and survives uninstall. `XDG_CONFIG_HOME`, when explicitly
+set, overrides the platform default. Both use schema version 1.
 It contains:
 
 - the SSH host alias;

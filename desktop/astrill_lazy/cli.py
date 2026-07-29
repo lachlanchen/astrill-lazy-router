@@ -94,7 +94,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     arguments = parser.parse_args(argv)
     if arguments.command in {None, "gui"}:
-        from .application import run_application
+        if sys.platform == "win32":
+            from .windows_app import run_application
+        else:
+            from .application import run_application
 
         return run_application()
 

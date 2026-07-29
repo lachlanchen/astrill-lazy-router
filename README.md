@@ -19,11 +19,11 @@
 
 </div>
 
-Astrill Lazy Router is a native Ubuntu control application with an optional
-small DD-WRT companion. It can safely inspect an already-working native
-Astrill router without installing anything, or add explicit policy routing
-beside Astrill after write access and companion deployment are deliberately
-enabled.
+Astrill Lazy Router provides native Ubuntu and Windows control applications
+with an optional small DD-WRT companion. Either frontend can safely inspect an
+already-working native Astrill router without installing anything, or add
+explicit policy routing beside Astrill after write access and companion
+deployment are deliberately enabled.
 
 ![Services view with provider-country filtering and batch policy controls](docs/assets/services-country-batch.png)
 
@@ -32,7 +32,7 @@ enabled.
 | Area | Capability |
 | --- | --- |
 | Routing | Direct WAN or the router's currently active Astrill tunnel |
-| Selectors | Service, company, website, IPv4 network, LAN device, protocol, port, and isolated Ubuntu application |
+| Selectors | Service, company, website, IPv4 network, LAN device, protocol, port, and isolated application on Ubuntu |
 | Catalog | 261 maintained profiles with search and provider-country, category, and type filters |
 | Batch workflow | Select the visible result and apply Suggested, Direct, or Astrill to new and existing policies |
 | Native sync | Bidirectional website, device, interface, DNS, connection, and advanced Astrill settings |
@@ -67,7 +67,7 @@ tables.
 
 ```mermaid
 flowchart LR
-    GUI["Ubuntu GTK 4 app"] -->|"read-only native inspection"| APPLET["Native Astrill applet"]
+    GUI["Ubuntu GTK 4 or Windows Qt app"] -->|"read-only native inspection"| APPLET["Native Astrill applet"]
     GUI -->|"optional validated policy over key-only SSH"| CTRL["DD-WRT companion"]
     CATALOG["Data-only service catalog"] --> GUI
     LAN["LAN devices and app identities"] --> CTRL
@@ -117,6 +117,9 @@ current endpoint, and performs a confirmed reconnect when switching servers.
 The companion merges DHCP leases, static reservations, and active LAN
 neighbors. Ubuntu application profiles use a validated Polkit helper and a
 macvlan network namespace to obtain an independent router-visible identity.
+The native Windows frontend supports device policies but deliberately has no
+per-application WFP backend; see the
+[Windows application guide](docs/WINDOWS_APP.md).
 
 ## Safety model
 
@@ -142,8 +145,9 @@ shared or untrusted LAN.
 
 ### Requirements
 
-- Python 3.11 or newer;
-- GTK 4, Libadwaita, and Python GObject introspection on Ubuntu;
+- Python 3.11 or newer for a source installation or Windows build;
+- GTK 4, Libadwaita, and Python GObject introspection for Ubuntu;
+- PySide6 and Windows OpenSSH Client for the native Windows build;
 - a DD-WRT router with a working Astrill applet;
 - key-only root SSH available through the `astrill-router` host alias;
 - enough router NVRAM for the packaged companion.
@@ -151,7 +155,7 @@ shared or untrusted LAN.
 Review [router prerequisites and rollback](docs/ROUTER_INSTALL.md) before the
 first router installation.
 
-### Install the desktop app
+### Install on Ubuntu
 
 ```bash
 git clone git@github.com:lachlanchen/astrill-lazy-router.git
@@ -175,6 +179,25 @@ ASTRILL_LAZY_ENABLE_AUTOSTART=1 ./scripts/install-desktop.sh
 
 When an existing writable configuration has companion mode enabled, the GUI
 checks the router at startup and repairs or installs only when required.
+
+### Build and install on Windows
+
+The Windows frontend is a native Qt application. It does not require WSL or
+noVNC:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\contrib\windows\build-native.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\contrib\windows\install-native.ps1
+```
+
+The per-user installer creates one Desktop shortcut, deliberately creates no
+Start Menu entry, and does not launch the app. Before the first connection,
+use its interactive SSH setup action to inspect and accept the DD-WRT host key;
+normal app commands require already-verified key-only Windows OpenSSH access.
+See [Native Windows Application](docs/WINDOWS_APP.md) for the complete build,
+installation, safety, and host-key procedure.
 
 ### Useful CLI commands
 
@@ -221,7 +244,7 @@ address and teardown command.
 | Router | Linksys E4200 |
 | Firmware | DD-WRT `v3.0-r62374 mega` |
 | Astrill applet | `2.9.52` |
-| Desktop | Ubuntu with GTK 4 and Libadwaita |
+| Desktop | Ubuntu with GTK 4 and Libadwaita; Windows 11 with native Qt |
 | Policy engine | IPv4, one active Astrill tunnel |
 | Catalog | 261 profiles, 19 categories, 9 provider-country groups |
 
@@ -239,6 +262,7 @@ firewall behavior, and Astrill integration must be verified independently.
 | [Architecture](docs/ARCHITECTURE.md) | Components, packet path, precedence, A/B activation, and recovery |
 | [Astrill analysis](docs/ASTRILL_ANALYSIS.md) | Observed applet behavior and DD-WRT integration |
 | [Desktop application](docs/DESKTOP_APP.md) | Every GUI view, startup, noVNC, and application identities |
+| [Native Windows application](docs/WINDOWS_APP.md) | Native build, per-user install, SSH trust, safety, and Windows limitations |
 | [Router installation](docs/ROUTER_INSTALL.md) | Prerequisites, installation, persistence, operations, and rollback |
 | [Native-only operation](docs/NATIVE_ONLY.md) | Safe inspection, write guard, second-router evidence, and DD-WRT SSH lessons |
 | [Rule model](docs/RULE_MODEL.md) | Selectors, priorities, compilation, and native composition |

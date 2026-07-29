@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import tarfile
 from io import BytesIO
 from pathlib import Path
 
 import pytest
+from astrill_lazy import __version__
 from astrill_lazy.autostart import (
     autostart_path,
     disable_autostart,
@@ -23,6 +25,10 @@ from astrill_lazy.router import RouterError
 from astrill_lazy.store import ConfigStore, default_uu_rule
 
 ROUTER_VERSION = (find_router_root() / "VERSION").read_text(encoding="ascii").strip()
+
+
+def test_desktop_and_router_versions_match() -> None:
+    assert __version__ == ROUTER_VERSION
 
 
 def test_router_package_is_deterministic_and_contains_only_runtime_files() -> None:
@@ -51,7 +57,8 @@ def test_config_store_round_trip_is_private(tmp_path: Path) -> None:
     store.companion_enabled = False
     store.read_only = False
     store.save()
-    assert path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
 
     loaded = ConfigStore(path)
     assert loaded.rules[0].selector == "uu-remote"
@@ -93,6 +100,10 @@ def test_legacy_config_keeps_its_writable_companion_behavior(tmp_path: Path) -> 
     assert store.read_only is False
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="application network namespaces are an Ubuntu-only provider",
+)
 def test_parse_application_command() -> None:
     executable, arguments = parse_command("/usr/bin/printf '%s' hello")
     assert executable == "/usr/bin/printf"
@@ -104,6 +115,10 @@ def test_parse_application_command_rejects_missing_file() -> None:
         parse_command("/does/not/exist")
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="freedesktop autostart is an Ubuntu-only provider",
+)
 def test_desktop_autostart_round_trip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

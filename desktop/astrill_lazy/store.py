@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -11,13 +12,20 @@ from .models import MatchKind, RouteTarget, Rule
 SCHEMA_VERSION = 1
 
 
+def default_config_path() -> Path:
+    configured = os.environ.get("XDG_CONFIG_HOME")
+    if configured:
+        return Path(configured).expanduser() / "astrill-lazy" / "config.json"
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "Astrill Lazy Router" / "config.json"
+    return Path.home() / ".config" / "astrill-lazy" / "config.json"
+
+
 class ConfigStore:
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or (
-            Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-            / "astrill-lazy"
-            / "config.json"
-        )
+        self.path = path or default_config_path()
         self.router_host = "astrill-router"
         self.rules: list[Rule] = []
         self.active_region = "active-astrill"
