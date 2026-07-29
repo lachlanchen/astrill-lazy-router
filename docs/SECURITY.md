@@ -59,7 +59,10 @@ boundary against someone who controls the user account or invokes SSH directly.
 The native settings mirror uses an explicit safe-key allowlist. Astrill
 account values, router passwords, installer URLs, and generated OpenVPN
 credentials are neither requested nor returned. Writes use normalized values,
-commit once, and read every changed key back for exact verification.
+commit once, and read every changed key back for exact verification. Endpoint
+selections can only be constructed from validated records parsed from the
+installed applet. A failed native reconnect restores the prior allowlisted
+values and attempts to recover the prior active session.
 
 Astrill installer input is transient. The GUI uses a redacted `xxx/xxx`
 template, limits downloaded or pasted shell text to 512 KiB, displays its

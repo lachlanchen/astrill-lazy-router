@@ -35,7 +35,7 @@ deployment are deliberately enabled.
 | Selectors | Service, company, website, IPv4 network, LAN device, protocol, port, and isolated application on Ubuntu |
 | Catalog | 261 maintained profiles with search and provider-country, category, and type filters |
 | Batch workflow | Select the visible result and apply Suggested, Direct, or Astrill to new and existing policies |
-| Native sync | Bidirectional website, device, interface, DNS, connection, and advanced Astrill settings |
+| Native sync | Bidirectional routing, DNS, endpoint, protocol, port, transport, favorite, and resilience settings |
 | Native-only audit | Read-only status, settings, endpoints, and LAN clients with no companion or router writes |
 | Router safety | Validated input, separate marks/tables, transactional A/B activation, rollback, and watchdog recovery |
 | Recovery | One action removes every companion-owned object and restores native Astrill-only operation |
@@ -67,7 +67,7 @@ tables.
 
 ```mermaid
 flowchart LR
-    GUI["Ubuntu GTK 4 or Windows Qt app"] -->|"read-only native inspection"| APPLET["Native Astrill applet"]
+    GUI["Ubuntu GTK 4 or Windows Qt app"] -->|"allowlisted native inspection and settings"| APPLET["Native Astrill applet"]
     GUI -->|"optional validated policy over key-only SSH"| CTRL["DD-WRT companion"]
     CATALOG["Data-only service catalog"] --> GUI
     LAN["LAN devices and app identities"] --> CTRL
@@ -106,17 +106,29 @@ country preference. The Countries view summarizes requested regions and warns
 when several policies request countries that one physical tunnel cannot serve
 simultaneously.
 
-### Native Astrill and endpoints
+### Connection, endpoints, and native Astrill
 
-The Astrill view mirrors supported native settings through an explicit
-allowlist. Ubuntu and Windows both present human-readable Routing, DNS,
-Connection, and Advanced controls while showing the exact underlying NVRAM
-keys. The Endpoints view discovers the applet's server list, shows the current
-endpoint, and provides an explicit confirmed action to select a server and
-reconnect the router's shared tunnel. The Windows action changes DD-WRT only;
-it does not install or connect a VPN, or change local routing, on the PC.
-Endpoint switching requires the optional companion so a failed connection can
-restore the router's previous endpoint settings.
+The Ubuntu Connection view mirrors the native applet's selected endpoint,
+supported UDP/TCP transport, endpoint-specific port, favorite state, cipher,
+MTU, acceleration, kill switch, favorite cycling, and router-boot connection.
+Its server list comes from the installed applet. Save is available while
+disconnected; a changed connected session uses a confirmed, verified
+`Apply & Reconnect`.
+
+The Endpoints view remains the searchable country-grouped browser and quick
+connect surface. On Windows, **Test PC latency** is a manual-only bounded TCP
+reachability test from the PC: it sends no command to DD-WRT, does not measure
+bandwidth, and never switches the endpoint. The separately confirmed Windows
+connect action changes DD-WRT only; it neither installs a VPN nor changes local
+PC routing. It uses the optional companion so a failed connection can restore
+the router's previous endpoint settings.
+
+The Astrill view owns native routing, device, interface, DNS, and advanced
+filters. Ubuntu and Windows present human-readable controls backed by an
+explicit NVRAM allowlist. Router state is read at launch and on explicit
+refresh, page demand, or completed actions; the desktop does not run a recurring
+SSH poll. Pending edits are retained and a reload conflict is shown instead of
+silently replacing them.
 
 ### Devices and applications
 
@@ -138,6 +150,8 @@ per-application WFP backend; see the
 - Domain refresh retains prior addresses when a transient lookup fails.
 - Automatic reconciliation does not rewrite healthy or fingerprint-identical
   router packages.
+- Connection writes are allowlisted and read back exactly; a failed native
+  reconnect restores the prior values and active session when possible.
 - `Restore Astrill Only` removes companion state without changing the selected
   Astrill endpoint, protocol, or connection state.
 - Catalog extensions are declarative data and never execute on the router.

@@ -62,6 +62,9 @@ ready, use the manual Refresh action after the router finishes booting. The
 SSH, Astrill installer, and companion onboarding actions remain available
 because each has its own explicit confirmation.
 
+When the optional companion is enabled in another access mode, its watchdog is
+router-local runtime recovery. It does not create a recurring desktop SSH poll.
+
 ## Native Include-Mode Example
 
 A second validated Linksys E4200 was already working without this project's

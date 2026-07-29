@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .astrill import AstrillConnectionSelection
 from .native_settings import (
     SAFE_NATIVE_ASTRILL_KEYS,
     NativeAstrillSettings,
@@ -29,6 +30,12 @@ class CommandResult:
     stdout: str
     stderr: str
     returncode: int
+
+
+@dataclass(frozen=True)
+class AstrillConnectionResult:
+    status: dict[str, Any]
+    settings: NativeAstrillSettings
 
 
 class RouterClient:
@@ -254,23 +261,127 @@ done
         normalized = normalize_native_changes(changes)
         if not normalized:
             return self.native_astrill_settings()
+        return self._write_native_astrill_values(normalized)
+
+    def save_astrill_connection(
+        self,
+        selection: AstrillConnectionSelection,
+        changes: dict[str, Any],
+    ) -> NativeAstrillSettings:
+        normalized = normalize_native_changes(changes)
+        values = {**selection.native_values(), **normalized}
+        return self._write_native_astrill_values(values)
+
+    def apply_astrill_connection(
+        self,
+        selection: AstrillConnectionSelection,
+        changes: dict[str, Any],
+        *,
+        companion_enabled: bool = True,
+    ) -> AstrillConnectionResult:
+        normalized = normalize_native_changes(changes)
+        before = self.native_astrill_settings()
+        if not companion_enabled:
+            values = {**selection.native_values(), **normalized}
+            previous = {key: before.get(key) for key in values}
+            was_connected = self.native_astrill_status().get("vpn_state") == "up"
+            settings_attempted = False
+            try:
+                if was_connected:
+                    self.set_astrill_connection(
+                        False,
+                        companion_enabled=False,
+                    )
+                settings_attempted = True
+                self._write_native_astrill_values(values)
+                status = self.set_astrill_connection(True, companion_enabled=False)
+                settings = self.native_astrill_settings()
+                self._verify_native_astrill_values(settings, values)
+            except RouterError as exc:
+                recovery_errors: list[str] = []
+                if settings_attempted:
+                    try:
+                        self.set_astrill_connection(
+                            False,
+                            companion_enabled=False,
+                        )
+                    except RouterError as recovery_error:
+                        recovery_errors.append(f"disconnect: {recovery_error}")
+                    try:
+                        self._write_native_astrill_values(previous)
+                    except RouterError as recovery_error:
+                        recovery_errors.append(f"settings: {recovery_error}")
+                if was_connected:
+                    try:
+                        self.set_astrill_connection(
+                            True,
+                            companion_enabled=False,
+                        )
+                    except RouterError as recovery_error:
+                        recovery_errors.append(f"reconnect: {recovery_error}")
+                if recovery_errors:
+                    raise RouterError(
+                        f"{exc}; native connection recovery also failed: "
+                        + "; ".join(recovery_errors)
+                    ) from exc
+                raise
+            return AstrillConnectionResult(status=status, settings=settings)
+
+        if normalized:
+            self._write_native_astrill_values(normalized)
+        try:
+            status = self.switch_astrill(
+                server_id=selection.server_id,
+                sid=selection.sid,
+                encoded_ip=selection.encoded_ip,
+                port=selection.port,
+                port_index=selection.port_index,
+                protocol=selection.protocol,
+                vpn_mode=selection.vpn_mode,
+            )
+        except RouterError as exc:
+            if normalized:
+                previous = {key: before.get(key) for key in normalized}
+                try:
+                    self._write_native_astrill_values(previous)
+                except RouterError as rollback_error:
+                    raise RouterError(
+                        f"{exc}; connection settings rollback also failed: "
+                        f"{rollback_error}"
+                    ) from exc
+            raise
+
+        settings = self.native_astrill_settings()
+        expected = {**selection.native_values(), **normalized}
+        self._verify_native_astrill_values(settings, expected)
+        return AstrillConnectionResult(status=status, settings=settings)
+
+    def _write_native_astrill_values(
+        self, values: dict[str, str]
+    ) -> NativeAstrillSettings:
         script = ["set -e"]
         script.extend(
             f"nvram set {shlex.quote(f'{key}={value}')}"
-            for key, value in normalized.items()
+            for key, value in values.items()
         )
         script.append("nvram commit >/dev/null")
         self.run_script("\n".join(script) + "\n", timeout=30)
         settings = self.native_astrill_settings()
+        self._verify_native_astrill_values(settings, values)
+        return settings
+
+    @staticmethod
+    def _verify_native_astrill_values(
+        settings: NativeAstrillSettings, expected: dict[str, str]
+    ) -> None:
         mismatched = [
-            key for key, value in normalized.items() if settings.get(key) != value
+            key for key, value in expected.items() if settings.get(key) != value
         ]
         if mismatched:
             raise RouterError(
                 "router did not persist native Astrill settings: "
                 + ", ".join(sorted(mismatched))
             )
-        return settings
 
     def fetch_astrill_payload(self) -> bytes:
         result = subprocess.run(

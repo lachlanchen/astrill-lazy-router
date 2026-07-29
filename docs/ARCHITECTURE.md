@@ -112,6 +112,28 @@ package only opens the Install/Upgrade confirmation. No background desktop
 monitor can invoke the NVRAM installer. This lifecycle is separate from
 Astrill connection management and does not change `astrill_autostart`.
 
+## Native Connection Mirror
+
+The desktop reads an explicit NVRAM allowlist and the installed applet's server
+catalog. A connection selection is compiled to Astrill's server ID, node ID,
+encoded address, protocol, port, port index, and VPN mode fields. Supported
+protocols and port indexes are intersected across the selected server's node
+records so the GUI cannot construct a combination absent from the applet.
+
+Cipher, MTU, acceleration, disconnect blocking, favorite records, favorite
+cycling, and startup remain native Astrill values. They are validated
+individually, committed once, and read back exactly. The companion's existing
+transactional endpoint switch performs connected changes. In writable
+native-only mode, the desktop stops an active tunnel, writes the complete
+selection, starts it again, and restores both the prior values and active
+session if startup fails.
+
+Startup, explicit refreshes, and completed-action readbacks obtain status and
+settings in both companion and native-only modes. There is no recurring
+desktop SSH monitor. Clean controls follow router-side applet changes. Unsaved
+desktop edits retain their baseline and expose a reload conflict when the
+router changes concurrently.
+
 `Restore Astrill Only` records native tunnel state, removes all
 companion-owned runtime and persistent objects, audits that cleanup, and then
 checks that endpoint, protocol, and tunnel state are unchanged. The desktop

@@ -66,6 +66,13 @@ def test_native_change_validation_excludes_secrets_and_bad_values() -> None:
         normalize_native_changes({"astrill_wanmtu": "400"})
     with pytest.raises(ValueError, match="invalid native Astrill site entry"):
         normalize_native_changes({"astrill_iplistraw": "not a domain"})
+    with pytest.raises(ValueError, match="favorite record"):
+        normalize_native_changes({"astrill_favlist": "invalid"})
+
+    favorite = "1109:536872021:1-65535:0:6:1109"
+    assert normalize_native_changes({"astrill_favlist": favorite}) == {
+        "astrill_favlist": favorite
+    }
 
 
 def test_router_native_settings_hex_transport_and_verified_write() -> None:

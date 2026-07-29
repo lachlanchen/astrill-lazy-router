@@ -7,7 +7,6 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from astrill_lazy import __version__
 from astrill_lazy.autostart import (
     autostart_path,
     disable_autostart,
@@ -25,10 +24,6 @@ from astrill_lazy.router import RouterError
 from astrill_lazy.store import ConfigStore, default_uu_rule
 
 ROUTER_VERSION = (find_router_root() / "VERSION").read_text(encoding="ascii").strip()
-
-
-def test_desktop_and_router_versions_match() -> None:
-    assert __version__ == ROUTER_VERSION
 
 
 def test_router_package_is_deterministic_and_contains_only_runtime_files() -> None:

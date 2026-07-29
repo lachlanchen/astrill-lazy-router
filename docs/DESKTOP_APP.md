@@ -253,12 +253,39 @@ reservation cannot be discovered; its fixed address can be added manually.
 Every listed device can become a direct or Astrill source policy with one
 action.
 
+### Connection
+
+The Connection view is the desktop mirror of Astrill's native connection page.
+It reads and controls:
+
+- the selected endpoint and its favorite state;
+- OpenVPN or RouterPro over UDP or TCP when supported by that endpoint;
+- the endpoint-specific port or automatic port range;
+- OpenVPN cipher and UDP MTU;
+- acceleration, disconnect blocking, favorite cycling, and router-boot
+  connection.
+
+The endpoint parser intersects protocol and port capabilities across the
+server's applet records, matching the choices the native page can use. Save is
+available only while disconnected. Connect applies a clean saved selection;
+changed values require a confirmation and use `Apply & Connect` or
+`Apply & Reconnect`. Every write is committed once and read back before the
+GUI reports success. In native-only writable mode, reconnect stops the current
+tunnel first and restores the previous settings and connection after a failed
+start.
+
+Connection state and native values are read at startup and on explicit refresh,
+page demand, or completion of a related action. The desktop does not schedule a
+recurring SSH poll. When a remote change is discovered, it updates a clean page
+immediately. If local edits are pending, the GUI retains them and shows a
+Reload conflict instead of silently overwriting the form.
+
 ### Endpoints
 
 The app reads the installed Astrill applet, groups its servers by configured
-country tokens, identifies the current endpoint, and can reconnect the shared
-tunnel using a selected Astrill protocol. A confirmation is required because
-reconnecting pauses VPN-routed traffic.
+country tokens, identifies the current endpoint, and provides a quick
+confirmed reconnect using a selected Astrill protocol. The Connection view is
+the full endpoint-specific editor.
 
 The Windows Endpoints view also offers **Test PC latency** for the selected,
 visible, or all loaded endpoints. It runs only when clicked and opens bounded
@@ -269,24 +296,26 @@ reachability over the PC's current path, not bandwidth or VPN throughput.
 ### Router
 
 The Router view reports the upstream Astrill connection and companion policy
-runtime. It exposes endpoint selection, runtime repair, domain refresh,
-confirmation-gated policy rollback, and idempotent companion installation or
-upgrade. `Restore Astrill Only` removes every companion-owned runtime, NVRAM,
-MyPage, firewall, policy-rule, and watchdog object while preserving Astrill's
-endpoint, protocol, and connection state. The saved desktop mode then prevents
-later manual or page-demand reads from treating it as an enabled companion;
-reinstallation remains an explicit action.
+runtime. It links to the full Connection view and exposes runtime repair,
+domain refresh, confirmation-gated policy rollback, and idempotent companion
+installation or upgrade. `Restore Astrill Only` removes every companion-owned
+runtime, NVRAM, MyPage, firewall, policy-rule, and watchdog object while
+preserving Astrill's endpoint, protocol, and connection state. The saved desktop
+mode keeps later manual or page-demand reads in native-only mode; reinstallation
+remains an explicit action. The companion watchdog referenced here runs locally
+on DD-WRT for router runtime recovery; it is not a recurring desktop SSH
+monitor.
 
 ### Astrill
 
 The Astrill view reads the native applet's settings directly from DD-WRT and
 maps include/exclude choices to effective Direct/Astrill defaults and
 per-entry routes. It synchronizes website and device lists, Wi-Fi and VLAN
-filters, DNS, cipher, MTU, kill switch, startup, favorites summary, and
-advanced filter fields. Opening or refreshing the view is read-only. Only
+filters, DNS, and advanced filter fields. Endpoint and transport controls live
+in the Connection view. Opening or refreshing either view is read-only. Only
 changed controls are written, every value is validated, and the complete
-result is read back before success is reported. Account and router
-credentials are outside the allowed key set.
+result is read back before success is reported. Account and router credentials
+are outside the allowed key set.
 
 ### Extensions
 

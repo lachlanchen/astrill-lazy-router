@@ -12,7 +12,6 @@ from gi.repository import Adw, Gtk
 
 from .models import RouteTarget
 from .native_settings import (
-    CIPHER_OPTIONS,
     DNS_OPTIONS,
     EffectivePolicy,
     NativeAstrillSettings,
@@ -63,7 +62,6 @@ class NativeSettingsPage(Gtk.Box):
 
         self._build_routing()
         self._build_dns()
-        self._build_connection()
         self._build_advanced()
         self._write_controls: list[Gtk.Widget] = [
             self.site_default,
@@ -76,8 +74,6 @@ class NativeSettingsPage(Gtk.Box):
             self.dmz_device,
             self.dns_provider,
             self.user_dns,
-            self.cipher,
-            self.mtu,
             self.site_source,
             self.site_file,
             self.external_filter,
@@ -154,25 +150,11 @@ class NativeSettingsPage(Gtk.Box):
             )
             self.user_dns.set_text(settings.get("astrill_userdns"))
             self._set_switches(settings)
-            self.cipher.set_selected(
-                _option_index(CIPHER_OPTIONS, settings.get("astrill_cipher", "default"))
-            )
-            self.mtu.set_value(settings.integer("astrill_wanmtu", 1446))
             self.site_source.set_selected(
                 1 if settings.get("astrill_iplistext") == "1" else 0
             )
             self.site_file.set_text(settings.get("astrill_iplistfile"))
             self.external_filter.set_text(settings.get("astrill_exflt"))
-            self.endpoint_row.set_subtitle(
-                f"Server {settings.get('astrill_serverid') or 'none'} · "
-                f"protocol {settings.get('astrill_protocol') or '0'}"
-            )
-            favorites = [
-                value for value in settings.get("astrill_favlist").split(",") if value
-            ]
-            self.favorites_row.set_subtitle(
-                f"{len(favorites)} saved endpoint{'' if len(favorites) == 1 else 's'}"
-            )
             compiled = settings.get("astrill_iplist").split()
             self.compiled_sites_row.set_subtitle(
                 f"{len(compiled)} generated IPv4 network"
@@ -236,8 +218,6 @@ class NativeSettingsPage(Gtk.Box):
             "astrill_dmzdevice": self.dmz_device.get_text().strip(),
             "astrill_dnsserver": DNS_OPTIONS[self.dns_provider.get_selected()][0],
             "astrill_userdns": " ".join(self.user_dns.get_text().split()),
-            "astrill_cipher": CIPHER_OPTIONS[self.cipher.get_selected()][0],
-            "astrill_wanmtu": str(self.mtu.get_value_as_int()),
             "astrill_iplistext": str(self.site_source.get_selected()),
             "astrill_iplistfile": self.site_file.get_text().strip(),
             "astrill_exflt": self.external_filter.get_text().strip(),
@@ -386,49 +366,6 @@ class NativeSettingsPage(Gtk.Box):
         self.user_dns.connect("changed", lambda *_args: self._mark_dirty())
         for switch in self.switches.values():
             switch.connect("notify::active", lambda *_args: self._mark_dirty())
-
-    def _build_connection(self) -> None:
-        self.append(_section_heading("Connection"))
-        connection_list = _settings_list()
-        self.cipher = Gtk.DropDown.new_from_strings(
-            [label for _value, label in CIPHER_OPTIONS]
-        )
-        cipher_row = _control_row("Encryption", "Native tunnel cipher")
-        cipher_row.add_suffix(self.cipher)
-        connection_list.append(cipher_row)
-        self.mtu = Gtk.SpinButton.new_with_range(576, 1500, 1)
-        self.mtu.set_valign(Gtk.Align.CENTER)
-        mtu_row = _control_row("Internet MTU", "576 to 1500")
-        mtu_row.add_suffix(self.mtu)
-        connection_list.append(mtu_row)
-        for key, title, subtitle in (
-            ("astrill_accel", "Hardware acceleration", "Native fast path"),
-            (
-                "astrill_blockinternet",
-                "Block Internet when disconnected",
-                "Native kill switch",
-            ),
-            (
-                "astrill_autocycle",
-                "Cycle favorite endpoints",
-                "Reconnect through saved endpoints",
-            ),
-            ("astrill_autostart", "Connect after router boot", "Native startup"),
-        ):
-            switch = Gtk.Switch()
-            switch.set_valign(Gtk.Align.CENTER)
-            row = _control_row(title, subtitle)
-            row.add_suffix(switch)
-            connection_list.append(row)
-            self.switches[key] = switch
-            switch.connect("notify::active", lambda *_args: self._mark_dirty())
-        self.endpoint_row = _control_row("Endpoint", "Not loaded")
-        connection_list.append(self.endpoint_row)
-        self.favorites_row = _control_row("Favorites", "Not loaded")
-        connection_list.append(self.favorites_row)
-        self.append(connection_list)
-        self.cipher.connect("notify::selected", lambda *_args: self._mark_dirty())
-        self.mtu.connect("value-changed", lambda *_args: self._mark_dirty())
 
     def _build_advanced(self) -> None:
         self.append(_section_heading("Advanced"))

@@ -15,6 +15,7 @@ from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 from .astrill import (
     ASTRILL_PROTOCOL_NAMES,
+    AstrillConnectionSelection,
     AstrillServer,
     group_by_region,
     parse_applet,
@@ -32,6 +33,7 @@ from .autostart import (
 )
 from .catalog import Catalog, discover_extensions, load_catalog
 from .compiler import compile_rules
+from .connection_page import AstrillConnectionPage, ConnectionDraft
 from .detector import (
     MINIMUM_BYPASS_SERVICES,
     RouteRecommendation,
@@ -42,7 +44,7 @@ from .launcher import ApplicationLauncher, parse_command
 from .models import MatchKind, Region, RouteTarget, Rule, Service
 from .native_page import NativeSettingsPage
 from .native_settings import NativeAstrillSettings
-from .router import RouterClient
+from .router import AstrillConnectionResult, RouterClient, RouterError
 from .service_policy import ServiceRouteMode, service_policy_route
 from .ssh_setup import authorize_router_key, ensure_local_identity
 from .store import ConfigStore
@@ -120,6 +122,7 @@ class MainWindow(Adw.ApplicationWindow):
         ("services", "Services", "view-app-grid-symbolic"),
         ("countries", "Countries", "mark-location-symbolic"),
         ("devices", "Devices", "network-workgroup-symbolic"),
+        ("connection", "Connection", "network-vpn-symbolic"),
         ("locations", "Endpoints", "network-server-symbolic"),
         ("astrill", "Astrill", "preferences-system-symbolic"),
         ("router", "Router", "network-server-symbolic"),
@@ -179,9 +182,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_countries()
         self._render_extensions()
         self.native_page.set_read_only(self.store.read_only)
+        self.connection_page.set_read_only(self.store.read_only)
         self.check_router_environment(quiet=False)
         self.load_servers()
-        self.refresh_native_settings(quiet=True)
+        self.refresh_native_settings(
+            quiet=True,
+            force_native=True,
+            force_connection=True,
+        )
 
     def _install_css(self) -> None:
         provider = Gtk.CssProvider()
@@ -279,6 +287,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack.add_named(self._build_services_page(), "services")
         self.stack.add_named(self._build_countries_page(), "countries")
         self.stack.add_named(self._build_devices_page(), "devices")
+        self.stack.add_named(self._build_connection_page(), "connection")
         self.stack.add_named(self._build_locations_page(), "locations")
         self.stack.add_named(self._build_native_settings_page(), "astrill")
         self.stack.add_named(self._build_router_page(), "router")
@@ -554,6 +563,15 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_devices()
         return _scroll_page(content)
 
+    def _build_connection_page(self) -> Gtk.Widget:
+        self.connection_page = AstrillConnectionPage(
+            on_refresh=self.confirm_refresh_connection,
+            on_save=self.save_astrill_connection,
+            on_connect=self.confirm_connect_astrill,
+            on_disconnect=lambda: self._change_astrill_connection(False),
+        )
+        return _scroll_page(self.connection_page)
+
     def _build_locations_page(self) -> Gtk.Widget:
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         content.add_css_class("page-content")
@@ -702,9 +720,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.astrill_install_button.set_valign(Gtk.Align.CENTER)
         self.router_astrill_row.add_suffix(self.astrill_install_button)
         self.choose_location_button = _button_with_icon(
-            "Choose",
-            "find-location-symbolic",
-            lambda _button: self._show_locations(),
+            "Configure",
+            "preferences-system-symbolic",
+            lambda _button: self._show_connection(),
         )
         self.choose_location_button.set_valign(Gtk.Align.CENTER)
         self.router_astrill_row.add_suffix(self.choose_location_button)
@@ -812,7 +830,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _build_native_settings_page(self) -> Gtk.Widget:
         self.native_page = NativeSettingsPage(
-            on_refresh=lambda: self.refresh_native_settings(),
+            on_refresh=lambda: self.refresh_native_settings(force_native=True),
             on_save=self.save_native_settings,
         )
         return _scroll_page(self.native_page)
@@ -892,8 +910,9 @@ class MainWindow(Adw.ApplicationWindow):
             "services": f"{len(self.catalog.services)} service profiles",
             "countries": "Policy countries on one shared tunnel",
             "devices": "Observed LAN clients and fixed addresses",
+            "connection": "Native endpoint and transport settings",
             "locations": "Choose the shared Astrill server",
-            "astrill": "Native settings and effective routes",
+            "astrill": "Native routing, DNS, and effective routes",
             "router": "Runtime status and recovery",
             "extensions": "Catalog and router components",
         }
@@ -901,12 +920,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.window_title.set_subtitle(subtitles[page_id])
         if page_id in {"devices", "astrill"} and not self._clients_loaded:
             self.refresh_clients()
-        if page_id == "locations" and self.servers is None:
+        if page_id in {"connection", "locations"} and self.servers is None:
             self.load_servers()
         if page_id == "services":
             self._render_services()
         if page_id == "astrill" and self.native_settings is None:
-            self.refresh_native_settings(quiet=True)
+            self.refresh_native_settings(quiet=True, force_native=True)
+        if page_id == "connection" and self.native_settings is None:
+            self.refresh_native_settings(quiet=True, force_connection=True)
 
     def _show_services(self) -> None:
         self.nav_list.select_row(self.nav_rows["services"])
@@ -916,6 +937,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_locations(self) -> None:
         self.nav_list.select_row(self.nav_rows["locations"])
+
+    def _show_connection(self) -> None:
+        self.nav_list.select_row(self.nav_rows["connection"])
 
     def _render_rules(self) -> None:
         _clear_list(self.policy_list)
@@ -1500,11 +1524,7 @@ class MainWindow(Adw.ApplicationWindow):
                 row.add_prefix(Gtk.Image.new_from_icon_name("network-vpn-symbolic"))
             connect = Gtk.Button(label="Connected" if connected else "Connect")
             connect.add_css_class("compact-button")
-            connect.set_sensitive(
-                self.store.companion_enabled
-                and not self.store.read_only
-                and not connected
-            )
+            connect.set_sensitive(not self.store.read_only and not connected)
             connect.set_valign(Gtk.Align.CENTER)
             connect.connect(
                 "clicked",
@@ -1625,11 +1645,12 @@ class MainWindow(Adw.ApplicationWindow):
     def _toggle_astrill_connection(self, switch: Gtk.Switch, _param: object) -> None:
         if self._updating_astrill_connection:
             return
+        self._change_astrill_connection(switch.get_active())
+
+    def _change_astrill_connection(self, connected: bool) -> None:
         if not self._require_write_access("changing the Astrill connection"):
             self._update_status()
             return
-        connected = switch.get_active()
-        switch.set_sensitive(False)
 
         def success(status: dict[str, Any]) -> None:
             self._router_refreshed(status)
@@ -2122,28 +2143,72 @@ class MainWindow(Adw.ApplicationWindow):
             quiet=True,
         )
 
-    def refresh_native_settings(self, *, quiet: bool = False) -> None:
+    def refresh_native_settings(
+        self,
+        *,
+        quiet: bool = False,
+        force_native: bool = False,
+        force_connection: bool = False,
+    ) -> None:
         if self._native_settings_loading:
             return
         self._native_settings_loading = True
         self._run_task(
             self.router.native_astrill_settings,
             lambda settings: self._native_settings_refreshed(
-                settings, notify=not quiet
+                settings,
+                notify=not quiet,
+                force_native=force_native,
+                force_connection=force_connection,
             ),
             "Could not load native Astrill settings",
             quiet=quiet,
         )
 
     def _native_settings_refreshed(
-        self, settings: NativeAstrillSettings, *, notify: bool
+        self,
+        settings: NativeAstrillSettings,
+        *,
+        notify: bool,
+        force_native: bool = False,
+        force_connection: bool = False,
     ) -> None:
         self._native_settings_loading = False
         self.native_settings = settings
-        self.native_page.render(settings, self.clients)
+        if force_native or not self.native_page.dirty:
+            self.native_page.render(settings, self.clients)
+        self.connection_page.sync(
+            settings,
+            self.servers or (),
+            self.router_status,
+            force=force_connection,
+        )
         self._render_services()
         if notify:
             self.toast("Native Astrill settings synchronized")
+
+    def confirm_refresh_connection(self) -> None:
+        if not self.connection_page.dirty:
+            self.refresh_native_settings(force_connection=True)
+            return
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Discard unsaved connection changes?",
+            "The connection page will reload the current values from the router.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("reload", "Reload")
+        dialog.set_response_appearance("reload", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect(
+            "response",
+            lambda _dialog, response: (
+                response == "reload"
+                and self.refresh_native_settings(force_connection=True)
+            ),
+        )
+        dialog.present()
 
     def save_native_settings(self) -> None:
         if not self._require_write_access("saving native Astrill settings"):
@@ -2159,13 +2224,121 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         def success(settings: NativeAstrillSettings) -> None:
-            self._native_settings_refreshed(settings, notify=False)
+            self._native_settings_refreshed(
+                settings,
+                notify=False,
+                force_native=True,
+            )
             self.toast("Native Astrill settings saved")
 
         self._run_task(
             lambda: self.router.update_native_astrill_settings(changes),
             success,
             "Could not save native Astrill settings",
+        )
+
+    def save_astrill_connection(self) -> None:
+        if not self._require_write_access("saving the Astrill connection"):
+            return
+        try:
+            draft = self.connection_page.collect()
+        except ValueError as exc:
+            self.toast(str(exc))
+            return
+        if not self.connection_page.dirty:
+            self.toast("Astrill connection settings are already synchronized")
+            return
+        if self.router_status.get("vpn_state") == "up":
+            self.confirm_connect_astrill()
+            return
+
+        def success(settings: NativeAstrillSettings) -> None:
+            self._native_settings_refreshed(
+                settings,
+                notify=False,
+                force_connection=True,
+            )
+            status = dict(self.router_status)
+            status["astrill_server_id"] = draft.selection.server_id
+            status["astrill_protocol"] = draft.selection.protocol
+            self._router_refreshed(status)
+            self.toast("Astrill connection settings saved")
+
+        self._run_task(
+            lambda: self.router.save_astrill_connection(
+                draft.selection,
+                draft.changes,
+            ),
+            success,
+            "Could not save Astrill connection",
+        )
+
+    def confirm_connect_astrill(self) -> None:
+        if not self._require_write_access("changing the Astrill connection"):
+            return
+        try:
+            draft = self.connection_page.collect()
+        except ValueError as exc:
+            self.toast(str(exc))
+            return
+        if not self.connection_page.dirty:
+            self._change_astrill_connection(True)
+            return
+
+        server = self._server_by_id(draft.selection.server_id)
+        server_name = (
+            server.name if server is not None else f"Server {draft.selection.server_id}"
+        )
+        connected = self.router_status.get("vpn_state") == "up"
+        verb = "Reconnect" if connected else "Connect"
+        dialog = Adw.MessageDialog.new(
+            self,
+            f"{verb} to {server_name}?",
+            f"{ASTRILL_PROTOCOL_NAMES[draft.selection.protocol]} on port "
+            f"{draft.selection.port} will be saved to the router. "
+            + (
+                "VPN-routed traffic will pause during reconnection."
+                if connected
+                else "The shared Astrill tunnel will be started."
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("connect", verb)
+        dialog.set_response_appearance("connect", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("connect")
+        dialog.set_close_response("cancel")
+        dialog.connect(
+            "response",
+            lambda _dialog, response: (
+                response == "connect" and self._apply_astrill_connection(draft)
+            ),
+        )
+        dialog.present()
+
+    def _apply_astrill_connection(self, draft: ConnectionDraft) -> None:
+        def success(result: AstrillConnectionResult) -> None:
+            self._native_settings_refreshed(
+                result.settings,
+                notify=False,
+                force_connection=True,
+            )
+            self._router_refreshed(result.status)
+            server = self._server_by_id(draft.selection.server_id)
+            if server is not None:
+                self.store.active_region = self._region_for_server(server)
+                self.store.save()
+            self.toast(
+                f"Connected with {ASTRILL_PROTOCOL_NAMES[draft.selection.protocol]}"
+            )
+
+        self._run_task(
+            lambda: self.router.apply_astrill_connection(
+                draft.selection,
+                draft.changes,
+                companion_enabled=self.store.companion_enabled,
+            ),
+            success,
+            "Could not apply Astrill connection",
         )
 
     def refresh_domains(self, _button: Gtk.Button | None = None) -> None:
@@ -2314,12 +2487,20 @@ class MainWindow(Adw.ApplicationWindow):
         self.check_router_environment(quiet=False)
 
     def check_router_environment(self, *, quiet: bool = True) -> None:
-        def check() -> tuple[dict[str, Any], CompanionCheck]:
+        def check() -> tuple[
+            dict[str, Any],
+            CompanionCheck,
+            NativeAstrillSettings | None,
+        ]:
             if not self.router.ping():
                 raise RuntimeError("router did not acknowledge SSH")
             native_status = self.router.native_astrill_status()
             companion = RouterInstaller(self.router).check()
-            return native_status, companion
+            try:
+                settings = self.router.native_astrill_settings()
+            except RouterError:
+                settings = None
+            return native_status, companion, settings
 
         self._run_task(
             check,
@@ -2329,11 +2510,18 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _router_environment_checked(
-        self, result: tuple[dict[str, Any], CompanionCheck]
+        self,
+        result: tuple[
+            dict[str, Any],
+            CompanionCheck,
+            NativeAstrillSettings | None,
+        ],
     ) -> None:
-        native_status, companion = result
+        native_status, companion, settings = result
         self.astrill_applet_available = native_status.get("health") == "healthy"
         self.router_companion_check = companion
+        if settings is not None:
+            self._native_settings_refreshed(settings, notify=False)
         self.router_ssh_icon.set_from_icon_name("object-select-symbolic")
         self.router_ssh_row.set_subtitle(
             f"Connected as {self.store.router_user} on port {self.store.router_port}"
@@ -2395,6 +2583,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _router_refreshed(self, status: dict[str, Any]) -> None:
         self.router_status = status
+        self.connection_page.update_status(status)
         self._update_status()
         self._render_countries()
         self._render_locations()
@@ -2508,8 +2697,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.astrill_connection_switch.set_sensitive(writable)
         self.astrill_install_button.set_visible(self.astrill_applet_available is False)
         self.astrill_install_button.set_sensitive(self.busy_count == 0)
-        self.choose_location_button.set_sensitive(companion_writable)
-        self.protocol_dropdown.set_sensitive(companion_writable)
+        self.choose_location_button.set_sensitive(writable)
+        self.protocol_dropdown.set_sensitive(writable)
         for control in (
             self.router_repair_button,
             self.router_refresh_domains_button,
@@ -2521,6 +2710,7 @@ class MainWindow(Adw.ApplicationWindow):
         for button in self.router_install_buttons:
             button.set_sensitive(self.busy_count == 0)
         self.native_page.set_read_only(self.store.read_only)
+        self.connection_page.set_read_only(self.store.read_only)
         self._update_recommendation_controls()
 
     def refresh_clients(self) -> None:
@@ -2563,6 +2753,12 @@ class MainWindow(Adw.ApplicationWindow):
         ) -> None:
             self.servers_loading = False
             self.servers, self.server_groups = result
+            if self.native_settings is not None:
+                self.connection_page.sync(
+                    self.native_settings,
+                    self.servers,
+                    self.router_status,
+                )
             self._render_countries()
             self._render_locations()
             self._update_status()
@@ -2619,24 +2815,25 @@ class MainWindow(Adw.ApplicationWindow):
             return
         protocol = self.protocol_dropdown.get_selected()
         try:
-            sid, endpoint = server.endpoint_for(protocol)
+            selection = AstrillConnectionSelection.from_server(server, protocol, 0)
         except ValueError as exc:
             self.toast(str(exc))
             return
 
-        def switch() -> dict[str, Any]:
-            return self.router.switch_astrill(
-                server_id=server.id,
-                sid=sid,
-                encoded_ip=endpoint.encoded_ip,
-                port=endpoint.port,
-                port_index=endpoint.port_index,
-                protocol=protocol,
-                vpn_mode=endpoint.vpn_mode_for(protocol),
+        def switch() -> AstrillConnectionResult:
+            return self.router.apply_astrill_connection(
+                selection,
+                {},
+                companion_enabled=self.store.companion_enabled,
             )
 
-        def success(status: dict[str, Any]) -> None:
-            self.router_status = status
+        def success(result: AstrillConnectionResult) -> None:
+            self.router_status = result.status
+            self._native_settings_refreshed(
+                result.settings,
+                notify=False,
+                force_connection=True,
+            )
             self.store.active_region = self._region_for_server(server)
             self.store.save()
             self._protocol_user_selected = False
@@ -2792,6 +2989,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.store.read_only = False
             self.store.save()
             self.native_page.set_read_only(False)
+            self.connection_page.set_read_only(False)
             self.access_banner.set_revealed(False)
             if check.status is not None:
                 self._router_refreshed(check.status)
@@ -2848,6 +3046,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.store.read_only = False
             self.store.save()
             self.native_page.set_read_only(False)
+            self.connection_page.set_read_only(False)
             self.access_banner.set_revealed(False)
             self._router_refreshed(result.status)
             self.toast(f"Router companion {result.version} installed")
@@ -2905,6 +3104,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.busy_count += 1
         self.apply_button.set_sensitive(False)
         self.native_page.set_busy(True)
+        self.connection_page.set_busy(True)
         self._update_recommendation_controls()
 
         def runner() -> None:
@@ -2947,7 +3147,9 @@ class MainWindow(Adw.ApplicationWindow):
         if prefix == "Could not load native Astrill settings":
             self._native_settings_loading = False
         if prefix in {
+            "Could not apply Astrill connection",
             "Could not change Astrill connection",
+            "Could not save Astrill connection",
             "Could not fully restore native Astrill",
         }:
             self.refresh_router()
@@ -2961,6 +3163,7 @@ class MainWindow(Adw.ApplicationWindow):
             and self.busy_count == 0
         )
         self.native_page.set_busy(self.busy_count != 0)
+        self.connection_page.set_busy(self.busy_count != 0)
         self._update_recommendation_controls()
 
     def _require_write_access(self, action: str) -> bool:
