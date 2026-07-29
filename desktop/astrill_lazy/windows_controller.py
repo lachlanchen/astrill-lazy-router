@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .astrill import AstrillServer, group_by_region, parse_applet
@@ -15,6 +16,12 @@ from .router import RouterClient
 from .service_policy import ServiceRouteMode, service_policy_route
 from .ssh_setup import identity_path
 from .store import ConfigStore
+from .windows_ssh_setup import (
+    WindowsHostKey,
+    WindowsKeyAuthorization,
+    authorize_windows_router_key_via_telnet,
+    inspect_windows_host_key,
+)
 
 SSH_HOST_RE = re.compile(r"^[a-zA-Z0-9._:\[\]-]{1,255}$")
 SSH_USER_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
@@ -126,6 +133,49 @@ class WindowsController:
 
     def test_connection(self) -> bool:
         return self.router.ping()
+
+    def inspect_router_host_key(self) -> WindowsHostKey:
+        if self.store.router_use_ssh_config:
+            raise ControllerError(
+                "guided key setup requires explicit host, user, port, and "
+                "private-key fields; disable OpenSSH config mode first"
+            )
+        return inspect_windows_host_key(
+            self.store.router_host,
+            self.store.router_port,
+            known_hosts_path=self.known_hosts_path,
+        )
+
+    def authorize_router_key_via_telnet(
+        self,
+        host_key: WindowsHostKey,
+        password: str,
+        *,
+        confirmed: bool = False,
+    ) -> WindowsKeyAuthorization:
+        if not confirmed:
+            raise ControllerError(
+                "explicit SSH fingerprint and Telnet warning confirmation is required"
+            )
+        if self.store.router_use_ssh_config:
+            raise ControllerError(
+                "guided key setup is unavailable while OpenSSH config mode is enabled"
+            )
+        if (
+            host_key.host != self.store.router_host
+            or host_key.port != self.store.router_port
+            or host_key.known_hosts_path != self.known_hosts_path
+        ):
+            raise ControllerError(
+                "router settings changed after the SSH fingerprint was inspected"
+            )
+        return authorize_windows_router_key_via_telnet(
+            self.router,
+            host_key,
+            password,
+            user=self.store.router_user,
+            identity_file=self.store.router_identity,
+        )
 
     def refresh_status(self) -> dict[str, Any]:
         if self.store.companion_enabled:
@@ -399,4 +449,9 @@ class WindowsController:
             port=self.store.router_port,
             identity_file=self.store.router_identity,
             host_key_policy="yes",
+            known_hosts_file=self.known_hosts_path,
         )
+
+    @property
+    def known_hosts_path(self) -> Path:
+        return self.store.path.with_name("known_hosts")

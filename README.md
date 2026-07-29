@@ -150,8 +150,8 @@ shared or untrusted LAN.
 - PySide6 and Windows OpenSSH Client for the native Windows build;
 - a DD-WRT router with a working Astrill applet;
 - LAN access to DD-WRT SSH (first-run defaults are `192.168.1.1`, user `root`,
-  port `22`, and a dedicated Ed25519 identity path; Ubuntu onboarding can
-  generate and authorize it, while Windows uses an existing authorized key);
+  port `22`, and a dedicated Ed25519 identity path; both native apps can
+  generate and authorize it, with Windows using one-time LAN Telnet setup);
 - enough router NVRAM for the packaged companion.
 
 Review [router prerequisites and rollback](docs/ROUTER_INSTALL.md) before the
@@ -200,8 +200,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 The per-user installer creates one Desktop shortcut, deliberately creates no
 Start Menu entry, and does not launch the app. Before the first connection,
-use its interactive SSH setup action to inspect and accept the DD-WRT host key;
-normal app commands require already-verified key-only Windows OpenSSH access.
+use **Set up key via Telnet** to confirm the DD-WRT SSH fingerprint, generate
+the dedicated key, send its public half through the one-time LAN Telnet
+session, and verify strict key-only Windows OpenSSH access.
 See [Native Windows Application](docs/WINDOWS_APP.md) for the complete build,
 installation, safety, and host-key procedure.
 

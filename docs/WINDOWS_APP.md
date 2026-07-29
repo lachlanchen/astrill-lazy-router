@@ -37,7 +37,8 @@ Running the packaged application requires:
 - Windows 10 or Windows 11;
 - the Windows OpenSSH Client (`ssh.exe`) on `PATH`;
 - a DD-WRT router with a working Astrill applet;
-- verified key-only root SSH access to the router.
+- verified key-only root SSH access to the router, or temporary LAN Telnet
+  access for guided first-time key authorization.
 
 Check OpenSSH from PowerShell:
 
@@ -131,19 +132,39 @@ installer. Launch it from the Desktop shortcut or directly:
 & "$env:LOCALAPPDATA\Programs\Astrill Lazy Router\Astrill Lazy Router.exe"
 ```
 
-## Verify The SSH Host Key
+## Set Up The Dedicated SSH Key
 
-The application delegates host-key and private-key handling to Windows
-OpenSSH. It does not copy, generate, or store a private key, and its background
-router commands use `BatchMode=yes` plus `StrictHostKeyChecking=yes`. Password
-prompts and first-contact host-key prompts therefore fail closed.
+The application generates or reuses a dedicated local Ed25519 key through
+Windows OpenSSH. The private key remains under the configured local path; only
+its public half is sent to DD-WRT. Background router commands use
+`BatchMode=yes`, `IdentitiesOnly=yes`, `StrictHostKeyChecking=yes`, and the
+application-pinned `known_hosts` file. Password prompts and unverified host
+keys therefore fail closed.
 
 The fresh Settings values are host `192.168.1.1`, user `root`, port `22`, and
-private-key path `~/.ssh/astrill_lazy_router_ed25519`. Change the key path to an
-existing authorized key, or create and authorize the dedicated key through
-your normal DD-WRT provisioning method. An SSH alias can also be used as the
-host field. Select **Use OpenSSH config for user, port, and private key** when
-the alias should supply those options:
+private-key path `~/.ssh/astrill_lazy_router_ed25519`. For guided setup:
+
+1. Keep the PC and router on a trusted local network.
+2. Enter the explicit host, user, port, and identity path in **Settings**.
+3. Select **Set up key via Telnet**.
+4. Compare the displayed SSH algorithm and SHA-256 fingerprint with a trusted
+   router record, Web UI, label, or local console. Cancel if it cannot be
+   verified.
+5. Confirm the Telnet warning and enter the router's root Telnet password.
+6. Wait for both strict key-only SSH checks to succeed.
+
+Telnet sends credentials without encryption. The guided flow therefore uses
+it once on the LAN and only after fingerprint confirmation. The password is
+held transiently in application memory and is never saved in configuration,
+logs, command arguments, or environment variables. The setup script verifies
+router UID 0, preserves existing authorized keys, appends the public key
+idempotently, and restarts SSH. It disables SSH password authentication and
+WAN SSH only after Windows OpenSSH proves that the dedicated key works, then
+verifies key-only access again. Telnet itself remains available as the
+documented recovery path.
+
+An SSH alias can instead be used as the host field. Select **Use OpenSSH config
+for user, port, and private key** when the alias should supply those options:
 
 ```sshconfig
 Host astrill-router
@@ -153,22 +174,11 @@ Host astrill-router
     IdentitiesOnly yes
 ```
 
-Then establish trust deliberately:
-
-1. Obtain the router SSH host-key fingerprint through a trusted path, such as
-   its local console or the record made when SSH was provisioned.
-2. Open **Settings** in Astrill Lazy Router and enter the host or alias, SSH
-   user, port, and private-key path. For a complete alias, select **Use OpenSSH
-   config for user, port, and private key**.
-3. Select **Open interactive SSH setup**.
-4. Compare the fingerprint shown by `ssh.exe` with the trusted fingerprint.
-   Type `yes` only when they match.
-5. Complete public-key setup if needed, close the terminal, and select **Save
-   and test**. The test must succeed without a password prompt.
-
-The interactive terminal explicitly uses `StrictHostKeyChecking=ask`. The
-application never supplies `StrictHostKeyChecking=no` and never auto-accepts a
-new key. If OpenSSH reports that a host key changed, first
+Guided onboarding requires explicit fields rather than an alias. The
+interactive terminal remains available as an advanced fallback and explicitly
+uses `StrictHostKeyChecking=ask`. The application never supplies
+`StrictHostKeyChecking=no` and never auto-accepts a new key. If OpenSSH reports
+that a host key changed, first
 verify that the router was intentionally replaced, reset, or rekeyed. Only
 after that independent verification should the affected entry named in the
 error be removed:
@@ -202,16 +212,17 @@ automatically install or repair the companion.
 
 Recommended first-use sequence:
 
-1. Verify and test SSH in **Settings**.
+1. Set up and test key-only SSH in **Settings**.
 2. Keep the read-only guard enabled while reviewing **Router**, **Astrill**,
    **Devices**, and **Endpoints**.
 3. Add or edit local policies if desired. This changes only the current user's
    configuration.
 4. Review the router prerequisites and recovery procedure in
    [Router Installation And Rollback](ROUTER_INSTALL.md).
-5. Disable the guard only when router changes are intended and confirm the
-   warning.
-6. Install the optional companion from **Router**, then apply policies.
+5. Select **Install / upgrade** in **Router** and confirm the exact DD-WRT
+   writes. On a fresh profile that confirmation also disables the local guard;
+   a failed installation restores it automatically.
+6. Apply policies only through the separate confirmation when intended.
 
 Guarded remote write operations include native Astrill setting changes,
 connection changes, companion installation, policy application, endpoint
@@ -258,8 +269,10 @@ The Windows configuration is stored at:
 
 `XDG_CONFIG_HOME`, when explicitly set, takes precedence. The configuration
 contains the SSH target, local policies, enabled catalog IDs, companion mode,
-and read-only state. It does not contain the SSH private key, router password,
-or Astrill account credentials.
+and read-only state. The confirmed SSH host key is pinned beside it as
+`known_hosts`. The dedicated private key remains at its separately configured
+path. Neither file contains the router Telnet password or Astrill account
+credentials.
 
 Uninstall the native application with:
 

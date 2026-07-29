@@ -18,10 +18,14 @@ Fresh desktop profiles can instead address `192.168.1.1` directly. The GUI
 stores the host, user, port, and identity path, but never the router password.
 Authorize Key passes a transient password to `sshpass` through its environment,
 verifies the generated Ed25519 key, and only then disables SSH password login.
-That authorization workflow is Ubuntu-only. The Windows controller does not
-use `sshpass`: its background commands require a previously verified host key
-with `StrictHostKeyChecking=yes`, and its interactive setup explicitly prompts
-with `StrictHostKeyChecking=ask`.
+The Windows controller does not use `sshpass`. Guided onboarding shows the
+candidate SHA-256 SSH fingerprint before any credential prompt, pins the
+confirmed key in the application configuration directory, and uses a transient
+LAN Telnet password only to append the generated public key. Telnet is
+unencrypted and must be used only on a trusted local network. The password is
+never written to disk, logs, process arguments, or environment variables.
+Normal Windows commands then use the pinned file, `BatchMode=yes`, and
+`StrictHostKeyChecking=yes`.
 
 Telnet remains enabled as a deliberate recovery mechanism. This is less secure
 than SSH on an untrusted LAN. Disable it only after confirming another console

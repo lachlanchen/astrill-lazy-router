@@ -40,6 +40,7 @@ class RouterClient:
         port: int | None = None,
         identity_file: str | Path | None = None,
         host_key_policy: str = "accept-new",
+        known_hosts_file: str | Path | None = None,
     ) -> None:
         if host_key_policy not in {"accept-new", "yes"}:
             raise ValueError("SSH host-key policy must be 'accept-new' or 'yes'")
@@ -50,6 +51,11 @@ class RouterClient:
         self.host_key_policy = host_key_policy
         self.identity_file = (
             str(Path(identity_file).expanduser()) if identity_file is not None else None
+        )
+        self.known_hosts_file = (
+            str(Path(known_hosts_file).expanduser())
+            if known_hosts_file is not None
+            else None
         )
 
     def ping(self) -> bool:
@@ -366,6 +372,8 @@ done
             arguments.extend(("-p", str(self.port)))
         if self.identity_file is not None:
             arguments.extend(("-o", "IdentitiesOnly=yes", "-i", self.identity_file))
+        if self.known_hosts_file is not None:
+            arguments.extend(("-o", f"UserKnownHostsFile={self.known_hosts_file}"))
         return arguments
 
 

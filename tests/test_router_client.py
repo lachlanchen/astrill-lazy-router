@@ -63,6 +63,7 @@ def test_remote_commands_use_stable_key_only_ssh_options(
         user="root",
         port=2222,
         identity_file="~/.ssh/router-key",
+        known_hosts_file="~/.ssh/astrill-lazy-known-hosts",
     )
 
     assert client.ping()
@@ -76,6 +77,10 @@ def test_remote_commands_use_stable_key_only_ssh_options(
     assert captured[captured.index("-p") + 1] == "2222"
     assert captured[captured.index("-i") + 1] == str(
         Path("~/.ssh/router-key").expanduser()
+    )
+    assert (
+        f"UserKnownHostsFile={Path('~/.ssh/astrill-lazy-known-hosts').expanduser()}"
+        in captured
     )
     assert "root@192.168.1.1" in captured
 

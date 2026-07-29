@@ -92,7 +92,9 @@ automatically install or repair the companion. Those actions remain explicit
 in its Router view. Follow the
 [Windows build, install, and verified SSH setup](WINDOWS_APP.md) before first
 use. Its spacious native layout uses a scrollable Settings page and adapts its
-opening size to the available Windows desktop.
+opening size to the available Windows desktop. Guided Settings onboarding can
+generate the dedicated Ed25519 key and authorize its public half through a
+confirmation-gated, one-time LAN Telnet session.
 
 ## Frontend Differences
 

@@ -17,6 +17,10 @@ from astrill_lazy.native_settings import NativeAstrillSettings
 from astrill_lazy.service_policy import ServiceRouteMode
 from astrill_lazy.store import ConfigStore
 from astrill_lazy.windows_controller import ControllerError, WindowsController
+from astrill_lazy.windows_ssh_setup import (
+    WindowsHostKey,
+    WindowsKeyAuthorization,
+)
 
 
 class FakeRouter:
@@ -153,6 +157,7 @@ def test_configure_router_validates_and_persists_without_connecting(
                 "port": 22,
                 "identity_file": "~/.ssh/astrill_lazy_router_ed25519",
                 "host_key_policy": "yes",
+                "known_hosts_file": tmp_path / "known_hosts",
             },
         )
     ]
@@ -256,12 +261,79 @@ def test_legacy_ssh_alias_and_composite_target_keep_openssh_configuration(
             "port": 2222,
             "identity_file": "~/.ssh/router",
             "host_key_policy": "yes",
+            "known_hosts_file": tmp_path / "known_hosts",
         },
     )
     loaded = ConfigStore(path)
     assert loaded.router_host == "192.168.1.1"
     assert loaded.router_user == "admin"
     assert loaded.router_use_ssh_config is False
+
+
+def test_guided_telnet_key_setup_requires_confirmation_and_never_saves_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    router = FakeRouter()
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+    store.save()
+    inspected = WindowsHostKey(
+        host="192.168.1.1",
+        port=22,
+        key_type="ssh-ed25519",
+        key_base64="AAAATEST",
+        fingerprint="SHA256:test",
+        trust_state="unknown",
+        known_hosts_path=tmp_path / "known_hosts",
+    )
+    monkeypatch.setattr(
+        controller_module,
+        "inspect_windows_host_key",
+        lambda *_args, **_kwargs: inspected,
+    )
+    assert controller.inspect_router_host_key() == inspected
+
+    with pytest.raises(ControllerError, match="confirmation"):
+        controller.authorize_router_key_via_telnet(
+            inspected,
+            "one-time-secret",
+        )
+
+    captured: dict[str, object] = {}
+    authorized = WindowsKeyAuthorization(
+        host_key=inspected,
+        identity_file=tmp_path / "key",
+        password_login_disabled=True,
+    )
+
+    def authorize(*args: object, **options: object) -> WindowsKeyAuthorization:
+        captured["args"] = args
+        captured["options"] = options
+        return authorized
+
+    monkeypatch.setattr(
+        controller_module,
+        "authorize_windows_router_key_via_telnet",
+        authorize,
+    )
+    assert (
+        controller.authorize_router_key_via_telnet(
+            inspected,
+            "one-time-secret",
+            confirmed=True,
+        )
+        == authorized
+    )
+    assert captured["args"][2] == "one-time-secret"  # type: ignore[index]
+    assert captured["options"] == {
+        "user": "root",
+        "identity_file": "~/.ssh/astrill_lazy_router_ed25519",
+    }
+    assert "one-time-secret" not in store.path.read_text(encoding="utf-8")
 
 
 def test_read_only_blocks_every_router_mutation_before_dispatch(

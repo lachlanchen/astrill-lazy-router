@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -62,6 +63,7 @@ from .native_settings import (
 )
 from .service_policy import ServiceRouteMode
 from .windows_controller import WindowsController
+from .windows_ssh_setup import WindowsHostKey, WindowsKeyAuthorization
 
 APP_NAME = "Astrill Lazy Router"
 
@@ -912,12 +914,14 @@ class MainWindow(QMainWindow):
             ("Roll back", self._rollback),
             ("Restore native only", self._restore_native),
         )
+        self.companion_action_buttons: dict[str, QPushButton] = {}
         for column, (label, callback) in enumerate(actions):
             button = QPushButton(label)
             if label == "Restore native only":
                 button.setObjectName("danger")
             button.clicked.connect(callback)
             companion_layout.addWidget(button, 1, column)
+            self.companion_action_buttons[label] = button
         layout.addWidget(companion)
 
         self.raw_status = QPlainTextEdit()
@@ -955,22 +959,31 @@ class MainWindow(QMainWindow):
         self.ssh_config_check.toggled.connect(self._sync_ssh_fields)
         form.addRow("", self.ssh_config_check)
         host_actions = QHBoxLayout()
-        save_test = QPushButton("Save and test")
+        save_test = QPushButton("Test key access")
         save_test.clicked.connect(self._save_and_test_host)
         host_actions.addWidget(save_test)
+        self.setup_key_button = QPushButton("Set up key via Telnet")
+        self.setup_key_button.setObjectName("primary")
+        self.setup_key_button.clicked.connect(self._setup_key_via_telnet)
+        host_actions.addWidget(self.setup_key_button)
         trust = QPushButton("Open interactive SSH setup")
         trust.clicked.connect(self._open_ssh_setup)
         host_actions.addWidget(trust)
         host_actions.addStretch(1)
         form.addRow("", host_actions)
         guidance = QLabel(
-            "The app never auto-accepts an SSH host key. Use the interactive "
-            "setup button to inspect and accept the DD-WRT fingerprint, then "
-            "complete public-key setup and return here to test key-only access."
+            "Guided setup generates a dedicated Ed25519 key, shows the SSH "
+            "fingerprint for confirmation, and sends only the public key through "
+            "LAN Telnet port 23. Telnet is unencrypted, so use it only on a "
+            "trusted local network. The password is used once and never saved."
         )
         guidance.setWordWrap(True)
         guidance.setProperty("class", "muted")
         form.addRow("", guidance)
+        self.ssh_setup_status = QLabel("Key-only SSH has not been verified.")
+        self.ssh_setup_status.setProperty("class", "muted")
+        self.ssh_setup_status.setWordWrap(True)
+        form.addRow("Setup status", self.ssh_setup_status)
         self._sync_ssh_fields()
         layout.addWidget(connection)
 
@@ -1569,25 +1582,45 @@ class MainWindow(QMainWindow):
         )
 
     def _install_companion(self) -> None:
+        was_read_only = self.controller.store.read_only
+        guard_detail = (
+            "\n\nThis confirmation also turns off the local read-only guard. "
+            "The guard is restored automatically if installation fails."
+            if was_read_only
+            else ""
+        )
         if (
             QMessageBox.warning(
                 self,
                 "Install DD-WRT companion",
                 "This writes the validated companion package, startup hook, "
-                "watchdog, routes, and MyPage entries to DD-WRT. Continue?",
+                "watchdog, routes, and MyPage entries to DD-WRT. It does not "
+                "change Astrill account credentials or the selected endpoint."
+                f"{guard_detail}\n\nContinue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
             != QMessageBox.StandardButton.Yes
         ):
             return
+        if was_read_only:
+            self.controller.set_read_only(False)
+            self._sync_access_ui()
 
         def installed(result: object) -> None:
             self._status_loaded(result.status)  # type: ignore[attr-defined]
 
+        def install() -> object:
+            try:
+                return self.controller.install_companion()
+            except Exception:
+                if was_read_only:
+                    self.controller.set_read_only(True)
+                raise
+
         self._run_task(
             "Installing DD-WRT companion",
-            self.controller.install_companion,
+            install,
             installed,
         )
 
@@ -1645,31 +1678,136 @@ class MainWindow(QMainWindow):
         )
 
     def _save_and_test_host(self) -> None:
-        try:
-            self.controller.configure_router(
-                self.host_entry.text(),
-                user=self.user_entry.text(),
-                port=self.port_entry.value(),
-                identity_file=self.identity_entry.text(),
-                use_ssh_config=self.ssh_config_check.isChecked(),
-            )
-        except ValueError as exc:
-            QMessageBox.warning(self, "Invalid SSH target", str(exc))
+        if not self._save_router_fields():
             return
-        self._show_saved_router_fields()
         self._run_task(
             "Testing key-only SSH",
             self.controller.test_connection,
-            lambda ready: QMessageBox.information(
-                self,
-                "Router SSH",
-                "Key-only SSH is ready."
-                if ready
-                else "The router did not return the expected response.",
-            ),
+            self._key_access_tested,
         )
 
-    def _open_ssh_setup(self) -> None:
+    def _setup_key_via_telnet(self) -> None:
+        if not self._save_router_fields():
+            return
+        if self.controller.store.router_use_ssh_config:
+            QMessageBox.warning(
+                self,
+                "Guided key setup",
+                "Disable OpenSSH config mode and use the explicit host, user, "
+                "port, and private-key fields for guided setup.",
+            )
+            return
+        self.ssh_setup_status.setText("Inspecting the router SSH host key...")
+        self._run_task(
+            "Inspecting router SSH fingerprint",
+            self.controller.inspect_router_host_key,
+            self._router_host_key_inspected,
+        )
+
+    def _router_host_key_inspected(self, result: object) -> None:
+        if not isinstance(result, WindowsHostKey):
+            return
+        if result.trust_state == "changed":
+            self.ssh_setup_status.setText("Blocked: the saved SSH host key changed.")
+            QMessageBox.critical(
+                self,
+                "SSH host key changed",
+                "The router presents a different SSH key than the pinned key. "
+                "No password or public key was sent. Verify the router through "
+                "a trusted path before replacing any known_hosts entry.",
+            )
+            return
+        state = {
+            "trusted": "already pinned",
+            "additional": "an additional key type",
+            "unknown": "not yet trusted",
+        }.get(result.trust_state, result.trust_state)
+        detail = (
+            f"Router: {result.host}:{result.port}\n"
+            f"Algorithm: {result.key_type}\n"
+            f"Fingerprint: {result.fingerprint}\n"
+            f"Local state: {state}\n\n"
+            "Confirm only if this fingerprint belongs to your DD-WRT router.\n\n"
+            "Continuing uses Telnet port 23 once. Telnet sends the supplied "
+            "password unencrypted over the local network. The app sends only "
+            "the generated public key, verifies strict key-only SSH, then "
+            "disables SSH password and WAN SSH access. Telnet remains enabled "
+            "as a recovery path."
+        )
+        answer = QMessageBox.warning(
+            self,
+            "Confirm router fingerprint and Telnet setup",
+            detail,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.ssh_setup_status.setText(
+                "Cancelled before trusting the host key or requesting a password."
+            )
+            return
+        password, accepted = QInputDialog.getText(
+            self,
+            "One-time router Telnet password",
+            f"Password for {self.controller.store.router_user}@"
+            f"{self.controller.store.router_host} (used once, never saved):",
+            QLineEdit.EchoMode.Password,
+        )
+        if not accepted:
+            self.ssh_setup_status.setText("Cancelled before sending a Telnet password.")
+            return
+        if not password:
+            QMessageBox.warning(
+                self,
+                "Router key setup",
+                "The router Telnet password cannot be empty.",
+            )
+            return
+        self.ssh_setup_status.setText("Generating and authorizing the dedicated key...")
+        self._run_task(
+            "Authorizing key through router Telnet",
+            lambda supplied_password=password: (
+                self.controller.authorize_router_key_via_telnet(
+                    result,
+                    supplied_password,
+                    confirmed=True,
+                )
+            ),
+            self._router_key_authorized,
+        )
+        password = ""
+
+    def _router_key_authorized(self, result: object) -> None:
+        if not isinstance(result, WindowsKeyAuthorization):
+            return
+        hardening = (
+            "SSH password login and WAN SSH are disabled."
+            if result.password_login_disabled
+            else "SSH password login remains enabled."
+        )
+        self.ssh_setup_status.setText(
+            f"Key-only SSH verified with {result.identity_file}. {hardening}"
+        )
+        QMessageBox.information(
+            self,
+            "Router key access is ready",
+            "The dedicated public key was authorized and strict key-only SSH "
+            f"was verified. {hardening} Telnet remains enabled for recovery.",
+        )
+        self._refresh_status()
+
+    def _key_access_tested(self, ready: object) -> None:
+        if bool(ready):
+            self.ssh_setup_status.setText("Key-only SSH is verified and ready.")
+        QMessageBox.information(
+            self,
+            "Router SSH",
+            "Key-only SSH is ready."
+            if ready
+            else "The router did not return the expected response.",
+        )
+
+    def _save_router_fields(self) -> bool:
         try:
             self.controller.configure_router(
                 self.host_entry.text(),
@@ -1680,10 +1818,15 @@ class MainWindow(QMainWindow):
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid SSH target", str(exc))
+            return False
+        self._show_saved_router_fields()
+        return True
+
+    def _open_ssh_setup(self) -> None:
+        if not self._save_router_fields():
             return
         from PySide6.QtCore import QProcess
 
-        self._show_saved_router_fields()
         arguments = [
             "/k",
             "ssh.exe",
@@ -1701,6 +1844,12 @@ class MainWindow(QMainWindow):
             identity = Path(self.controller.store.router_identity).expanduser()
             if identity.is_file():
                 arguments.extend(("-i", str(identity)))
+            arguments.extend(
+                (
+                    "-o",
+                    f"UserKnownHostsFile={self.controller.known_hosts_path}",
+                )
+            )
             arguments.append(target)
         if not QProcess.startDetached(
             "cmd.exe",
@@ -1725,6 +1874,7 @@ class MainWindow(QMainWindow):
         self.user_entry.setEnabled(explicit)
         self.port_entry.setEnabled(explicit)
         self.identity_entry.setEnabled(explicit)
+        self.setup_key_button.setEnabled(explicit and self.busy_count == 0)
 
     def _toggle_read_only(self, checked: bool) -> None:
         if self._syncing_access:
@@ -1757,6 +1907,17 @@ class MainWindow(QMainWindow):
         self.apply_button.setEnabled(companion_writable)
         self.save_native_button.setEnabled(writable)
         self.refresh_button.setEnabled(self.busy_count == 0)
+        idle = self.busy_count == 0
+        if hasattr(self, "companion_action_buttons"):
+            self.companion_action_buttons["Install / upgrade"].setEnabled(idle)
+            for label in (
+                "Repair",
+                "Refresh domains",
+                "Roll back",
+                "Restore native only",
+            ):
+                self.companion_action_buttons[label].setEnabled(companion_writable)
+        self._sync_ssh_fields()
 
     def _region_choices(self) -> list[tuple[str, str]]:
         return [(region.id, region.name) for region in self.controller.catalog.regions]
