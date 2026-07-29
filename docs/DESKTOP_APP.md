@@ -230,6 +230,13 @@ threads with a 1.5-second timeout, and caches results until the endpoint
 catalog is reloaded. The measurement follows the desktop's current path; it
 performs no router SSH, firewall change, or periodic background scan.
 
+Each row has stable Country, Ping, and Action columns. Country labels are
+normalized from the installed applet's endpoint names, independently of the
+broader policy-region groups. Clicking Country toggles A-Z/Z-A; clicking Ping
+toggles fastest/slowest measured results. Pending, no-reply, and unmeasured
+rows remain below successful measurements in either speed direction. The
+initial order remains the applet's own order.
+
 ### Router
 
 The Router view reports the upstream Astrill connection and companion policy

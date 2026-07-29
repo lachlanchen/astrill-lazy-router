@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.7 - 2026-07-30
+
+- Add stable Country, Ping, and Action columns to the Endpoints view using
+  normalized country names from Astrill's installed server catalog.
+- Make the Country and Ping headers sortable in both directions while keeping
+  pending, no-reply, and unmeasured endpoints below valid latency results.
+- Preserve Astrill's applet order by default and retain the automatic first
+  latency measurement plus the explicit filtered Ping refresh.
+
 ## 0.2.6 - 2026-07-29
 
 - Parse Astrill's encoded endpoint-address map and expose a validated TCP probe

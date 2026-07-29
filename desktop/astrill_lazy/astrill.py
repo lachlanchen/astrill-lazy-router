@@ -24,6 +24,20 @@ IP_RE = re.compile(
 )
 ENDPOINT_ADDRESS_RE = re.compile(r"(?<![0-9-])(-?\d+)=((?:\d{1,3}\.){3}\d{1,3})(?=;)")
 PORT_RE = re.compile(r"^\d{1,5}(?:-\d{1,5})?$")
+SERVER_COUNTRY_QUALIFIER_RE = re.compile(
+    r"\s+(?:Supercharged(?:\s+\d+)?|10GB?(?:-\d+)?|[A-Z]{1,3}\d+|\d+)$"
+)
+SERVER_COUNTRY_ALIASES = {
+    "usa": "United States",
+    "uk": "United Kingdom",
+    "korea": "South Korea",
+    "czechia": "Czech Republic",
+}
+SERVER_CITY_COUNTRIES = {
+    "buffalo": "United States",
+    "los angeles": "United States",
+    "seattle": "United States",
+}
 
 
 @dataclass(frozen=True)
@@ -258,6 +272,26 @@ class AstrillServer:
             ),
         )
         return endpoint.address, _probe_port(endpoint)
+
+    def country_name(self) -> str:
+        return endpoint_country_name(self.name)
+
+
+def endpoint_country_name(server_name: str) -> str:
+    value = server_name.lstrip("* ").strip()
+    if not value:
+        return "Other"
+    if value.startswith("[") and "]" in value:
+        candidate = value[1 : value.index("]")].strip()
+    else:
+        candidate = value.split(" - ", 1)[0].strip()
+        candidate = SERVER_COUNTRY_QUALIFIER_RE.sub("", candidate).strip()
+    if not candidate:
+        return "Other"
+    normalized = candidate.casefold()
+    if normalized in SERVER_CITY_COUNTRIES:
+        return SERVER_CITY_COUNTRIES[normalized]
+    return SERVER_COUNTRY_ALIASES.get(normalized, candidate)
 
 
 def parse_astrill_favorites(value: str) -> tuple[AstrillFavorite, ...]:
