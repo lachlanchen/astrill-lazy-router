@@ -4,8 +4,13 @@ import gzip
 
 from astrill_lazy.astrill import (
     ASTRILL_PROTOCOL_NAMES,
+    AstrillConnectionSelection,
+    AstrillFavorite,
+    AstrillServer,
     group_by_region,
     parse_applet,
+    parse_astrill_favorites,
+    serialize_astrill_favorites,
     unpack_applet,
 )
 from astrill_lazy.models import Region
@@ -59,3 +64,53 @@ def test_protocol_names_match_applet_codes() -> None:
         "RouterPro VPN UDP",
         "RouterPro VPN TCP",
     )
+
+
+def test_connection_options_follow_protocol_and_port_records() -> None:
+    server = parse_applet(
+        b"this.list = [{id:9,name:'Test',servers:["
+        b"{id:70,lf:1,ips:["
+        b"{ip:100,port:8292,mode:0,proto:0,index:1,protop:5},"
+        b"{ip:101,port:53,mode:0,proto:0,index:2,protop:5},"
+        b"{ip:102,port:443,mode:1,proto:1,index:1,protop:6},"
+        b"{ip:103,port:'1-65535',mode:0,proto:134,index:0}"
+        b"]},"
+        b"{id:71,lf:1,ips:["
+        b"{ip:200,port:8292,mode:0,proto:0,index:1,protop:5},"
+        b"{ip:201,port:53,mode:0,proto:0,index:2,protop:5},"
+        b"{ip:202,port:443,mode:1,proto:1,index:1,protop:6},"
+        b"{ip:203,port:'1-65535',mode:0,proto:134,index:0}"
+        b"]}]}];"
+    )[0]
+
+    assert server.supported_protocols() == (0, 1, 2)
+    assert [(item.index, item.port) for item in server.port_options(0)] == [
+        (1, "8292"),
+        (2, "53"),
+    ]
+    selection = AstrillConnectionSelection.from_server(server, 0, 2)
+    assert selection.native_values() == {
+        "astrill_serverid": "9",
+        "astrill_sid": "70",
+        "astrill_ip": "101",
+        "astrill_port": "53",
+        "astrill_portindex": "2",
+        "astrill_protocol": "0",
+        "astrill_vpnmode": "5",
+    }
+
+
+def test_empty_server_has_no_connection_options() -> None:
+    server = AstrillServer(9, "Empty", ())
+
+    assert server.supported_protocols() == ()
+    assert server.port_options(0) == ()
+
+
+def test_favorites_round_trip_in_native_applet_format() -> None:
+    original = "1109:536872021:1-65535:0:6:1109,458:536871370:443:1:6:458"
+    favorites = parse_astrill_favorites(original)
+
+    assert favorites[0].server_id == 1109
+    assert serialize_astrill_favorites(favorites) == original
+    assert AstrillFavorite.parse(favorites[0].to_native()) == favorites[0]

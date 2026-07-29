@@ -25,6 +25,13 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.4" date="2026-07-29">
+      <description>
+        <p>Adds a synchronized native Astrill connection view with validated
+        endpoint, protocol, port, transport, favorite, and resilience controls
+        plus recoverable reconnects.</p>
+      </description>
+    </release>
     <release version="0.2.3" date="2026-07-29">
       <description>
         <p>Add native-only inspection, reversible native-policy overlays,

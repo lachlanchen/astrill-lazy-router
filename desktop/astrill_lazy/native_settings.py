@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from .astrill import parse_astrill_favorites
 from .models import DOMAIN_RE, RouteTarget
 
 SAFE_NATIVE_ASTRILL_KEYS = (
@@ -51,6 +52,7 @@ WRITABLE_NATIVE_ASTRILL_KEYS = frozenset(
         "astrill_accel",
         "astrill_blockinternet",
         "astrill_autocycle",
+        "astrill_favlist",
         "astrill_routingmode",
         "astrill_devmode",
         "astrill_adsblock",
@@ -98,6 +100,13 @@ MODE_KEYS = {
 
 MAC_RE = re.compile(r"^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 INTERFACE_LIST_RE = re.compile(r"^[a-zA-Z0-9_.:-]*(?:;[a-zA-Z0-9_.:-]+)*$")
+
+CIPHER_OPTIONS = (
+    ("default", "Default"),
+    ("AES-128-CBC", "AES 128-bit"),
+    ("AES-256-CBC", "AES 256-bit"),
+    ("none", "Disabled"),
+)
 
 
 @dataclass(frozen=True)
@@ -294,6 +303,8 @@ def normalize_native_changes(changes: dict[str, Any]) -> dict[str, str]:
         if key == "astrill_devices" and value:
             for record in value.split(";"):
                 NativeDevice.parse(record)
+        if key == "astrill_favlist":
+            parse_astrill_favorites(value)
         if key == "astrill_iplistraw":
             value = normalize_site_entries(value)
         normalized[key] = value

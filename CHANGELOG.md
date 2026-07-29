@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4 - 2026-07-29
+
+- Add a dedicated Connection view that mirrors Astrill's endpoint, protocol,
+  endpoint-specific port, favorite, cipher, MTU, acceleration, kill switch,
+  favorite cycling, and router-boot connection settings.
+- Derive supported protocols and common port choices from the installed
+  applet's server records instead of presenting invalid combinations.
+- Add verified Save, Connect, Disconnect, and Apply & Reconnect flows with
+  confirmation and recovery of previous native settings after a failed start.
+- Synchronize native connection changes at launch and every 60 seconds while
+  preserving pending local edits and reporting concurrent router changes.
+
 ## 0.2.3 - 2026-07-29
 
 - Add automatic SSH, native Astrill, and companion checks; configurable stable

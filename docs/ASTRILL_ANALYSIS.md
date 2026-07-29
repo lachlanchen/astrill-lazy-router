@@ -40,6 +40,27 @@ the server list with bracket-aware scanning and regular expressions. It never
 uses JavaScript `eval`. The installed applet exposes 178 server endpoints and
 932 endpoint records.
 
+## Native Connection Contract
+
+The applet connection page stores the selected server, node, encoded address,
+port, port index, protocol, VPN mode, cipher, MTU, acceleration, disconnect
+blocking, favorite cycling, favorites, and startup state in `astrill_*` NVRAM
+keys. Its four transport values are OpenVPN UDP, OpenVPN TCP, RouterPro VPN
+UDP, and RouterPro VPN TCP. Cipher applies only to OpenVPN; MTU applies only to
+UDP.
+
+Available protocols and ports depend on the selected server records. The
+desktop therefore derives options from the installed applet instead of keeping
+a parallel server table. A favorite record contains only numeric IDs, the
+encoded address, validated port or port range, UDP/TCP mode, and VPN mode. No
+account data is needed to parse or write these settings.
+
+The native page separates saving a disconnected selection from connecting it.
+The desktop retains that distinction and adds a confirmed reconnect operation
+for a changed active session. All observed values are mirrored through an
+allowlist; the applet executable and generated VPN configuration are not
+patched.
+
 ## Astrill Routing Behavior
 
 Astrill installs split defaults `0.0.0.0/1` and `128.0.0.0/1` through `tun0`,

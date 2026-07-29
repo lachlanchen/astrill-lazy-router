@@ -21,6 +21,124 @@ IP_RE = re.compile(
     r"\{ip:(-?\d+),port:(?:'([^']+)'|(\d+)),mode:(\d+),"
     r"proto:(\d+),index:(\d+)(?:,protop:(\d+))?\}"
 )
+PORT_RE = re.compile(r"^\d{1,5}(?:-\d{1,5})?$")
+
+
+@dataclass(frozen=True)
+class AstrillPortOption:
+    index: int
+    port: str
+
+
+@dataclass(frozen=True)
+class AstrillConnectionSelection:
+    server_id: int
+    sid: int
+    encoded_ip: int
+    port: str
+    port_index: int
+    protocol: int
+    vpn_mode: int
+
+    def __post_init__(self) -> None:
+        if self.server_id <= 0 or self.sid <= 0:
+            raise ValueError("Astrill server identifiers must be positive")
+        if not -(2**31) <= self.encoded_ip < 2**31:
+            raise ValueError("Astrill encoded address is outside the 32-bit range")
+        _validate_port(self.port)
+        if self.port_index < 0:
+            raise ValueError("Astrill port index cannot be negative")
+        if self.protocol not in range(len(ASTRILL_PROTOCOL_NAMES)):
+            raise ValueError("Astrill protocol must be between 0 and 3")
+        if not 0 <= self.vpn_mode <= 127:
+            raise ValueError("Astrill VPN mode must be between 0 and 127")
+
+    @classmethod
+    def from_server(
+        cls,
+        server: AstrillServer,
+        protocol: int,
+        port_index: int,
+    ) -> AstrillConnectionSelection:
+        sid, endpoint = server.endpoint_for(protocol, port_index)
+        return cls(
+            server_id=server.id,
+            sid=sid,
+            encoded_ip=endpoint.encoded_ip,
+            port=endpoint.port,
+            port_index=endpoint.port_index,
+            protocol=protocol,
+            vpn_mode=endpoint.vpn_mode_for(protocol),
+        )
+
+    def native_values(self) -> dict[str, str]:
+        return {
+            "astrill_serverid": str(self.server_id),
+            "astrill_sid": str(self.sid),
+            "astrill_ip": str(self.encoded_ip),
+            "astrill_port": self.port,
+            "astrill_portindex": str(self.port_index),
+            "astrill_protocol": str(self.protocol),
+            "astrill_vpnmode": str(self.vpn_mode),
+        }
+
+
+@dataclass(frozen=True)
+class AstrillFavorite:
+    server_id: int
+    encoded_ip: int
+    port: str
+    mode: int
+    vpn_mode: int
+    sid: int
+
+    @classmethod
+    def parse(cls, value: str) -> AstrillFavorite:
+        parts = value.split(":")
+        if len(parts) != 6:
+            raise ValueError(f"invalid Astrill favorite record: {value!r}")
+        try:
+            favorite = cls(
+                server_id=int(parts[0]),
+                encoded_ip=int(parts[1]),
+                port=parts[2],
+                mode=int(parts[3]),
+                vpn_mode=int(parts[4]),
+                sid=int(parts[5]),
+            )
+        except ValueError as exc:
+            raise ValueError(f"invalid Astrill favorite record: {value!r}") from exc
+        favorite._validate()
+        return favorite
+
+    @classmethod
+    def from_selection(cls, selection: AstrillConnectionSelection) -> AstrillFavorite:
+        return cls(
+            server_id=selection.server_id,
+            encoded_ip=selection.encoded_ip,
+            port=selection.port,
+            mode=selection.protocol & 1,
+            vpn_mode=selection.vpn_mode,
+            sid=selection.sid,
+        )
+
+    def _validate(self) -> None:
+        if self.server_id <= 0 or self.sid <= 0:
+            raise ValueError("Astrill favorite identifiers must be positive")
+        if not -(2**31) <= self.encoded_ip < 2**31:
+            raise ValueError("Astrill favorite address is outside the 32-bit range")
+        _validate_port(self.port)
+        if self.mode not in {0, 1}:
+            raise ValueError("Astrill favorite mode must be UDP or TCP")
+        if not 0 <= self.vpn_mode <= 127:
+            raise ValueError("Astrill favorite VPN mode must be between 0 and 127")
+
+    def to_native(self) -> str:
+        self._validate()
+        return (
+            f"{self.server_id}:{self.encoded_ip}:{self.port}:"
+            f"{self.mode}:{self.vpn_mode}:{self.sid}"
+        )
 
 
 @dataclass(frozen=True)
@@ -86,6 +204,59 @@ class AstrillServer:
             f"{self.name} does not support Astrill protocol mode {protocol}"
         )
 
+    def supported_protocols(self) -> tuple[int, ...]:
+        if not self.nodes:
+            return ()
+        supported = set(range(len(ASTRILL_PROTOCOL_NAMES)))
+        for node in self.nodes:
+            node_protocols = {
+                _endpoint_protocol(endpoint) for endpoint in node.endpoints
+            }
+            supported.intersection_update(node_protocols)
+        return tuple(sorted(supported))
+
+    def port_options(self, protocol: int) -> tuple[AstrillPortOption, ...]:
+        if not self.nodes:
+            return ()
+        node_ports: list[dict[int, str]] = []
+        for node in self.nodes:
+            ports = {
+                endpoint.port_index: endpoint.port
+                for endpoint in node.endpoints
+                if _endpoint_protocol(endpoint) == protocol
+            }
+            if not ports:
+                return ()
+            node_ports.append(ports)
+        common_indexes = set(node_ports[0])
+        for ports in node_ports[1:]:
+            common_indexes.intersection_update(ports)
+        return tuple(
+            AstrillPortOption(index, node_ports[0][index])
+            for index in sorted(common_indexes)
+        )
+
+
+def parse_astrill_favorites(value: str) -> tuple[AstrillFavorite, ...]:
+    if not value:
+        return ()
+    favorites = tuple(
+        AstrillFavorite.parse(record) for record in value.split(",") if record
+    )
+    if len({favorite.server_id for favorite in favorites}) != len(favorites):
+        raise ValueError("Astrill favorites contain duplicate servers")
+    return favorites
+
+
+def serialize_astrill_favorites(
+    favorites: Iterable[AstrillFavorite],
+) -> str:
+    ordered: dict[int, AstrillFavorite] = {}
+    for favorite in favorites:
+        favorite._validate()
+        ordered[favorite.server_id] = favorite
+    return ",".join(favorite.to_native() for favorite in ordered.values())
+
 
 def parse_applet(payload: bytes) -> tuple[AstrillServer, ...]:
     script = unpack_applet(payload)
@@ -131,6 +302,20 @@ def group_by_region(
                 break
         grouped.setdefault(destination, []).append(server)
     return {key: tuple(value) for key, value in grouped.items()}
+
+
+def _endpoint_protocol(endpoint: AstrillEndpoint) -> int:
+    return (2 if endpoint.router_pro else 0) | endpoint.mode
+
+
+def _validate_port(value: str) -> None:
+    if not PORT_RE.fullmatch(value):
+        raise ValueError(f"invalid Astrill port: {value!r}")
+    bounds = [int(part) for part in value.split("-", 1)]
+    if any(part < 1 or part > 65535 for part in bounds):
+        raise ValueError("Astrill port must be between 1 and 65535")
+    if len(bounds) == 2 and bounds[0] > bounds[1]:
+        raise ValueError("Astrill port range is reversed")
 
 
 def _extract_list_literal(script: str) -> str:
