@@ -55,14 +55,21 @@ def test_core_catalog_contains_requested_services() -> None:
     assert {"app.jianguoyun.com", "comet.jianguoyun.com"} <= set(nutstore.domains)
 
 
-def test_default_uu_rule_compiles_to_direct_domain() -> None:
+def test_default_uu_rule_compiles_complete_global_direct_profile() -> None:
     compilation = compile_rules([default_uu_rule()], load_catalog())
     assert not compilation.warnings
-    assert len(compilation.rules) == 1
-    compiled = compilation.rules[0]
-    assert compiled.selector == "uuyc.163.com"
-    assert compiled.target is RouteTarget.DIRECT
-    assert compiled.origin == "uu-remote-direct"
+    selectors = {compiled.selector for compiled in compilation.rules}
+    assert {
+        "uuyc.163.com",
+        "api.nrd.nie.163.com",
+        "sig-3303-d.nrd.nie.163.com",
+        "relay-mg-3303-d.nrd.nie.163.com",
+        "online-logger.webapp.163.com",
+        "115.236.122.145/32",
+        "223.252.194.149/32",
+    } <= selectors
+    assert all(compiled.target is RouteTarget.DIRECT for compiled in compilation.rules)
+    assert all(compiled.origin == "uu-remote-direct" for compiled in compilation.rules)
 
 
 def test_service_rule_expands_every_seed_domain() -> None:
@@ -76,8 +83,11 @@ def test_service_rule_expands_every_seed_domain() -> None:
         region="united-states",
     )
     compilation = compile_rules([rule], catalog)
-    assert len(compilation.rules) == len(service.domains)
-    assert {item.selector for item in compilation.rules} == set(service.domains)
+    assert len(compilation.rules) == len(service.domains) + len(service.networks)
+    assert {item.selector for item in compilation.rules} == {
+        *service.domains,
+        *service.networks,
+    }
 
 
 def test_compiler_rejects_policy_larger_than_router_contract() -> None:

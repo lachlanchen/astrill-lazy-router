@@ -45,6 +45,22 @@ def compile_rules(rules: list[Rule], catalog: Catalog) -> Compilation:
                         origin=rule.id,
                     )
                 )
+            for index, network in enumerate(service.networks):
+                compiled_id = _unique_id(f"{rule.id}.net{index}", used_ids)
+                compiled.append(
+                    CompiledRule(
+                        id=compiled_id,
+                        enabled=rule.enabled,
+                        priority=rule.priority,
+                        kind="cidr",
+                        selector=network,
+                        target=rule.target,
+                        protocol=rule.protocol,
+                        ports=rule.ports,
+                        label=rule.name,
+                        origin=rule.id,
+                    )
+                )
             continue
 
         if rule.match_kind is MatchKind.PROCESS:

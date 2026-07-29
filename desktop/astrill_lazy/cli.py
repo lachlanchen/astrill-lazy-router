@@ -70,7 +70,11 @@ def main(argv: list[str] | None = None) -> int:
     router = RouterClient(host)
     try:
         if arguments.command == "status":
-            _print_json(router.status())
+            _print_json(
+                router.status()
+                if store.companion_enabled
+                else router.native_astrill_status()
+            )
         elif arguments.command == "rules":
             print(router.rules(), end="")
         elif arguments.command == "apply":
@@ -84,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(router.rollback())
         elif arguments.command == "install-router":
             result = RouterInstaller(router).install()
+            store.companion_enabled = True
+            store.save()
             _print_json(
                 {
                     "version": result.version,
@@ -96,8 +102,10 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
         elif arguments.command == "uninstall-router":
-            RouterInstaller(router).uninstall()
-            _print_json({"ok": True, "uninstalled": True})
+            status = RouterInstaller(router).uninstall()
+            store.companion_enabled = False
+            store.save()
+            _print_json({"ok": True, "uninstalled": True, "status": status})
         elif arguments.command == "servers":
             servers = parse_applet(router.fetch_astrill_payload())
             if arguments.json:

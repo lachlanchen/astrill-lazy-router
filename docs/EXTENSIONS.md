@@ -68,6 +68,9 @@ or `regions`; duplicate JSON keys and duplicate IDs are rejected.
     "example.com",
     "examplecdn.com"
   ],
+  "networks": [
+    "203.0.113.25/32"
+  ],
   "aliases": [
     "Example"
   ],
@@ -78,7 +81,9 @@ or `regions`; duplicate JSON keys and duplicate IDs are rejected.
 Profile types are `company`, `app`, or `website`. Domains are seed hostnames,
 not wildcard expressions. Every domain, source URL, preferred region, and
 route/region combination is validated before the extension loads. A service
-can contain at most 16 unique seed hosts.
+can contain at most 16 unique seed hosts and 16 unique IPv4 endpoint networks.
+Literal networks are useful for documented signaling or relay fallbacks that
+do not consistently publish a hostname.
 
 Run the full catalog audit with:
 

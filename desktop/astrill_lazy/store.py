@@ -22,6 +22,7 @@ class ConfigStore:
         self.rules: list[Rule] = []
         self.active_region = "active-astrill"
         self.enabled_extensions = ["core-catalog"]
+        self.companion_enabled = True
         self.load()
 
     def load(self) -> None:
@@ -34,6 +35,10 @@ class ConfigStore:
             raise ValueError("unsupported desktop configuration schema")
         self.router_host = str(document.get("router_host", "astrill-router"))
         self.active_region = str(document.get("active_region", "active-astrill"))
+        companion_enabled = document.get("companion_enabled", True)
+        if not isinstance(companion_enabled, bool):
+            raise TypeError("companion_enabled must be a boolean")
+        self.companion_enabled = companion_enabled
         self.enabled_extensions = [
             str(item) for item in document.get("enabled_extensions", ["core-catalog"])
         ]
@@ -47,6 +52,7 @@ class ConfigStore:
             "schema_version": SCHEMA_VERSION,
             "router_host": self.router_host,
             "active_region": self.active_region,
+            "companion_enabled": self.companion_enabled,
             "enabled_extensions": self.enabled_extensions,
             "rules": [rule.to_dict() for rule in self.rules],
         }
@@ -76,4 +82,5 @@ def default_uu_rule() -> Rule:
         region="direct",
         enabled=True,
         priority=100,
+        metadata={"minimum_bypass": True},
     )

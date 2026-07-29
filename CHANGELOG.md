@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2 - 2026-07-29
+
+- Mirror native Astrill website, device, Wi-Fi, VLAN, DNS, connection, and
+  advanced settings in the desktop GUI with validated, verified NVRAM writes.
+- Flatten native include/exclude modes into effective Direct/Astrill controls
+  while preserving native rule precedence and incremental companion behavior.
+- Add one-click path detection with per-policy Direct/Astrill latency,
+  conservative service-aware recommendations, and explicit batch apply.
+- Keep UU Remote, WeChat, Taobao, and Meituan as minimum Direct
+  recommendations and expand their common app, web, CDN, and literal endpoint
+  coverage.
+- Add native Astrill connect/disconnect controls and a fully audited
+  `Restore Astrill Only` path that removes the companion without changing the
+  active endpoint, protocol, or tunnel state.
+- Serialize firewall mutations with the xtables lock and verify connected and
+  disconnected behavior, native-only restoration, noVNC layouts, and live
+  traffic marks.
+
 ## 0.2.1 - 2026-07-28
 
 - Separate preferred policy countries from selectable Astrill server endpoints

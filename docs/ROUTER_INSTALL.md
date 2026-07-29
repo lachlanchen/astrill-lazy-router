@@ -99,9 +99,13 @@ astrill-lazy uninstall-router
 ```
 
 Uninstall stops the plugin, removes its exact startup line and MyPage commands,
-unsets its NVRAM keys, and removes known runtime files. It does not:
+unsets its NVRAM keys, removes known runtime files, and audits the firewall,
+policy rules, watchdogs, startup hooks, pages, and runtime directory. The GUI
+labels this operation `Restore Astrill Only` and disables automatic
+reinstallation only after the audit passes. It does not:
 
 - uninstall or restart Astrill;
+- disconnect Astrill or change its endpoint or protocol;
 - disable SSH;
 - remove the authorized SSH key;
 - change DD-WRT web or Telnet credentials.

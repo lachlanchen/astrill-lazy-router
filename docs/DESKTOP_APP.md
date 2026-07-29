@@ -71,6 +71,14 @@ active while the tunnel is disconnected. Each rule has:
 Local edits are saved immediately. The orange Apply action compiles and
 transactionally installs the full rule set on DD-WRT.
 
+`Detect` measures the same representative IPv4 destination through the WAN
+interface and `tun0`. Results show Direct and Astrill path latency on each
+enabled service or website policy. Recommendations require a meaningful
+improvement, keep the current route when both paths cannot be compared, and
+honor the catalog's access profile. UU Remote, WeChat, Taobao, and Meituan are
+minimum Direct recommendations. Detection never changes routing;
+`Apply Recommendations` is a separate explicit action.
+
 ### Services
 
 The 261-profile catalog can be searched by service, company, alias, or seed
@@ -108,7 +116,21 @@ reconnecting pauses VPN-routed traffic.
 The Router view reports the upstream Astrill connection and companion policy
 runtime. It exposes endpoint selection, runtime repair, domain refresh,
 confirmation-gated policy rollback, and idempotent companion installation or
-upgrade.
+upgrade. `Restore Astrill Only` removes every companion-owned runtime, NVRAM,
+MyPage, firewall, policy-rule, and watchdog object while preserving Astrill's
+endpoint, protocol, and connection state. The saved desktop mode then prevents
+the 60-second monitor from reinstalling it.
+
+### Astrill
+
+The Astrill view reads the native applet's settings directly from DD-WRT and
+maps include/exclude choices to effective Direct/Astrill defaults and
+per-entry routes. It synchronizes website and device lists, Wi-Fi and VLAN
+filters, DNS, cipher, MTU, kill switch, startup, favorites summary, and
+advanced filter fields. Opening or refreshing the view is read-only. Only
+changed controls are written, every value is validated, and the complete
+result is read back before success is reported. Account and router
+credentials are outside the allowed key set.
 
 ### Extensions
 
@@ -147,6 +169,7 @@ It contains:
 - active country and endpoint metadata;
 - enabled extension IDs;
 - editable source rules;
-- application profile metadata and allocated lease addresses.
+- application profile metadata and allocated lease addresses;
+- the enabled/disabled companion state and route recommendation results.
 
 It contains no Astrill account credential or SSH private key.

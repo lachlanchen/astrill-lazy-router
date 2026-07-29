@@ -50,11 +50,23 @@ uses:
 - tables `110` through `114` for site, VPN, ISP, and exception paths;
 - `0x1000000/0x3000000` for ISP/direct;
 - `0x2000000/0x3000000` for VPN;
-- preference `32764` for the direct-mark policy rule in the observed state.
+- preference `32764` for the direct-mark policy rule in the initial snapshot;
+  the connected global-mode state later used preferences `29998` through
+  `30001`.
 
 The applet supports site modes for all traffic, selected sites, excluded sites,
 and an international-region list. It separately supports all, selected, and
-excluded device modes. Exceptions are applied after those filters.
+excluded device modes. The desktop maps these to effective outcomes:
+
+| Native mode | Outside list | Inside list |
+| --- | --- | --- |
+| Global (`0`) | Astrill | Stored list inactive |
+| Include (`1`) | Direct | Astrill |
+| Exclude (`2`) | Astrill | Direct |
+
+Automatic modes `3` and `4` remain applet-owned unless the user explicitly
+changes the flattened website controls. Dirty tracking prevents an unrelated
+save from activating or rewriting a stored inactive list.
 
 At inventory time, one device exclusion created a source rule to table `111`.
 The applet watchdog had also accumulated duplicate `tun0` MASQUERADE entries.

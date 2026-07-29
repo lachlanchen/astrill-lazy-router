@@ -216,18 +216,18 @@ initialize_rules() {
 }
 
 chain_exists() {
-    iptables -t mangle -S "$1" >/dev/null 2>&1
+    iptables -w 10 -t mangle -S "$1" >/dev/null 2>&1
 }
 
 ensure_chain_shell() {
     chain=$1
-    chain_exists "$chain" || iptables -t mangle -N "$chain"
-    iptables -t mangle -F "$chain"
-    iptables -t mangle -A "$chain" -d 10.0.0.0/8 -j RETURN
-    iptables -t mangle -A "$chain" -d 172.16.0.0/12 -j RETURN
-    iptables -t mangle -A "$chain" -d 192.168.0.0/16 -j RETURN
-    iptables -t mangle -A "$chain" -d 224.0.0.0/4 -j RETURN
-    iptables -t mangle -A "$chain" -d 255.255.255.255/32 -j RETURN
+    chain_exists "$chain" || iptables -w 10 -t mangle -N "$chain"
+    iptables -w 10 -t mangle -F "$chain"
+    iptables -w 10 -t mangle -A "$chain" -d 10.0.0.0/8 -j RETURN
+    iptables -w 10 -t mangle -A "$chain" -d 172.16.0.0/12 -j RETURN
+    iptables -w 10 -t mangle -A "$chain" -d 192.168.0.0/16 -j RETURN
+    iptables -w 10 -t mangle -A "$chain" -d 224.0.0.0/4 -j RETURN
+    iptables -w 10 -t mangle -A "$chain" -d 255.255.255.255/32 -j RETURN
 }
 
 resolve_domain() {
@@ -244,18 +244,26 @@ resolve_domain() {
 domain_addresses() {
     domain=$1
     cache_file=$2
+    refresh_mode=${3:-0}
     addresses=$(awk -F '\t' -v domain="$domain" '$1 == domain { print $2 }' "$cache_file" 2>/dev/null)
+    if [ -n "$addresses" ]; then
+        printf '%s\n' "$addresses"
+        return 0
+    fi
+    if [ -z "$addresses" ] && [ "$refresh_mode" != 1 ]; then
+        addresses=$(awk -F '\t' -v domain="$domain" '$1 == domain { print $2 }' "$RESOLVED" 2>/dev/null)
+    fi
     if [ -z "$addresses" ]; then
         addresses=$(resolve_domain "$domain")
         if [ -z "$addresses" ]; then
             addresses=$(awk -F '\t' -v domain="$domain" '$1 == domain { print $2 }' "$RESOLVED" 2>/dev/null)
         fi
-        if [ -n "$addresses" ]; then
-            now=$(date +%s)
-            for address in $addresses; do
-                printf '%s\t%s\t%s\n' "$domain" "$address" "$now" >> "$cache_file"
-            done
-        fi
+    fi
+    if [ -n "$addresses" ]; then
+        now=$(date +%s)
+        for address in $addresses; do
+            printf '%s\t%s\t%s\n' "$domain" "$address" "$now" >> "$cache_file"
+        done
     fi
     printf '%s\n' "$addresses"
 }
@@ -274,7 +282,7 @@ append_rule_pair() {
         mark=$VPN_MARK
     fi
 
-    set -- iptables -t mangle -A "$chain"
+    set -- iptables -w 10 -t mangle -A "$chain"
     case $kind in
         destination) set -- "$@" -d "$selector" ;;
         source) set -- "$@" -s "$selector" ;;
@@ -317,6 +325,7 @@ append_compiled_rule() {
 build_chain() {
     chain=$1
     file=$2
+    refresh_mode=${3:-0}
     new_resolved=$BASE/resolved.new.tsv
     : > "$new_resolved"
     : > "$UNRESOLVED"
@@ -327,7 +336,7 @@ build_chain() {
         [ "$enabled" = 1 ] || continue
         case $kind in
             domain)
-                addresses=$(domain_addresses "$selector" "$new_resolved")
+                addresses=$(domain_addresses "$selector" "$new_resolved" "$refresh_mode")
                 if [ -z "$addresses" ]; then
                     printf '%s\n' "$selector" >> "$UNRESOLVED"
                     continue
@@ -344,7 +353,7 @@ build_chain() {
                 ;;
         esac
     done < "$file"
-    iptables -t mangle -A "$chain" -j RETURN || return 1
+    iptables -w 10 -t mangle -A "$chain" -j RETURN || return 1
     mv "$new_resolved" "$RESOLVED"
 }
 
@@ -364,8 +373,8 @@ inactive_chain() {
 
 remove_prerouting_jump() {
     chain=$1
-    while iptables -t mangle -C PREROUTING -j "$chain" >/dev/null 2>&1; do
-        iptables -t mangle -D PREROUTING -j "$chain" || break
+    while iptables -w 10 -t mangle -C PREROUTING -j "$chain" >/dev/null 2>&1; do
+        iptables -w 10 -t mangle -D PREROUTING -j "$chain" || break
     done
 }
 
@@ -374,10 +383,10 @@ activate_chain() {
     activation_other=$CHAIN_A
     [ "$activation_target" = "$CHAIN_A" ] && activation_other=$CHAIN_B
 
-    iptables -t mangle -I PREROUTING 1 -j "$activation_target" || return 1
+    iptables -w 10 -t mangle -I PREROUTING 1 -j "$activation_target" || return 1
     remove_prerouting_jump "$activation_other"
-    while [ "$(iptables -t mangle -S PREROUTING 2>/dev/null | grep -c -- "-A PREROUTING -j $activation_target")" -gt 1 ]; do
-        iptables -t mangle -D PREROUTING -j "$activation_target" || break
+    while [ "$(iptables -w 10 -t mangle -S PREROUTING 2>/dev/null | grep -c -- "-A PREROUTING -j $activation_target")" -gt 1 ]; do
+        iptables -w 10 -t mangle -D PREROUTING -j "$activation_target" || break
     done
     printf '%s\n' "$activation_target" > "$ACTIVE_FILE"
 }
@@ -435,8 +444,9 @@ ensure_routes() {
 
 apply_runtime() {
     file=$1
+    refresh_mode=${2:-0}
     next_chain=$(inactive_chain)
-    build_chain "$next_chain" "$file" || {
+    build_chain "$next_chain" "$file" "$refresh_mode" || {
         log_message ERROR "could not build policy chain $next_chain"
         return 1
     }
@@ -503,10 +513,10 @@ ensure_runtime() {
         apply_runtime "$CURRENT" || return 1
         active=$(active_chain)
     fi
-    first_jump=$(iptables -t mangle -S PREROUTING 2>/dev/null | sed -n '2p')
+    first_jump=$(iptables -w 10 -t mangle -S PREROUTING 2>/dev/null | sed -n '2p')
     if [ "$first_jump" != "-A PREROUTING -j $active" ]; then
         remove_prerouting_jump "$active"
-        iptables -t mangle -I PREROUTING 1 -j "$active" || return 1
+        iptables -w 10 -t mangle -I PREROUTING 1 -j "$active" || return 1
     fi
 }
 
@@ -515,8 +525,8 @@ cleanup_policy() {
     remove_prerouting_jump "$CHAIN_B"
     for chain in "$CHAIN_A" "$CHAIN_B"; do
         if chain_exists "$chain"; then
-            iptables -t mangle -F "$chain" 2>/dev/null || true
-            iptables -t mangle -X "$chain" 2>/dev/null || true
+            iptables -w 10 -t mangle -F "$chain" 2>/dev/null || true
+            iptables -w 10 -t mangle -X "$chain" 2>/dev/null || true
         fi
     done
     for table in "$DIRECT_TABLE" "$VPN_TABLE"; do
@@ -627,7 +637,7 @@ status_json() {
     watchdog=false
     watchdog_running && watchdog=true
     jump=false
-    iptables -t mangle -C PREROUTING -j "$active" >/dev/null 2>&1 && jump=true
+    iptables -w 10 -t mangle -C PREROUTING -j "$active" >/dev/null 2>&1 && jump=true
     health=healthy
     [ "$jump" = true ] || health=degraded
     [ "$watchdog" = true ] || health=degraded
@@ -842,6 +852,54 @@ switch_astrill() {
     fail "new Astrill server did not connect; previous settings were restored"
 }
 
+set_astrill_connection() {
+    requested=${1:-}
+    [ -x /dev/astrill/astrillvpn ] || fail "Astrill applet is unavailable"
+
+    case $requested in
+        up)
+            if [ "$(nvram get astrill_status)" = 3 ] &&
+               ip route show table main | grep -q ' dev tun0'; then
+                status_json
+                return 0
+            fi
+            /dev/astrill/astrillvpn start > "$BASE/astrill-connection.log" 2>&1 || true
+            attempts=0
+            while [ "$attempts" -lt 60 ]; do
+                if [ "$(nvram get astrill_status)" = 3 ] &&
+                   ip route show table main | grep -q ' dev tun0'; then
+                    ensure_routes >/dev/null 2>&1 || true
+                    log_message INFO "connected Astrill at user request"
+                    status_json
+                    return 0
+                fi
+                attempts=$((attempts + 1))
+                sleep 1
+            done
+            fail "Astrill did not connect within 60 seconds"
+            ;;
+        down)
+            /dev/astrill/astrillvpn stop > "$BASE/astrill-connection.log" 2>&1 || true
+            attempts=0
+            while [ "$attempts" -lt 65 ]; do
+                if ! ip route show table main | grep -q ' dev tun0' &&
+                   ! ps w | grep astrill/openvpn.conf | grep -vq grep; then
+                    ensure_routes >/dev/null 2>&1 || true
+                    log_message INFO "disconnected Astrill at user request"
+                    status_json
+                    return 0
+                fi
+                attempts=$((attempts + 1))
+                sleep 1
+            done
+            fail "Astrill did not disconnect within 65 seconds"
+            ;;
+        *)
+            fail "Astrill connection state must be up or down"
+            ;;
+    esac
+}
+
 usage() {
     cat <<'EOF'
 Usage: alctl COMMAND
@@ -855,6 +913,8 @@ Usage: alctl COMMAND
   route-origin ID ROUTE Set an origin to direct or vpn
   clients [--json]      List DHCP clients
   astrill-switch ...    Transactionally switch Astrill server settings
+  astrill-connect       Connect using Astrill's current native settings
+  astrill-disconnect    Disconnect Astrill and preserve its current settings
   ensure                Repair policy routes and hooks
   start                 Start policy routing and the watchdog
   stop                  Stop the watchdog and remove only this plugin's policy
@@ -891,7 +951,7 @@ case $command in
         acquire_lock
         initialize_rules
         validate_rules "$CURRENT" || fail "stored rules are invalid"
-        apply_runtime "$CURRENT" || fail "could not refresh policy"
+        apply_runtime "$CURRENT" 1 || fail "could not refresh policy"
         log_message INFO "refreshed resolved domains and policy routes"
         status_json
         ;;
@@ -922,6 +982,14 @@ case $command in
         shift
         acquire_lock
         switch_astrill "$@"
+        ;;
+    astrill-connect)
+        acquire_lock
+        set_astrill_connection up
+        ;;
+    astrill-disconnect)
+        acquire_lock
+        set_astrill_connection down
         ;;
     ensure)
         acquire_lock

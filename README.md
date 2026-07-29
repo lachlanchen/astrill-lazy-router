@@ -11,17 +11,23 @@ The current deployment provides:
 - isolated per-application identities on Ubuntu using macvlan network
   namespaces;
 - a native GTK 4 and Libadwaita control application;
+- bidirectional native Astrill website, device, interface, DNS, and connection
+  settings using effective Direct/Astrill controls;
+- one-click Direct/Astrill path detection, per-policy recommendations, and
+  explicit batch apply;
 - a companion page at DD-WRT `/MyPage.asp?3`;
 - an extension catalog with 261 company, app, and website profiles across 19
   categories and 14 region groups;
 - guarded A/B policy activation, rollback, watchdog recovery, and fail-closed
   VPN routes;
 - desktop login startup and automatic companion installation or runtime repair;
+- an audited native-only restore that disables automatic companion reinstall;
 - discovery and switching of all 178 server endpoints in the installed Astrill
   applet;
 - an encrypted, round-trip-verified recovery backup.
 
-The installed default policy is `UU Remote -> Direct`.
+The current deployment keeps `UU Remote`, `WeChat`, `Taobao`, and `Meituan`
+Direct while all other traffic follows native Astrill global routing.
 
 ## Run
 
@@ -63,7 +69,7 @@ The GUI stores a preferred country for each VPN policy. The Countries view
 shows assignments, available endpoint counts, the active country, and
 incompatible simultaneous preferences. The Endpoints view selects the actual
 Astrill server for the shared tunnel. One tunnel cannot provide several active
-countries at once.
+countries at once. `No country override` follows the current endpoint.
 
 ## Current Deployment
 
@@ -72,18 +78,20 @@ countries at once.
 - Astrill applet: `2.9.52`
 - Router runtime: `/tmp/astrill-lazy`
 - DD-WRT pages: policy `3`, status API `4`
-- Desktop/catalog: `0.2.1`
-- Router plugin: `0.2.0`
-- Astrill tunnel: verified connected; its existing `astrill_autostart=0`
-  setting remains unchanged
-- Active example: `uuyc.163.com` resolved and marked direct
+- Desktop/catalog: `0.2.2`
+- Router plugin: `0.2.2`
+- Astrill tunnel: connected to `*USA - Los Angeles A` with RouterPro UDP
+- Native default: global Astrill with the existing device exclusion preserved
+- Companion policy: four Direct service groups, 56 compiled rules
+- Verified services: Google, YouTube, and Instagram through Astrill; UU Remote,
+  WeChat, Taobao, and Meituan through Direct
 
 ## Safety
 
 Raw applet files, account state, generated OpenVPN configuration, and installer
 credentials are ignored by Git. The complete snapshot is committed only as CMS
 ciphertext under `backups/`; its private decryption key remains outside this
-repository.
+repository. Native credentials are never read by the desktop settings mirror.
 
 ## Documentation
 

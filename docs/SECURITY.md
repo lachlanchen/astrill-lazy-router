@@ -26,6 +26,11 @@ configuration. It stores only the absolute GUI executable path. Companion
 reconciliation uses the existing key-only SSH alias and stores no router or
 Ubuntu password.
 
+The native settings mirror uses an explicit safe-key allowlist. Astrill
+account values, router passwords, installer URLs, and generated OpenVPN
+credentials are neither requested nor returned. Writes use normalized values,
+commit once, and read every changed key back for exact verification.
+
 ## Input Handling
 
 Router TSV input is limited to 6,144 bytes and exactly ten fields per rule.
@@ -58,6 +63,9 @@ website text is edited over SSH in the native app, not interpolated into
   install, and compares the deterministic package fingerprint before recovery,
   so a healthy or identically broken companion does not cause repeated NVRAM
   writes.
+- Route detection is read-only and requires the existing tunnel to be up.
+  Recommendations are displayed before a separate apply action; incomplete
+  comparisons retain the current route.
 
 Domain matching still depends on known, resolved service domains. Unknown CDN
 hostnames follow the router's ordinary Astrill behavior rather than being

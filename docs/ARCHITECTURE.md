@@ -35,10 +35,12 @@ these marks and returns:
 | Direct | `0x4000000` | `0xc000000` | `32000` | `213` |
 | Astrill | `0x8000000` | `0xc000000` | `32001` | `212` |
 
-Astrill currently uses mask `0x3000000`, tables `110` through `114`, and
-preferences beginning at `32764`. The independent high-bit mask and earlier
-preferences allow both systems to classify a packet while this plugin's
-explicit rule wins.
+Astrill uses mask `0x3000000`, tables `110` through `114`, and observed
+preferences `29998` through `30001`. The companion deliberately uses separate
+high bits and later preferences `32000` and `32001`. Native Astrill
+classifications therefore win a conflict; companion rules affect traffic
+that native Astrill leaves to its default route. This is the basis of the
+incremental extension model.
 
 Table `213` contains the DD-WRT WAN default. Table `212` contains the `tun0`
 default while Astrill is connected. When `tun0` is unavailable, table `212`
@@ -84,6 +86,28 @@ rewrite. An identical package that still cannot recover requires the explicit
 Install/Upgrade action, preventing automatic repeated NVRAM writes. This
 lifecycle is separate from Astrill connection management and does not change
 `astrill_autostart`.
+
+`Restore Astrill Only` records native tunnel state, removes all
+companion-owned runtime and persistent objects, audits that cleanup, and then
+checks that endpoint, protocol, and tunnel state are unchanged. The desktop
+persists native-only mode only after this audit succeeds.
+
+## Native Policy Composition
+
+The desktop presents final Direct/Astrill outcomes while preserving the
+native applet's underlying modes:
+
+| Native website mode | Native default | New companion policy default |
+| --- | --- | --- |
+| Global (`0`) | Astrill | Direct exception |
+| Include list (`1`) | Direct | Astrill union |
+| Exclude list (`2`) | Astrill | Direct union |
+| Automatic (`3`/`4`) | Applet-owned | Direct exception |
+
+Native website, device, Wi-Fi, and VLAN rules retain their higher precedence.
+Country is independent: a new Astrill policy starts with
+`No country override`, and only an explicit country selection requests an
+endpoint region.
 
 ## Per-Application Routing
 

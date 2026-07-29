@@ -30,13 +30,22 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "eval " not in helper
     assert "--set-xmark" in controller
     assert "0xc000000" in controller
+    assert "DIRECT_PREF=32000" in controller
+    assert "VPN_PREF=32001" in controller
     assert "MAX_RULE_BYTES=6144" in controller
+    assert controller.count("iptables -w 10") >= 15
     assert "insufficient NVRAM headroom" in controller
     assert "watchdog_pids | grep -qx" in controller
     assert "cleanup_watchdog_pid" in controller
+    assert 'refresh_mode=${3:-0}' in controller
+    assert 'apply_runtime "$CURRENT" 1' in controller
+    assert '"$RESOLVED"' in controller
     assert 'kill -9 "$pid"' in controller
     assert 'wait "$watchdog_sleep_pid"' in controller
     assert '[ "$watchdog" = true ] || health=degraded' in controller
+    assert "astrill-connect)" in controller
+    assert "astrill-disconnect)" in controller
+    assert "/dev/astrill/astrillvpn stop" in controller
 
 
 def test_ddwrt_banner_is_removed_from_ssh_errors() -> None:

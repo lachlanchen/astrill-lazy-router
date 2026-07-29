@@ -12,6 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from .router import RouterClient, RouterError
 
@@ -32,12 +33,12 @@ class InstallResult:
     nvram_chunks: int
     policy_page: int
     api_page: int
-    status: dict
+    status: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class EnsureResult:
-    status: dict
+    status: dict[str, Any]
     action: str
 
 
@@ -121,7 +122,7 @@ class RouterInstaller:
             and self._nvram_get("astrill_lazy_pkg_md5") == self.expected_package_md5
         )
 
-    def _runtime_is_current(self, status: dict) -> bool:
+    def _runtime_is_current(self, status: dict[str, Any]) -> bool:
         return (
             status.get("version") == self.expected_version
             and status.get("jump_installed") is True
@@ -198,7 +199,8 @@ class RouterInstaller:
             status=status,
         )
 
-    def uninstall(self) -> None:
+    def uninstall(self) -> dict[str, Any]:
+        before = self.client.native_astrill_status()
         count = _integer(self._nvram_get("astrill_lazy_pkg_count"))
         startup = self._nvram_get("rc_startup")
         startup = startup.replace(f"\n{STARTUP_LINE}", "").replace(STARTUP_LINE, "")
@@ -230,10 +232,27 @@ class RouterInstaller:
         script.extend(
             [
                 "nvram commit >/dev/null",
-                "rm -f /tmp/astrill-lazy/alctl /tmp/astrill-lazy/alapi /tmp/astrill-lazy/alpage /tmp/astrill-lazy/VERSION",
+                "rm -rf /tmp/astrill-lazy",
+                '[ -z "$(nvram get astrill_lazy_installed)" ]',
+                "! nvram get rc_startup | grep -Fq 'astrill_lazy_bootstrap'",
+                "! nvram get mypage_scripts | grep -Fq '/tmp/astrill-lazy/'",
+                "! iptables -w 10 -t mangle -S 2>/dev/null | grep -q 'AL_LAZY_'",
+                "! ip rule show | grep -Eq 'lookup (212|213)$'",
+                "! ps w | grep '/tmp/astrill-lazy/alctl watchdog-loop' | grep -vq grep",
             ]
         )
         self.client.run_script("\n".join(script) + "\n", timeout=45)
+        after = self.client.native_astrill_status()
+        preserved_fields = ("vpn_state", "astrill_server_id", "astrill_protocol")
+        changed = [
+            field for field in preserved_fields if before.get(field) != after.get(field)
+        ]
+        if changed:
+            raise RouterError(
+                "the companion was removed, but native Astrill state changed: "
+                + ", ".join(changed)
+            )
+        return after
 
     def _nvram_get(self, key: str) -> str:
         if not re.fullmatch(r"[a-zA-Z0-9_]+", key):

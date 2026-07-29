@@ -10,7 +10,24 @@
       "default_route": "direct",
       "preferred_region": "direct",
       "domains": [
-        "uuyc.163.com"
+        "uuyc.163.com",
+        "uuyc.webapp.163.com",
+        "api.nrd.nie.163.com",
+        "api-dcdn.nrd.nie.163.com",
+        "api-event.nrd.nie.163.com",
+        "api-ipv4.nrd.nie.163.com",
+        "sig-3303-d.nrd.nie.163.com",
+        "sig-dcdn-3303-d.nrd.nie.163.com",
+        "relay-mg-3303-d.nrd.nie.163.com",
+        "online-logger.webapp.163.com",
+        "fp.ps.netease.com",
+        "nrd-file.fp.ps.netease.com",
+        "nrd-ugc.fp.ps.netease.com",
+        "sentry.netease.com"
+      ],
+      "networks": [
+        "115.236.122.145/32",
+        "223.252.194.149/32"
       ],
       "aliases": [
         "UU Yuancheng",
@@ -326,9 +343,18 @@
       "preferred_region": "direct",
       "domains": [
         "taobao.com",
+        "www.taobao.com",
+        "m.taobao.com",
+        "h5.m.taobao.com",
+        "acs.m.taobao.com",
+        "login.taobao.com",
         "tmall.com",
+        "www.tmall.com",
         "tbcdn.cn",
-        "alicdn.com"
+        "alicdn.com",
+        "gw.alicdn.com",
+        "img.alicdn.com",
+        "g.alicdn.com"
       ],
       "aliases": [
         "Taobao",
@@ -346,9 +372,19 @@
       "preferred_region": "direct",
       "domains": [
         "wechat.com",
-        "weixin.qq.com",
+        "www.wechat.com",
         "weixin.com",
-        "qpic.cn"
+        "weixin.qq.com",
+        "wx.qq.com",
+        "res.wx.qq.com",
+        "login.weixin.qq.com",
+        "long.weixin.qq.com",
+        "short.weixin.qq.com",
+        "szshort.weixin.qq.com",
+        "extshort.weixin.qq.com",
+        "weixin110.qq.com",
+        "qpic.cn",
+        "wx.qlogo.cn"
       ],
       "aliases": [
         "Weixin",
@@ -402,9 +438,18 @@
       "preferred_region": "direct",
       "domains": [
         "meituan.com",
+        "www.meituan.com",
+        "i.meituan.com",
+        "api.meituan.com",
+        "passport.meituan.com",
         "meituan.net",
+        "p0.meituan.net",
+        "p1.meituan.net",
         "dianping.com",
-        "sankuai.com"
+        "www.dianping.com",
+        "m.dianping.com",
+        "sankuai.com",
+        "maoyan.com"
       ],
       "aliases": [
         "Dianping",

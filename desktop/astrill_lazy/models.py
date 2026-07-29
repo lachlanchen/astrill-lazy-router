@@ -45,6 +45,7 @@ class Service:
     default_route: RouteTarget
     preferred_region: str
     domains: tuple[str, ...]
+    networks: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     source: str = ""
 
@@ -59,6 +60,7 @@ class Service:
             default_route=RouteTarget(value["default_route"]),
             preferred_region=str(value.get("preferred_region", "active-astrill")),
             domains=tuple(str(item).lower() for item in value["domains"]),
+            networks=tuple(str(item) for item in value.get("networks", [])),
             aliases=tuple(str(item) for item in value.get("aliases", [])),
             source=str(value.get("source", "")),
         )
@@ -87,6 +89,12 @@ class Service:
             raise ValueError(f"service {self.id!r} contains duplicate domains")
         for domain in self.domains:
             validate_domain(domain)
+        if len(self.networks) > 16:
+            raise ValueError(f"service {self.id!r} has more than 16 endpoint networks")
+        if len(set(self.networks)) != len(self.networks):
+            raise ValueError(f"service {self.id!r} contains duplicate endpoint networks")
+        for network in self.networks:
+            validate_network(network)
         if any(not alias.strip() for alias in self.aliases):
             raise ValueError(f"service {self.id!r} contains an empty alias")
         if (
@@ -111,6 +119,7 @@ class Service:
                 self.profile_type,
                 *self.aliases,
                 *self.domains,
+                *self.networks,
             ]
         ).casefold()
 

@@ -23,10 +23,11 @@ router.
 
 ## Compilation
 
-Service rules expand to one domain rule for every catalog seed domain. Process
-rules compile to their allocated namespace address as a device rule. A process
-rule without an identity is skipped with a warning instead of accidentally
-matching the host.
+Service rules expand to one domain rule for every catalog seed domain and one
+CIDR rule for every declared literal endpoint network. Process rules compile
+to their allocated namespace address as a device rule. A process rule without
+an identity is skipped with a warning instead of accidentally matching the
+host.
 
 The router receives schema `astrill-lazy-rules-v1`, with exactly ten validated
 TSV fields:
@@ -78,6 +79,26 @@ compiler warns when enabled rules request more than one specific VPN region.
 The Countries view reports assignments and conflicts. The Endpoints view
 performs the actual shared-server switch.
 
+## Incremental Defaults
+
+New rules extend the active native Astrill mode:
+
+- global or exclude-list native routing creates a Direct exception;
+- include-list native routing creates an Astrill union;
+- country remains `No country override` until explicitly selected.
+
+Native rules have earlier policy preferences, so a companion rule cannot
+silently reverse an explicit native website or device decision.
+
+## Detection Metadata
+
+Network detection stores the checked destination, timestamp, Direct latency,
+Astrill latency, recommended target, reason, and applied state under
+`metadata.route_recommendation`. It compares only enabled service and website
+policies while Astrill is connected. A missing or one-sided latency keeps the
+current target. Service catalog route profiles prevent an ICMP-only speed
+result from overriding a known access requirement.
+
 ## Default Rule
 
 On first run:
@@ -90,8 +111,12 @@ On first run:
   "target": "direct",
   "region": "direct",
   "priority": 100,
-  "enabled": true
+  "enabled": true,
+  "metadata": {
+    "minimum_bypass": true
+  }
 }
 ```
 
-The core catalog currently maps that service to `uuyc.163.com`.
+The core catalog maps that service to its primary app, signaling, relay,
+logging, and file hosts plus observed literal fallback endpoints.

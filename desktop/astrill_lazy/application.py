@@ -26,9 +26,16 @@ from .autostart import (
 )
 from .catalog import Catalog, discover_extensions, load_catalog
 from .compiler import compile_rules
+from .detector import (
+    MINIMUM_BYPASS_SERVICES,
+    RouteRecommendation,
+    detect_rules,
+)
 from .installer import EnsureResult, RouterInstaller
 from .launcher import ApplicationLauncher, parse_command
 from .models import MatchKind, Region, RouteTarget, Rule
+from .native_page import NativeSettingsPage
+from .native_settings import NativeAstrillSettings
 from .router import RouterClient
 from .store import ConfigStore
 
@@ -104,6 +111,7 @@ class MainWindow(Adw.ApplicationWindow):
         ("countries", "Countries", "mark-location-symbolic"),
         ("devices", "Devices", "network-workgroup-symbolic"),
         ("locations", "Endpoints", "network-server-symbolic"),
+        ("astrill", "Astrill", "preferences-system-symbolic"),
         ("router", "Router", "network-server-symbolic"),
         ("extensions", "Extensions", "application-x-addon-symbolic"),
     )
@@ -119,6 +127,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.router = RouterClient(self.store.router_host)
         self.launcher = ApplicationLauncher()
         self.router_status: dict[str, Any] = {}
+        self.native_settings: NativeAstrillSettings | None = None
         self.servers: tuple[AstrillServer, ...] | None = None
         self.servers_loading = False
         self.server_groups: dict[str, tuple[AstrillServer, ...]] = {}
@@ -128,6 +137,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._region_filter = "all"
         self._updating_autostart = False
         self._updating_protocol = False
+        self._updating_astrill_connection = False
         self._protocol_user_selected = False
 
         self._install_css()
@@ -141,8 +151,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_services()
         self._render_countries()
         self._render_extensions()
-        self.ensure_router_companion(quiet=False)
+        if self.store.companion_enabled:
+            self.ensure_router_companion(quiet=False)
+        else:
+            self.refresh_router()
         self.load_servers()
+        self.refresh_native_settings(quiet=True)
         self.router_monitor_id = GLib.timeout_add_seconds(
             60, self._monitor_router_companion
         )
@@ -242,6 +256,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack.add_named(self._build_countries_page(), "countries")
         self.stack.add_named(self._build_devices_page(), "devices")
         self.stack.add_named(self._build_locations_page(), "locations")
+        self.stack.add_named(self._build_native_settings_page(), "astrill")
         self.stack.add_named(self._build_router_page(), "router")
         self.stack.add_named(self._build_extensions_page(), "extensions")
         toolbar.set_content(self.stack)
@@ -294,6 +309,22 @@ class MainWindow(Adw.ApplicationWindow):
         label.set_hexpand(True)
         label.add_css_class("section-title")
         heading.append(label)
+        self.detect_routes_button = _button_with_icon(
+            "Detect", "network-transmit-receive-symbolic", self.detect_routes
+        )
+        self.detect_routes_button.set_tooltip_text(
+            "Compare Direct and Astrill paths for enabled policies"
+        )
+        heading.append(self.detect_routes_button)
+        self.apply_recommendations_button = _button_with_icon(
+            "Apply Recommendations",
+            "object-select-symbolic",
+            self.apply_route_recommendations,
+        )
+        self.apply_recommendations_button.set_tooltip_text(
+            "Use all current route recommendations"
+        )
+        heading.append(self.apply_recommendations_button)
         add_menu = Gtk.MenuButton()
         add_menu.set_child(_button_content("Add", "list-add-symbolic"))
         add_menu.set_tooltip_text("Add a policy")
@@ -482,13 +513,20 @@ class MainWindow(Adw.ApplicationWindow):
             "network-offline-symbolic"
         )
         self.router_astrill_row.add_prefix(self.router_astrill_icon)
-        choose_location = _button_with_icon(
+        self.choose_location_button = _button_with_icon(
             "Choose",
             "find-location-symbolic",
             lambda _button: self._show_locations(),
         )
-        choose_location.set_valign(Gtk.Align.CENTER)
-        self.router_astrill_row.add_suffix(choose_location)
+        self.choose_location_button.set_valign(Gtk.Align.CENTER)
+        self.router_astrill_row.add_suffix(self.choose_location_button)
+        self.astrill_connection_switch = Gtk.Switch()
+        self.astrill_connection_switch.set_valign(Gtk.Align.CENTER)
+        self.astrill_connection_switch.set_tooltip_text("Connect or disconnect Astrill")
+        self.astrill_connection_switch.connect(
+            "notify::active", self._toggle_astrill_connection
+        )
+        self.router_astrill_row.add_suffix(self.astrill_connection_switch)
         astrill_list = Gtk.ListBox()
         astrill_list.set_selection_mode(Gtk.SelectionMode.NONE)
         astrill_list.add_css_class("catalog-list")
@@ -513,13 +551,13 @@ class MainWindow(Adw.ApplicationWindow):
             "network-offline-symbolic"
         )
         self.router_runtime_row.add_prefix(self.router_runtime_icon)
-        repair = _button_with_icon(
+        self.router_repair_button = _button_with_icon(
             "Repair",
             "system-run-symbolic",
             self.reconcile_router,
         )
-        repair.set_valign(Gtk.Align.CENTER)
-        self.router_runtime_row.add_suffix(repair)
+        self.router_repair_button.set_valign(Gtk.Align.CENTER)
+        self.router_runtime_row.add_suffix(self.router_repair_button)
         companion_list.append(self.router_runtime_row)
 
         self.router_domain_row = Adw.ActionRow(
@@ -530,13 +568,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.router_domain_row.add_prefix(
             Gtk.Image.new_from_icon_name("network-workgroup-symbolic")
         )
-        refresh_domains = _button_with_icon(
+        self.router_refresh_domains_button = _button_with_icon(
             "Refresh",
             "view-refresh-symbolic",
             self.refresh_domains,
         )
-        refresh_domains.set_valign(Gtk.Align.CENTER)
-        self.router_domain_row.add_suffix(refresh_domains)
+        self.router_refresh_domains_button.set_valign(Gtk.Align.CENTER)
+        self.router_domain_row.add_suffix(self.router_refresh_domains_button)
         companion_list.append(self.router_domain_row)
 
         rollback_row = Adw.ActionRow(
@@ -545,13 +583,13 @@ class MainWindow(Adw.ApplicationWindow):
         )
         rollback_row.set_use_markup(False)
         rollback_row.add_prefix(Gtk.Image.new_from_icon_name("edit-undo-symbolic"))
-        rollback = _button_with_icon(
+        self.router_rollback_button = _button_with_icon(
             "Roll Back",
             "edit-undo-symbolic",
             self.confirm_rollback,
         )
-        rollback.set_valign(Gtk.Align.CENTER)
-        rollback_row.add_suffix(rollback)
+        self.router_rollback_button.set_valign(Gtk.Align.CENTER)
+        rollback_row.add_suffix(self.router_rollback_button)
         companion_list.append(rollback_row)
 
         package_row = Adw.ActionRow(
@@ -569,11 +607,26 @@ class MainWindow(Adw.ApplicationWindow):
         )
         install.set_valign(Gtk.Align.CENTER)
         package_row.add_suffix(install)
+        self.restore_native_button = _button_with_icon(
+            "Restore Astrill Only",
+            "edit-delete-symbolic",
+            self.confirm_restore_native,
+        )
+        self.restore_native_button.add_css_class("destructive-action")
+        self.restore_native_button.set_valign(Gtk.Align.CENTER)
+        package_row.add_suffix(self.restore_native_button)
         companion_list.append(package_row)
 
         content.append(companion_list)
         content.append(_vertical_spacer())
         return _scroll_page(content)
+
+    def _build_native_settings_page(self) -> Gtk.Widget:
+        self.native_page = NativeSettingsPage(
+            on_refresh=lambda: self.refresh_native_settings(),
+            on_save=self.save_native_settings,
+        )
+        return _scroll_page(self.native_page)
 
     def _build_extensions_page(self) -> Gtk.Widget:
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -650,15 +703,20 @@ class MainWindow(Adw.ApplicationWindow):
             "countries": "Policy countries on one shared tunnel",
             "devices": "Observed LAN clients and fixed addresses",
             "locations": "Choose the shared Astrill server",
+            "astrill": "Native settings and effective routes",
             "router": "Runtime status and recovery",
             "extensions": "Catalog and router components",
         }
         self.window_title.set_title(title)
         self.window_title.set_subtitle(subtitles[page_id])
-        if page_id == "devices" and not self.clients:
+        if page_id in {"devices", "astrill"} and not self.clients:
             self.refresh_clients()
         if page_id == "locations" and self.servers is None:
             self.load_servers()
+        if page_id == "astrill" and (
+            self.native_settings is None or not self.native_page.dirty
+        ):
+            self.refresh_native_settings(quiet=True)
 
     def _show_services(self) -> None:
         self.nav_list.select_row(self.nav_rows["services"])
@@ -677,6 +735,7 @@ class MainWindow(Adw.ApplicationWindow):
                     "No policies", "Add a service, website, device, or application."
                 )
             )
+            self._update_recommendation_controls()
             return
         regions = list(self.catalog.regions)
         region_names = [region.name for region in regions]
@@ -691,6 +750,17 @@ class MainWindow(Adw.ApplicationWindow):
             if rule.match_kind is MatchKind.PROCESS:
                 address = str(rule.metadata.get("namespace_ip", ""))
                 subtitle = f"Application · {address or 'identity not prepared'}"
+            recommendation = rule.metadata.get("route_recommendation")
+            if isinstance(recommendation, dict):
+                target = str(recommendation.get("target", "")).capitalize()
+                direct = _latency_label(recommendation.get("direct_ms"))
+                astrill = _latency_label(recommendation.get("astrill_ms"))
+                reason = str(recommendation.get("reason", ""))
+                state = "Applied" if recommendation.get("applied") else "Recommended"
+                subtitle += (
+                    f"\n{state}: {target} · Direct {direct} · "
+                    f"Astrill {astrill} · {reason}"
+                )
             row.set_subtitle(subtitle)
             row.add_prefix(Gtk.Image.new_from_icon_name(_kind_icon(rule.match_kind)))
 
@@ -767,6 +837,7 @@ class MainWindow(Adw.ApplicationWindow):
             )
             row.add_suffix(delete)
             self.policy_list.append(row)
+        self._update_recommendation_controls()
 
     def _render_services(self) -> None:
         if not hasattr(self, "service_list"):
@@ -806,15 +877,14 @@ class MainWindow(Adw.ApplicationWindow):
             row.add_prefix(
                 Gtk.Image.new_from_icon_name(_category_icon(service.category))
             )
+            default_target = self._incremental_default_target()
             route = Gtk.Label(
-                label="DIRECT"
-                if service.default_route is RouteTarget.DIRECT
-                else "ASTRILL"
+                label="DIRECT" if default_target is RouteTarget.DIRECT else "ASTRILL"
             )
             route.add_css_class("catalog-route")
             route.add_css_class(
                 "catalog-direct"
-                if service.default_route is RouteTarget.DIRECT
+                if default_target is RouteTarget.DIRECT
                 else "catalog-vpn"
             )
             row.add_suffix(route)
@@ -1067,7 +1137,7 @@ class MainWindow(Adw.ApplicationWindow):
                 row.add_prefix(Gtk.Image.new_from_icon_name("network-vpn-symbolic"))
             connect = Gtk.Button(label="Connected" if connected else "Connect")
             connect.add_css_class("compact-button")
-            connect.set_sensitive(not connected)
+            connect.set_sensitive(self.store.companion_enabled and not connected)
             connect.set_valign(Gtk.Align.CENTER)
             connect.connect(
                 "clicked",
@@ -1185,6 +1255,25 @@ class MainWindow(Adw.ApplicationWindow):
             else "Desktop startup disabled"
         )
 
+    def _toggle_astrill_connection(self, switch: Gtk.Switch, _param: object) -> None:
+        if self._updating_astrill_connection:
+            return
+        connected = switch.get_active()
+        switch.set_sensitive(False)
+
+        def success(status: dict[str, Any]) -> None:
+            self._router_refreshed(status)
+            self.toast("Astrill connected" if connected else "Astrill disconnected")
+
+        self._run_task(
+            lambda: self.router.set_astrill_connection(
+                connected,
+                companion_enabled=self.store.companion_enabled,
+            ),
+            success,
+            "Could not change Astrill connection",
+        )
+
     def _set_rule_target(
         self, rule: Rule, target: RouteTarget, dropdown: Gtk.DropDown
     ) -> None:
@@ -1194,11 +1283,18 @@ class MainWindow(Adw.ApplicationWindow):
         dropdown.set_sensitive(target is RouteTarget.VPN)
         region_ids = [region.id for region in self.catalog.regions]
         if target is RouteTarget.DIRECT:
+            if rule.region != "direct":
+                rule.metadata["country_override"] = rule.region
             rule.region = "direct"
         elif rule.region == "direct":
-            rule.region = "active-astrill"
+            remembered = str(rule.metadata.get("country_override", "active-astrill"))
+            rule.region = (
+                remembered if remembered in region_ids else "active-astrill"
+            )
+        rule.metadata.pop("route_recommendation", None)
         dropdown.set_selected(region_ids.index(rule.region))
         self._changed()
+        self._update_recommendation_controls()
 
     def _set_rule_region(self, rule: Rule, region: str) -> None:
         if not region or rule.region == region:
@@ -1228,14 +1324,17 @@ class MainWindow(Adw.ApplicationWindow):
         ):
             self.toast("This service already has a policy")
             return
+        target = self._incremental_default_target()
         rule = Rule.create(
             name=service.name,
             match_kind=MatchKind.SERVICE,
             selector=service.id,
-            target=service.default_route,
-            region=service.preferred_region,
+            target=target,
+            region="direct" if target is RouteTarget.DIRECT else "active-astrill",
             priority=self._next_priority(),
         )
+        if service.id in MINIMUM_BYPASS_SERVICES:
+            rule.metadata["minimum_bypass"] = True
         self.store.rules.append(rule)
         self._changed()
         self._render_rules()
@@ -1463,12 +1562,15 @@ class MainWindow(Adw.ApplicationWindow):
         route_label = Gtk.Label(label="Route")
         route_label.set_xalign(0)
         route = Gtk.DropDown.new_from_strings(["Direct", "Astrill"])
-        route.set_selected(1)
-        region_label = Gtk.Label(label="Preferred Astrill region")
+        route.set_selected(
+            0 if self._incremental_default_target() is RouteTarget.DIRECT else 1
+        )
+        region_label = Gtk.Label(label="Country override")
         region_label.set_xalign(0)
         region = Gtk.DropDown.new_from_strings(
             [item.name for item in self._vpn_regions()]
         )
+        region.set_sensitive(route.get_selected() == 1)
         route.connect(
             "notify::selected",
             lambda widget, _param: region.set_sensitive(widget.get_selected() == 1),
@@ -1482,7 +1584,18 @@ class MainWindow(Adw.ApplicationWindow):
     def _vpn_regions(self) -> list[Region]:
         return [region for region in self.catalog.regions if region.id != "direct"]
 
+    def _incremental_default_target(self) -> RouteTarget:
+        if (
+            self.native_settings is not None
+            and self.native_settings.integer("astrill_routingmode") == 1
+        ):
+            return RouteTarget.VPN
+        return RouteTarget.DIRECT
+
     def apply_configuration(self, _button: Gtk.Button | None = None) -> None:
+        if not self.store.companion_enabled:
+            self.toast("Install the companion before applying routing policies")
+            return
         self.store.save()
         try:
             compilation = compile_rules(self.store.rules, self.catalog)
@@ -1507,12 +1620,173 @@ class MainWindow(Adw.ApplicationWindow):
             "Could not apply router policy",
         )
 
-    def refresh_router(self) -> None:
+    def detect_routes(self, _button: Gtk.Button | None = None) -> None:
+        if not self.store.companion_enabled:
+            self.toast("Install the companion before detecting routes")
+            return
+        candidates = [
+            rule
+            for rule in self.store.rules
+            if rule.enabled
+            and rule.match_kind in {MatchKind.SERVICE, MatchKind.DOMAIN}
+        ]
+        if not candidates:
+            self.toast("No enabled service or website policies to detect")
+            return
+
+        def work() -> list[RouteRecommendation]:
+            status = self.router.status()
+            if status.get("vpn_state") != "up":
+                raise RuntimeError("connect Astrill before comparing both paths")
+            return detect_rules(self.router, candidates, self.catalog)
+
+        def success(recommendations: list[RouteRecommendation]) -> None:
+            by_id = {recommendation.rule_id: recommendation for recommendation in recommendations}
+            for rule in self.store.rules:
+                recommendation = by_id.get(rule.id)
+                if recommendation is None:
+                    continue
+                metadata = recommendation.to_metadata()
+                metadata["applied"] = False
+                rule.metadata["route_recommendation"] = metadata
+            self.store.save()
+            self._render_rules()
+            changes = sum(
+                recommendation.target is not self._rule_by_id(recommendation.rule_id).target
+                for recommendation in recommendations
+            )
+            if changes:
+                self.toast(
+                    f"Checked {len(recommendations)} policies; "
+                    f"{changes} route changes recommended"
+                )
+            else:
+                self.toast(
+                    f"Checked {len(recommendations)} policies; current routes recommended"
+                )
+
         self._run_task(
-            self.router.status,
+            work,
+            success,
+            "Network detection failed",
+        )
+
+    def apply_route_recommendations(
+        self, _button: Gtk.Button | None = None
+    ) -> None:
+        recommendations = [
+            (rule, value)
+            for rule in self.store.rules
+            if isinstance(
+                (value := rule.metadata.get("route_recommendation")), dict
+            )
+            and not value.get("applied")
+        ]
+        if not recommendations:
+            self.toast("No pending route recommendations")
+            return
+        region_ids = {region.id for region in self.catalog.regions}
+        changed = 0
+        for rule, recommendation in recommendations:
+            try:
+                target = RouteTarget(str(recommendation["target"]))
+            except (KeyError, ValueError):
+                continue
+            if rule.target is not target:
+                changed += 1
+            rule.target = target
+            if target is RouteTarget.DIRECT:
+                if rule.region != "direct":
+                    rule.metadata["country_override"] = rule.region
+                rule.region = "direct"
+            elif rule.region == "direct":
+                remembered = str(
+                    rule.metadata.get("country_override", "active-astrill")
+                )
+                rule.region = (
+                    remembered if remembered in region_ids else "active-astrill"
+                )
+            recommendation["applied"] = True
+        self.store.save()
+        self.dirty = True
+        self._render_rules()
+        self._render_countries()
+        self.apply_configuration()
+        self.toast(
+            f"Applying {changed} recommended route change"
+            f"{'' if changed == 1 else 's'}"
+        )
+
+    def _rule_by_id(self, rule_id: str) -> Rule:
+        return next(rule for rule in self.store.rules if rule.id == rule_id)
+
+    def _update_recommendation_controls(self) -> None:
+        if not hasattr(self, "apply_recommendations_button"):
+            return
+        pending = any(
+            isinstance(value := rule.metadata.get("route_recommendation"), dict)
+            and not value.get("applied")
+            for rule in self.store.rules
+        )
+        idle = self.busy_count == 0
+        self.detect_routes_button.set_sensitive(
+            self.store.companion_enabled and idle
+        )
+        self.apply_recommendations_button.set_sensitive(
+            self.store.companion_enabled and idle and pending
+        )
+
+    def refresh_router(self) -> None:
+        work = (
+            self.router.status
+            if self.store.companion_enabled
+            else self.router.native_astrill_status
+        )
+        self._run_task(
+            work,
             self._router_refreshed,
             "Could not reach the router",
             quiet=True,
+        )
+
+    def refresh_native_settings(self, *, quiet: bool = False) -> None:
+        self._run_task(
+            self.router.native_astrill_settings,
+            lambda settings: self._native_settings_refreshed(
+                settings, notify=not quiet
+            ),
+            "Could not load native Astrill settings",
+            quiet=quiet,
+        )
+
+    def _native_settings_refreshed(
+        self, settings: NativeAstrillSettings, *, notify: bool
+    ) -> None:
+        self.native_settings = settings
+        self.native_page.render(settings, self.clients)
+        self._render_services()
+        if notify:
+            self.toast("Native Astrill settings synchronized")
+
+    def save_native_settings(self) -> None:
+        try:
+            changes = self.native_page.collect_changes()
+        except ValueError as exc:
+            self.toast(str(exc))
+            return
+        if not changes:
+            self.native_page.mark_clean()
+            self.toast("Native Astrill settings are already synchronized")
+            return
+
+        def success(settings: NativeAstrillSettings) -> None:
+            self._native_settings_refreshed(settings, notify=False)
+            self.toast("Native Astrill settings saved")
+
+        self._run_task(
+            lambda: self.router.update_native_astrill_settings(changes),
+            success,
+            "Could not save native Astrill settings",
         )
 
     def refresh_domains(self, _button: Gtk.Button | None = None) -> None:
@@ -1562,6 +1836,9 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def ensure_router_companion(self, *, quiet: bool = True) -> None:
+        if not self.store.companion_enabled:
+            self.refresh_router()
+            return
         self._run_task(
             lambda: RouterInstaller(self.router).ensure(),
             self._router_companion_ensured,
@@ -1570,6 +1847,9 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def reconcile_router(self, _button: Gtk.Button | None = None) -> None:
+        if not self.store.companion_enabled:
+            self.toast("Install the companion before repairing its runtime")
+            return
         self._run_task(
             lambda: RouterInstaller(self.router).ensure(),
             self._manual_companion_ensured,
@@ -1590,7 +1870,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _monitor_router_companion(self) -> bool:
         if self.busy_count == 0:
-            self.ensure_router_companion()
+            if self.store.companion_enabled:
+                self.ensure_router_companion()
+            else:
+                self.refresh_router()
         return GLib.SOURCE_CONTINUE
 
     def _router_refreshed(self, status: dict[str, Any]) -> None:
@@ -1601,8 +1884,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _update_status(self) -> None:
         status = self.router_status
+        native_mode = not self.store.companion_enabled
         healthy = status.get("health") == "healthy"
-        self.metrics["health"].set_label("Healthy" if healthy else "Needs attention")
+        self.metrics["health"].set_label(
+            "Native Astrill"
+            if native_mode and healthy
+            else ("Healthy" if healthy else "Needs attention")
+        )
         _set_status_class(self.metrics["health"], healthy)
         tunnel = status.get("vpn_state") == "up"
         self.metrics["tunnel"].set_label("Connected" if tunnel else "Disconnected")
@@ -1624,7 +1912,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.metrics["rules"].set_label(str(status.get("origin_count", 0)))
         if healthy:
             self.sidebar_status_icon.set_from_icon_name("network-vpn-symbolic")
-            self.sidebar_status_label.set_label("Router connected")
+            self.sidebar_status_label.set_label(
+                "Native Astrill" if native_mode else "Router connected"
+            )
         else:
             self.sidebar_status_icon.set_from_icon_name("network-error-symbolic")
             self.sidebar_status_label.set_label("Router needs attention")
@@ -1640,7 +1930,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.policy_banner.set_revealed(True)
         elif not self.dirty:
             self.policy_banner.set_revealed(False)
-        installed = status.get("version") not in {None, "", "unknown"}
+        installed = self.store.companion_enabled and status.get("version") not in {
+            None,
+            "",
+            "unknown",
+        }
         self.router_companion_icon.set_from_icon_name(
             "object-select-symbolic" if installed else "network-offline-symbolic"
         )
@@ -1650,16 +1944,32 @@ class MainWindow(Adw.ApplicationWindow):
         self.router_runtime_icon.set_from_icon_name(
             "object-select-symbolic" if runtime_healthy else "network-offline-symbolic"
         )
-        watchdog = "Watchdog active" if status.get("watchdog") else "Watchdog stopped"
-        self.router_runtime_row.set_subtitle(
-            f"Version {status.get('version', 'unknown')} · "
-            f"{status.get('active_chain') or 'No active chain'} · {watchdog}"
-        )
-        self.router_domain_row.set_subtitle(
-            f"{status.get('resolved_addresses', 0)} resolved · "
-            f"{status.get('unresolved_domains', 0)} unresolved · "
-            f"{status.get('origin_count', 0)} policies"
-        )
+        if native_mode:
+            self.router_runtime_row.set_subtitle(
+                "Native Astrill mode · companion runtime removed"
+            )
+            self.router_domain_row.set_subtitle(
+                "Unavailable until the companion is installed"
+            )
+            self.router_companion_row.set_subtitle(
+                "Not installed · native Astrill is unchanged"
+            )
+        else:
+            watchdog = (
+                "Watchdog active" if status.get("watchdog") else "Watchdog stopped"
+            )
+            self.router_runtime_row.set_subtitle(
+                f"Version {status.get('version', 'unknown')} · "
+                f"{status.get('active_chain') or 'No active chain'} · {watchdog}"
+            )
+            self.router_domain_row.set_subtitle(
+                f"{status.get('resolved_addresses', 0)} resolved · "
+                f"{status.get('unresolved_domains', 0)} unresolved · "
+                f"{status.get('origin_count', 0)} policies"
+            )
+            self.router_companion_row.set_subtitle(
+                "Persistent controller, watchdog, MyPage, and automatic repair"
+            )
         protocol_name = (
             ASTRILL_PROTOCOL_NAMES[protocol]
             if 0 <= protocol < len(ASTRILL_PROTOCOL_NAMES)
@@ -1673,6 +1983,27 @@ class MainWindow(Adw.ApplicationWindow):
         self.router_astrill_icon.set_from_icon_name(
             "network-vpn-symbolic" if tunnel else "network-offline-symbolic"
         )
+        self._updating_astrill_connection = True
+        self.astrill_connection_switch.set_active(tunnel)
+        self._updating_astrill_connection = False
+        self.astrill_connection_switch.set_sensitive(self.busy_count == 0)
+        self.choose_location_button.set_sensitive(
+            self.store.companion_enabled and self.busy_count == 0
+        )
+        self.protocol_dropdown.set_sensitive(self.store.companion_enabled)
+        for control in (
+            self.router_repair_button,
+            self.router_refresh_domains_button,
+            self.router_rollback_button,
+        ):
+            control.set_sensitive(self.store.companion_enabled and self.busy_count == 0)
+        self.restore_native_button.set_sensitive(
+            self.store.companion_enabled and self.busy_count == 0
+        )
+        self.apply_button.set_sensitive(
+            self.store.companion_enabled and self.busy_count == 0
+        )
+        self._update_recommendation_controls()
 
     def refresh_clients(self) -> None:
         self._run_task(
@@ -1684,6 +2015,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _clients_refreshed(self, clients: list[dict[str, Any]]) -> None:
         self.clients = clients
         self._render_devices()
+        self.native_page.update_clients(clients)
         self.toast(f"Loaded {len(clients)} LAN devices")
 
     def load_servers(self) -> None:
@@ -1816,13 +2148,50 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def install_router(self, _button: Gtk.Button | None = None) -> None:
+        def success(result: Any) -> None:
+            self.store.companion_enabled = True
+            self.store.save()
+            self._router_refreshed(result.status)
+            self.toast(f"Router companion {result.version} installed")
+
         self._run_task(
             lambda: RouterInstaller(self.router).install(),
-            lambda result: (
-                self.toast(f"Router companion {result.version} installed"),
-                self.refresh_router(),
-            ),
+            success,
             "Router companion installation failed",
+        )
+
+    def confirm_restore_native(self, _button: Gtk.Button | None = None) -> None:
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Restore native Astrill only?",
+            "This removes the companion watchdog, policy chains, routes, saved "
+            "package, and MyPage entries. Astrill's endpoint and connection "
+            "state are preserved.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("restore", "Restore Astrill Only")
+        dialog.set_response_appearance("restore", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect(
+            "response",
+            lambda _dialog, response: (
+                response == "restore" and self._restore_native_astrill()
+            ),
+        )
+        dialog.present()
+
+    def _restore_native_astrill(self) -> None:
+        def success(status: dict[str, Any]) -> None:
+            self.store.companion_enabled = False
+            self.store.save()
+            self._router_refreshed(status)
+            self.toast("Companion removed; native Astrill restored")
+
+        self._run_task(
+            lambda: RouterInstaller(self.router).uninstall(),
+            success,
+            "Could not fully restore native Astrill",
         )
 
     def _run_task(
@@ -1835,6 +2204,8 @@ class MainWindow(Adw.ApplicationWindow):
     ) -> None:
         self.busy_count += 1
         self.apply_button.set_sensitive(False)
+        self.native_page.set_busy(True)
+        self._update_recommendation_controls()
 
         def runner() -> None:
             try:
@@ -1860,11 +2231,20 @@ class MainWindow(Adw.ApplicationWindow):
             self.sidebar_status_label.set_label("Router unavailable")
         if prefix == "Could not load Astrill endpoints":
             self.servers_loading = False
+        if prefix in {
+            "Could not change Astrill connection",
+            "Could not fully restore native Astrill",
+        }:
+            self.refresh_router()
         return GLib.SOURCE_REMOVE
 
     def _task_finished(self) -> None:
         self.busy_count = max(0, self.busy_count - 1)
-        self.apply_button.set_sensitive(self.busy_count == 0)
+        self.apply_button.set_sensitive(
+            self.store.companion_enabled and self.busy_count == 0
+        )
+        self.native_page.set_busy(self.busy_count != 0)
+        self._update_recommendation_controls()
 
     def toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast(title=message, timeout=4))
@@ -1941,6 +2321,12 @@ def _policy_summary(policies: list[Rule]) -> str:
     if count > 2:
         names = f"{names} +{count - 2}"
     return f"{count} {'policy' if count == 1 else 'policies'}: {names}"
+
+
+def _latency_label(value: object) -> str:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return "no reply"
+    return f"{float(value):.0f} ms"
 
 
 def _kind_label(kind: MatchKind) -> str:

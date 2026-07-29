@@ -13,6 +13,7 @@ from astrill_lazy.autostart import (
     is_autostart_enabled,
 )
 from astrill_lazy.installer import (
+    STARTUP_LINE,
     RouterInstaller,
     build_router_package,
     find_router_root,
@@ -47,14 +48,17 @@ def test_config_store_round_trip_is_private(tmp_path: Path) -> None:
     store = ConfigStore(path)
     store.rules = [default_uu_rule()]
     store.enabled_extensions = ["core-catalog"]
+    store.companion_enabled = False
     store.save()
     assert path.stat().st_mode & 0o777 == 0o600
 
     loaded = ConfigStore(path)
     assert loaded.rules[0].selector == "uu-remote"
     assert loaded.enabled_extensions == ["core-catalog"]
+    assert loaded.companion_enabled is False
     document = json.loads(path.read_text(encoding="utf-8"))
     assert document["schema_version"] == 1
+    assert document["companion_enabled"] is False
 
 
 def test_parse_application_command() -> None:
@@ -203,3 +207,49 @@ def test_router_reconcile_does_not_rewrite_identical_broken_package(
     )
     with pytest.raises(RouterError, match="explicit rewrite"):
         installer.ensure()
+
+
+def test_router_uninstall_audits_cleanup_and_preserves_native_state() -> None:
+    native_status = {
+        "vpn_state": "up",
+        "astrill_server_id": 1109,
+        "astrill_protocol": 2,
+    }
+
+    class InstalledClient:
+        def __init__(self) -> None:
+            self.script = ""
+
+        def native_astrill_status(self) -> dict[str, object]:
+            return dict(native_status)
+
+        def raw(self, arguments: list[str], *, timeout: int | None = None) -> str:
+            assert timeout is None
+            values = {
+                "astrill_lazy_pkg_count": "2",
+                "rc_startup": "original-command\n" + STARTUP_LINE,
+                "mypage_scripts": (
+                    "native-page /tmp/astrill-lazy/alpage /tmp/astrill-lazy/alapi"
+                ),
+            }
+            return values[arguments[-1]]
+
+        def run_script(self, script: str, *, timeout: int) -> str:
+            assert timeout == 45
+            self.script = script
+            return ""
+
+    client = InstalledClient()
+    result = RouterInstaller(client).uninstall()  # type: ignore[arg-type]
+    assert result == native_status
+    assert "astrill_lazy_pkg_0" in client.script
+    assert "astrill_lazy_pkg_1" in client.script
+    assert "rm -rf /tmp/astrill-lazy" in client.script
+    assert "iptables -w 10 -t mangle -S" in client.script
+    assert "lookup (212|213)" in client.script
+    assert "native-page" in client.script
+    assert "/tmp/astrill-lazy/alpage" not in next(
+        line
+        for line in client.script.splitlines()
+        if line.startswith("nvram set mypage_scripts=")
+    )

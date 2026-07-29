@@ -18,9 +18,9 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-29 tests passed
+39 tests passed
 Ruff: all checks passed
-Catalog: 261 profiles, 608/608 unique seed hosts resolved to IPv4
+Catalog: 261 profiles, 649/649 unique seed hosts resolved to IPv4
 ShellCheck: no findings
 Desktop entry: valid
 AppStream metadata: valid
@@ -44,7 +44,12 @@ Tests cover:
 - POSIX shell parsing and the no-`eval` policy contract;
 - DHCP/static/ARP client inventory merging, MAC deduplication, and WAN
   exclusion;
-- SSH banner error cleanup.
+- SSH banner error cleanup;
+- native mode adapters, device/site parsing, safe-key validation, and
+  round-trip writes;
+- route probe parsing, noise thresholds, minimum bypasses, and service-aware
+  recommendations;
+- complete native-only removal and preserved Astrill state.
 
 ## Live Router Verification
 
@@ -56,6 +61,7 @@ The following checks were performed against the Linksys E4200:
 - WAN table `213` and tunnel table `212`;
 - default empty chain with no traffic effect;
 - `UU Remote -> Direct` compilation and DNS resolution;
+- four Direct service groups expanding to 56 domain/network rules;
 - real HTTPS request to `uuyc.163.com`;
 - 49 packets incrementing the `0x4000000/0xc000000` mark rule in a live
   verification run;
@@ -72,13 +78,22 @@ The following checks were performed against the Linksys E4200:
 - physical router reboot reconstruction from NVRAM, with one startup entry,
   one watchdog, both policy rules, and retained MyPage commands;
 - direct Internet requests to UU Remote, Cloudflare, and Google after reboot;
+- connected tests of Google, YouTube, Instagram, UU Remote, WeChat, Taobao,
+  and Meituan from Ubuntu and macOS;
+- exact live Direct mark and return counters for all four bypass services;
+- a controlled Astrill disconnect where Direct traffic continued, VPN-only
+  traffic stopped, and the companion did not reconnect Astrill;
+- full native-only restoration with no remaining companion NVRAM, MyPage,
+  firewall, policy-rule, watchdog, or runtime object, followed by explicit
+  reinstall and policy restore;
 - six deduplicated LAN devices from four leases and five active LAN neighbors,
   with the WAN neighbor excluded;
 - router MyPage rendering at `1280x900` and `390x844` with loaded status and
   no control/text overlap;
 - native GTK rendering of policies, all 261 services, country routes, LAN
-  devices, Astrill endpoints, router operations, login startup, and extension
-  state at `1180x760` and `880x600`;
+  devices, Astrill endpoints, synchronized native settings, route
+  recommendations, router operations, login startup, and extension state at
+  `1180x760` and `880x600`;
 - isolated GUI debugging through noVNC without opening a window in the active
   Ubuntu desktop session.
 
