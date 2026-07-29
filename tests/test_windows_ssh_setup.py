@@ -15,6 +15,8 @@ from astrill_lazy.windows_ssh_setup import (
     trust_windows_host_key,
 )
 
+WINDOWS_NO_WINDOW = 0x08000000
+
 
 def host_key(tmp_path: Path, *, state: str = "unknown") -> WindowsHostKey:
     return WindowsHostKey(
@@ -32,9 +34,15 @@ def test_host_key_inspection_uses_openssh_fingerprint_without_authentication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[list[str]] = []
+    known_hosts = tmp_path / "known_hosts"
+    known_hosts.write_text(
+        "other.example ssh-ed25519 AAAAOTHER\n",
+        encoding="ascii",
+    )
 
     def run(arguments: list[str], **options: Any) -> SimpleNamespace:
         calls.append(arguments)
+        assert options["creationflags"] == WINDOWS_NO_WINDOW
         if arguments[0] == "ssh-keyscan.exe":
             assert "input" not in options
             return SimpleNamespace(
@@ -42,6 +50,8 @@ def test_host_key_inspection_uses_openssh_fingerprint_without_authentication(
                 stdout="192.168.1.1 ssh-ed25519 AAAATESTKEY\n",
                 stderr="",
             )
+        if arguments[1] == "-F":
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
         assert arguments == ["ssh-keygen.exe", "-lf", "-"]
         assert "AAAATESTKEY" in options["input"]
         return SimpleNamespace(
@@ -51,16 +61,22 @@ def test_host_key_inspection_uses_openssh_fingerprint_without_authentication(
         )
 
     monkeypatch.setattr(setup.subprocess, "run", run)
+    monkeypatch.setattr(
+        setup,
+        "background_process_options",
+        lambda: {"creationflags": WINDOWS_NO_WINDOW},
+    )
     result = inspect_windows_host_key(
         "192.168.1.1",
         22,
-        known_hosts_path=tmp_path / "known_hosts",
+        known_hosts_path=known_hosts,
     )
 
     assert result.fingerprint == "SHA256:dGVzdA=="
     assert result.trust_state == "unknown"
     assert result.known_hosts_line == ("192.168.1.1 ssh-ed25519 AAAATESTKEY")
     assert calls[0][0] == "ssh-keyscan.exe"
+    assert [call[1] for call in calls[1:]] == ["-lf", "-F"]
 
 
 def test_confirmed_host_key_is_saved_atomically_and_idempotently(

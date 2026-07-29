@@ -3,7 +3,11 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
+import astrill_lazy.ssh_setup as setup
+import pytest
 from astrill_lazy.astrill_install import (
     ASTRILL_INSTALL_TEMPLATE,
     install_astrill,
@@ -13,6 +17,7 @@ from astrill_lazy.astrill_install import (
 from astrill_lazy.ssh_setup import ensure_local_identity, read_public_key
 
 ROOT = Path(__file__).parents[1]
+WINDOWS_NO_WINDOW = 0x08000000
 
 
 def test_local_router_identity_is_generated_with_private_permissions(
@@ -37,6 +42,43 @@ def test_custom_identity_does_not_change_an_existing_parent_mode(
 
     if os.name != "nt":
         assert parent.stat().st_mode & 0o777 == 0o755
+
+
+@pytest.mark.parametrize("derive_existing", (True, False))
+def test_identity_keygen_uses_background_process_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    derive_existing: bool,
+) -> None:
+    identity = tmp_path / "router"
+    if derive_existing:
+        identity.write_text("private", encoding="ascii")
+    captured_options: dict[str, Any] = {}
+
+    def run(arguments: list[str], **options: Any) -> SimpleNamespace:
+        captured_options.update(options)
+        if derive_existing:
+            assert arguments == ["ssh-keygen", "-y", "-f", str(identity)]
+            stdout = "ssh-ed25519 AAAATESTKEY\n"
+        else:
+            assert arguments[-1] == str(identity)
+            identity.write_text("private", encoding="ascii")
+            identity.with_name("router.pub").write_text(
+                "ssh-ed25519 AAAATESTKEY astrill-lazy-router\n",
+                encoding="ascii",
+            )
+            stdout = ""
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(setup.subprocess, "run", run)
+    monkeypatch.setattr(
+        setup,
+        "background_process_options",
+        lambda: {"creationflags": WINDOWS_NO_WINDOW},
+    )
+
+    assert setup.ensure_local_identity(str(identity)) == identity
+    assert captured_options["creationflags"] == WINDOWS_NO_WINDOW
 
 
 def test_astrill_installer_template_and_source_redaction_never_embed_a_token() -> None:

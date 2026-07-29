@@ -96,6 +96,25 @@ MODE_KEYS = {
     "astrill_cipher": frozenset({"default", "AES-128-CBC", "AES-256-CBC", "none"}),
 }
 
+DNS_OPTIONS = (
+    ("0", "Astrill DNS"),
+    ("1", "Google DNS"),
+    ("2", "OpenDNS"),
+    ("3", "Cloudflare"),
+    ("7", "DNS Advantage"),
+    ("8", "Comodo DNS"),
+    ("9", "Level3 DNS"),
+    ("254", "User defined"),
+    ("255", "Unchanged"),
+)
+
+CIPHER_OPTIONS = (
+    ("default", "Default"),
+    ("AES-128-CBC", "AES 128-bit"),
+    ("AES-256-CBC", "AES 256-bit"),
+    ("none", "Disabled"),
+)
+
 MAC_RE = re.compile(r"^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 INTERFACE_LIST_RE = re.compile(r"^[a-zA-Z0-9_.:-]*(?:;[a-zA-Z0-9_.:-]+)*$")
 

@@ -27,6 +27,11 @@ never written to disk, logs, process arguments, or environment variables.
 Normal Windows commands then use the pinned file, `BatchMode=yes`, and
 `StrictHostKeyChecking=yes`.
 
+The native Windows application launches its noninteractive `ssh.exe`,
+`ssh-keyscan.exe`, and `ssh-keygen.exe` helpers without a console window. The
+separate interactive SSH setup action remains visible by design and keeps
+`StrictHostKeyChecking=ask`.
+
 Telnet remains enabled as a deliberate recovery mechanism. This is less secure
 than SSH on an untrusted LAN. Disable it only after confirming another console
 or recovery path, and do not couple that change to a policy upgrade.

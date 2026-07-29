@@ -12,31 +12,14 @@ from gi.repository import Adw, Gtk
 
 from .models import RouteTarget
 from .native_settings import (
+    CIPHER_OPTIONS,
+    DNS_OPTIONS,
     EffectivePolicy,
     NativeAstrillSettings,
     NativeDevice,
     binary_native_mode,
     device_policy_changes,
     site_policy_changes,
-)
-
-DNS_OPTIONS = (
-    ("0", "Astrill DNS"),
-    ("1", "Google DNS"),
-    ("2", "OpenDNS"),
-    ("3", "Cloudflare"),
-    ("7", "DNS Advantage"),
-    ("8", "Comodo DNS"),
-    ("9", "Level3 DNS"),
-    ("254", "User defined"),
-    ("255", "Unchanged"),
-)
-
-CIPHER_OPTIONS = (
-    ("default", "Default"),
-    ("AES-128-CBC", "AES 128-bit"),
-    ("AES-256-CBC", "AES 256-bit"),
-    ("none", "Disabled"),
 )
 
 

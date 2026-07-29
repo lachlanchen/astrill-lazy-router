@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import astrill_lazy.router as router_module
 import pytest
 from astrill_lazy.router import (
     DOMAIN_REFRESH_TIMEOUT,
@@ -12,6 +13,8 @@ from astrill_lazy.router import (
     _openssh_config_path,
     _parse_native_clients,
 )
+
+WINDOWS_NO_WINDOW = 0x08000000
 
 
 def test_refresh_allows_a_full_forced_domain_resolution(
@@ -51,14 +54,21 @@ def test_remote_commands_use_stable_key_only_ssh_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: list[str] = []
+    captured_options: dict[str, object] = {}
 
     def complete(
-        arguments: list[str], **_kwargs: object
+        arguments: list[str], **options: object
     ) -> subprocess.CompletedProcess:
         captured.extend(arguments)
+        captured_options.update(options)
         return subprocess.CompletedProcess(arguments, 0, b"ready\n", b"")
 
     monkeypatch.setattr(subprocess, "run", complete)
+    monkeypatch.setattr(
+        router_module,
+        "background_process_options",
+        lambda: {"creationflags": WINDOWS_NO_WINDOW},
+    )
     client = RouterClient(
         "192.168.1.1",
         user="root",
@@ -82,6 +92,29 @@ def test_remote_commands_use_stable_key_only_ssh_options(
     known_hosts = Path("~/.ssh/astrill-lazy-known-hosts").expanduser()
     assert f"UserKnownHostsFile={_openssh_config_path(known_hosts)}" in captured
     assert "root@192.168.1.1" in captured
+    assert captured_options["creationflags"] == WINDOWS_NO_WINDOW
+
+
+def test_astrill_payload_ssh_uses_background_process_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_options: dict[str, object] = {}
+
+    def complete(
+        arguments: list[str], **options: object
+    ) -> subprocess.CompletedProcess:
+        captured_options.update(options)
+        return subprocess.CompletedProcess(arguments, 0, b"applet", b"")
+
+    monkeypatch.setattr(subprocess, "run", complete)
+    monkeypatch.setattr(
+        router_module,
+        "background_process_options",
+        lambda: {"creationflags": WINDOWS_NO_WINDOW},
+    )
+
+    assert RouterClient().fetch_astrill_payload() == b"applet"
+    assert captured_options["creationflags"] == WINDOWS_NO_WINDOW
 
 
 def test_known_hosts_path_with_spaces_is_one_openssh_config_value(

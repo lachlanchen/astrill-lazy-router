@@ -109,10 +109,12 @@ simultaneously.
 ### Native Astrill and endpoints
 
 The Astrill view mirrors supported native settings through an explicit
-allowlist. The Endpoints view discovers the applet's server list, shows the
-current endpoint, and provides an explicit confirmed action to select a server
-and reconnect the router's shared tunnel. The Windows action changes DD-WRT
-only; it does not install or connect a VPN, or change local routing, on the PC.
+allowlist. Ubuntu and Windows both present human-readable Routing, DNS,
+Connection, and Advanced controls while showing the exact underlying NVRAM
+keys. The Endpoints view discovers the applet's server list, shows the current
+endpoint, and provides an explicit confirmed action to select a server and
+reconnect the router's shared tunnel. The Windows action changes DD-WRT only;
+it does not install or connect a VPN, or change local routing, on the PC.
 Endpoint switching requires the optional companion so a failed connection can
 restore the router's previous endpoint settings.
 

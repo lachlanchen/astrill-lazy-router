@@ -15,6 +15,7 @@ from .native_settings import (
     NativeAstrillSettings,
     normalize_native_changes,
 )
+from .subprocess_support import background_process_options
 
 DOMAIN_REFRESH_TIMEOUT = 180
 
@@ -277,6 +278,7 @@ done
             check=False,
             capture_output=True,
             timeout=self.timeout,
+            **background_process_options(),
         )
         if result.returncode != 0:
             raise RouterError(
@@ -324,6 +326,7 @@ done
                 check=False,
                 capture_output=True,
                 timeout=effective_timeout,
+                **background_process_options(),
             )
         except subprocess.TimeoutExpired as exc:
             raise RouterError(

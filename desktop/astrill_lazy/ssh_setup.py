@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .subprocess_support import background_process_options
+
 if TYPE_CHECKING:
     from .router import RouterClient
 
@@ -45,6 +47,7 @@ def ensure_local_identity(value: str = DEFAULT_IDENTITY_FILE) -> Path:
                 capture_output=True,
                 text=True,
                 timeout=15,
+                **background_process_options(),
             )
             if result.returncode != 0 or not result.stdout.strip():
                 raise RuntimeError(
@@ -72,6 +75,7 @@ def ensure_local_identity(value: str = DEFAULT_IDENTITY_FILE) -> Path:
         capture_output=True,
         text=True,
         timeout=30,
+        **background_process_options(),
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -153,6 +157,7 @@ nvram commit >/dev/null
         capture_output=True,
         timeout=30,
         env=environment,
+        **background_process_options(),
     )
     environment["SSHPASS"] = ""
     del environment

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .router import RouterClient
 from .ssh_setup import identity_path, read_public_key
+from .subprocess_support import background_process_options
 
 HOST_KEY_TYPES = (
     "ssh-ed25519",
@@ -76,6 +77,7 @@ def inspect_windows_host_key(
         capture_output=True,
         text=True,
         timeout=bounded_timeout + 3,
+        **background_process_options(),
     )
     candidates = _parse_scanned_keys(scan.stdout)
     if not candidates:
@@ -268,6 +270,7 @@ def _fingerprint(known_hosts_line: str) -> str:
         capture_output=True,
         text=True,
         timeout=10,
+        **background_process_options(),
     )
     match = FINGERPRINT_RE.search(result.stdout)
     if result.returncode != 0 or match is None:
@@ -286,6 +289,7 @@ def _known_host_keys(lookup_name: str, path: Path) -> list[tuple[str, str]]:
         capture_output=True,
         text=True,
         timeout=10,
+        **background_process_options(),
     )
     if result.returncode not in {0, 1}:
         raise RuntimeError(

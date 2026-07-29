@@ -16,6 +16,12 @@
   companion, reconstruct its validated runtime from retained NVRAM, or fall
   back to native-only mode when the router no longer retains it, without
   silently rewriting a package.
+- Replace the Windows raw NVRAM table with Ubuntu-aligned, human-readable
+  Astrill controls that retain exact safe-key metadata, change detection,
+  validation, confirmation, and readback.
+- Keep background Windows OpenSSH status, endpoint, host-key, and identity
+  helpers console-free while retaining the explicitly requested interactive
+  SSH terminal.
 - Preserve writable companion behavior for legacy configuration files while
   adding an explicit `astrill-lazy access` guard for new deployments.
 - Add companion-free LAN client discovery and a sanitized native inspection

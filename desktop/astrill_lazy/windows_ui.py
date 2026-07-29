@@ -45,8 +45,6 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStackedWidget,
     QStyle,
-    QTableWidget,
-    QTableWidgetItem,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -56,14 +54,11 @@ from PySide6.QtWidgets import (
 from . import __version__
 from .astrill import ASTRILL_PROTOCOL_NAMES, AstrillServer
 from .models import MatchKind, RouteTarget, Rule
-from .native_settings import (
-    SAFE_NATIVE_ASTRILL_KEYS,
-    WRITABLE_NATIVE_ASTRILL_KEYS,
-    NativeAstrillSettings,
-)
+from .native_settings import NativeAstrillSettings
 from .router import _openssh_config_path
 from .service_policy import ServiceRouteMode
 from .windows_controller import WindowsController
+from .windows_native_page import WindowsNativeSettingsPage
 from .windows_ssh_setup import WindowsHostKey, WindowsKeyAuthorization
 
 APP_NAME = "Astrill Lazy Router"
@@ -201,6 +196,38 @@ QLabel#statusGood {{
 QLabel#statusBad {{
     color: {COLORS["red"]};
     font-weight: 600;
+}}
+QLabel.nativeIntro {{
+    color: #334155;
+    font-size: 10.5pt;
+}}
+QLabel.nativeSummary {{
+    color: #4338ca;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 9px;
+    padding: 10px 12px;
+    font-weight: 600;
+}}
+QLabel.nativeFieldTitle {{
+    color: {COLORS["text"]};
+    font-weight: 700;
+}}
+QLabel.nativeFieldDescription {{
+    color: {COLORS["muted"]};
+    font-size: 9.25pt;
+}}
+QLabel.nativeKey {{
+    color: #7c3aed;
+    font-family: "Cascadia Mono", "Consolas";
+    font-size: 8.5pt;
+}}
+QLabel.nativeReadOnly {{
+    color: #334155;
+    background: #f1f5f9;
+    border: 1px solid #d8d5ff;
+    border-radius: 8px;
+    padding: 9px 11px;
 }}
 QPushButton {{
     background: white;
@@ -465,7 +492,9 @@ class MainWindow(QMainWindow):
         self.busy_count = 0
         self.router_status: dict[str, Any] = {}
         self.clients: list[dict[str, Any]] = []
+        self._clients_loading = False
         self.native_settings: NativeAstrillSettings | None = None
+        self._native_settings_loading = False
         self._syncing_access = False
         self._endpoint_protocol_user_selected = False
 
@@ -590,7 +619,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_countries_page())
         self.stack.addWidget(self._build_devices_page())
         self.stack.addWidget(self._build_endpoints_page())
-        self.stack.addWidget(self._build_astrill_page())
+        self.stack.addWidget(self._scrollable_page(self._build_astrill_page()))
         self.stack.addWidget(self._build_router_page())
         self.stack.addWidget(self._scrollable_page(self._build_settings_page()))
 
@@ -864,47 +893,12 @@ class MainWindow(QMainWindow):
         return page
 
     def _build_astrill_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
-        row = QHBoxLayout()
-        note = QLabel(
-            "Allowlisted native Astrill values. Editable values are validated "
-            "and read back after saving."
+        self.native_page = WindowsNativeSettingsPage(
+            on_refresh=self._load_native_settings,
+            on_save=self._save_native_settings,
         )
-        note.setWordWrap(True)
-        row.addWidget(note, 1)
-        reload_button = QPushButton("Load settings")
-        reload_button.clicked.connect(self._load_native_settings)
-        row.addWidget(reload_button)
-        self.save_native_button = QPushButton("Save changed values")
-        self.save_native_button.setObjectName("primary")
-        self.save_native_button.clicked.connect(self._save_native_settings)
-        row.addWidget(self.save_native_button)
-        layout.addLayout(row)
-
-        self.native_table = QTableWidget(len(SAFE_NATIVE_ASTRILL_KEYS), 2)
-        self.native_table.setHorizontalHeaderLabels(["NVRAM key", "Value"])
-        self.native_table.setAlternatingRowColors(True)
-        self.native_table.verticalHeader().setVisible(False)
-        self.native_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.native_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )
-        for row_index, key in enumerate(SAFE_NATIVE_ASTRILL_KEYS):
-            key_item = QTableWidgetItem(key)
-            key_item.setFlags(key_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.native_table.setItem(row_index, 0, key_item)
-            value_item = QTableWidgetItem("")
-            if key not in WRITABLE_NATIVE_ASTRILL_KEYS:
-                value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                value_item.setBackground(QColor("#eef1f3"))
-            self.native_table.setItem(row_index, 1, value_item)
-        layout.addWidget(self.native_table)
-        return page
+        self.save_native_button = self.native_page.save_button
+        return self.native_page
 
     def _build_router_page(self) -> QWidget:
         page = QWidget()
@@ -1050,13 +1044,18 @@ class MainWindow(QMainWindow):
             return
         self.stack.setCurrentIndex(index)
         self.navigation.setCurrentRow(index)
-        _page_id, title, subtitle = self.PAGE_DEFINITIONS[index]
+        page_id, title, subtitle = self.PAGE_DEFINITIONS[index]
         self.page_title.setText(title)
         self.page_subtitle.setText(subtitle)
         if title == "Devices" and not self.clients:
             self._load_devices(quiet=True)
         if title == "Endpoints" and not self.controller.server_catalog.servers:
             self._load_endpoints(quiet=True)
+        if page_id == "astrill":
+            if not self.clients:
+                self._load_devices(quiet=True)
+            if self.native_settings is None:
+                self._load_native_settings()
 
     def _run_task(
         self,
@@ -1065,6 +1064,7 @@ class MainWindow(QMainWindow):
         success: Callable[[Any], None] | None = None,
         *,
         quiet: bool = False,
+        finished_callback: Callable[[], None] | None = None,
     ) -> None:
         task = BackgroundTask(function)
         self._tasks.add(task)
@@ -1086,6 +1086,8 @@ class MainWindow(QMainWindow):
             if self.busy_count == 0:
                 self.progress.hide()
             self._tasks.discard(task)
+            if finished_callback is not None:
+                finished_callback()
             self._sync_access_ui()
 
         task.signals.finished.connect(finished)
@@ -1328,16 +1330,25 @@ class MainWindow(QMainWindow):
             )
 
     def _load_devices(self, *, quiet: bool = False) -> None:
+        if self._clients_loading:
+            return
+        self._clients_loading = True
         self._run_task(
             "Loading LAN devices",
             self.controller.load_clients,
             self._devices_loaded,
             quiet=quiet,
+            finished_callback=self._devices_finished,
         )
+
+    def _devices_finished(self) -> None:
+        self._clients_loading = False
 
     def _devices_loaded(self, clients: object) -> None:
         self.clients = list(clients)  # type: ignore[arg-type]
         self._render_devices()
+        if hasattr(self, "native_page"):
+            self.native_page.update_clients(self.clients)
 
     def _render_devices(self) -> None:
         if not hasattr(self, "device_tree"):
@@ -1583,38 +1594,52 @@ class MainWindow(QMainWindow):
         self.endpoint_action_status.setText(message)
 
     def _load_native_settings(self) -> None:
+        if self._native_settings_loading:
+            return
+        self._native_settings_loading = True
         self._run_task(
             "Loading native Astrill settings",
             self.controller.load_native_settings,
             self._native_settings_loaded,
+            finished_callback=self._native_settings_finished,
         )
+
+    def _native_settings_finished(self) -> None:
+        self._native_settings_loading = False
 
     def _native_settings_loaded(self, settings: object) -> None:
         if not isinstance(settings, NativeAstrillSettings):
             return
         self.native_settings = settings
-        for row_index, key in enumerate(SAFE_NATIVE_ASTRILL_KEYS):
-            self.native_table.item(row_index, 1).setText(settings.get(key))
+        self.native_page.render(settings, self.clients)
+        self.statusBar().showMessage(
+            "Native Astrill settings loaded and synchronized.", 4000
+        )
 
     def _save_native_settings(self) -> None:
         if self.native_settings is None:
             self._select_something("Load native Astrill settings first.")
             return
-        changes: dict[str, str] = {}
-        for row_index, key in enumerate(SAFE_NATIVE_ASTRILL_KEYS):
-            if key not in WRITABLE_NATIVE_ASTRILL_KEYS:
-                continue
-            value = self.native_table.item(row_index, 1).text()
-            if value != self.native_settings.get(key):
-                changes[key] = value
+        try:
+            changes = self.native_page.collect_changes()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid native Astrill setting", str(exc))
+            return
         if not changes:
             self.statusBar().showMessage("Native Astrill settings are unchanged.", 4000)
             return
+        labels = "\n".join(f"  • {key}" for key in sorted(changes))
         if (
-            QMessageBox.question(
+            QMessageBox.warning(
                 self,
                 "Save native Astrill settings",
-                f"Validate and write {len(changes)} changed value(s) to DD-WRT?",
+                f"Validate and write {len(changes)} changed native setting(s) "
+                f"to DD-WRT?\n\n{labels}\n\nThe router will commit once, then "
+                "the app will read every changed value back before reporting "
+                "success. Astrill account and router credentials are outside "
+                "this page's allowlist.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
             )
             != QMessageBox.StandardButton.Yes
         ):
@@ -2069,7 +2094,8 @@ class MainWindow(QMainWindow):
         writable = not read_only and self.busy_count == 0
         companion_writable = writable and self.controller.store.companion_enabled
         self.apply_button.setEnabled(companion_writable)
-        self.save_native_button.setEnabled(writable)
+        self.native_page.set_read_only(read_only)
+        self.native_page.set_busy(self.busy_count != 0)
         self.refresh_button.setEnabled(self.busy_count == 0)
         idle = self.busy_count == 0
         if hasattr(self, "companion_action_buttons"):

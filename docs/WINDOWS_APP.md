@@ -269,6 +269,46 @@ The guard is an accident-prevention feature, not an authorization boundary.
 A user who can edit the configuration or invoke `ssh.exe` directly can still
 change the router.
 
+## Human-Readable Astrill Settings
+
+The **Astrill** view uses the same effective native controls as the Ubuntu
+frontend instead of presenting an editable raw NVRAM table. Settings are
+grouped into current endpoint state, website routing, device routing, router
+interfaces, DNS, connection behavior, and advanced website filters. Boolean
+values use checkboxes, validated modes use named choices, MTU uses a bounded
+number control, and lists use appropriately sized text fields.
+
+Website, device, Wi-Fi, and VLAN include/exclude modes are shown as effective
+**Direct** or **Astrill** defaults plus route exceptions. Editing the website
+list regenerates its compiled IPv4 networks; observed DD-WRT clients are
+merged with Astrill's stored native device records. Automatic native website
+modes are preserved unless the related controls are actually changed.
+
+For transparency, every row shows its underlying `astrill_*` NVRAM key in
+small text. Endpoint, node, protocol, encoded address, port, VPN mode,
+favorites, connection state, and the generated IPv4 summary remain read-only.
+The page covers exactly the explicit safe-key allowlist; it never requests or
+displays Astrill account credentials, router passwords, tokens, installer
+URLs, or generated VPN credentials.
+
+Controls stay disabled until a complete read succeeds. The read-only guard and
+background-task lock disable every writable control as well as Save. Save is
+enabled only when the presented value differs from the last readback. A
+Cancel-default confirmation lists the changed NVRAM keys without echoing their
+values; the controller validates those values, performs one NVRAM commit, and
+reads every changed key back before the page is marked synchronized.
+
+## Background Terminal Behavior
+
+Normal router refreshes, endpoint loading, host-key inspection, fingerprint
+checks, and local identity generation run Windows OpenSSH tools without
+creating a console window. This prevents `ssh.exe`, `ssh-keyscan.exe`, and
+`ssh-keygen.exe` from flashing a terminal during background app work.
+
+**Open interactive SSH setup** is intentionally different: it opens a visible
+terminal because that action hands an interactive SSH session to the operator.
+The router companion itself does not launch a terminal on Windows.
+
 ## Windows Limitations
 
 There is no Windows per-application WFP routing backend in this release.
