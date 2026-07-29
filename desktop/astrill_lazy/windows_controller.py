@@ -13,9 +13,11 @@ from .models import MatchKind, RouteTarget, Rule
 from .native_settings import NativeAstrillSettings
 from .router import RouterClient
 from .service_policy import ServiceRouteMode, service_policy_route
+from .ssh_setup import identity_path
 from .store import ConfigStore
 
-SSH_TARGET_RE = re.compile(r"^[a-zA-Z0-9._:@\[\]-]{1,255}$")
+SSH_HOST_RE = re.compile(r"^[a-zA-Z0-9._:\[\]-]{1,255}$")
+SSH_USER_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
 
 
 class ControllerError(RuntimeError):
@@ -46,13 +48,27 @@ class WindowsController:
     ) -> None:
         self.store = store or ConfigStore()
         self.catalog = catalog or load_catalog(self.store.enabled_extensions)
-        self.router = router or RouterClient(self.store.router_host)
+        self.router = router or self._router_client_from_store()
         self.server_catalog = ServerCatalog((), {})
 
-    def configure_router(self, target: str) -> str:
-        normalized = target.strip()
+    def configure_router(
+        self,
+        target: str,
+        *,
+        user: str | None = None,
+        port: int | None = None,
+        identity_file: str | None = None,
+        use_ssh_config: bool | None = None,
+    ) -> str:
+        original_target = target.strip()
+        normalized = original_target
+        embedded_user: str | None = None
+        if normalized.count("@") == 1:
+            embedded_user, normalized = normalized.split("@", 1)
+        elif "@" in normalized:
+            raise ValueError("router target contains more than one user separator")
         if (
-            not SSH_TARGET_RE.fullmatch(normalized)
+            not SSH_HOST_RE.fullmatch(normalized)
             or normalized.startswith("-")
             or ".." in normalized
         ):
@@ -60,11 +76,49 @@ class WindowsController:
                 "router target must be an SSH alias, hostname, IP address, "
                 "or user@host without spaces"
             )
-        self.store.router_host = normalized
+        normalized_user = embedded_user or (
+            user.strip() if user is not None else self.store.router_user
+        )
+        if not SSH_USER_RE.fullmatch(normalized_user):
+            raise ValueError(
+                "router SSH user must contain only letters, numbers, dot, "
+                "underscore, or hyphen"
+            )
+        normalized_port = self.store.router_port if port is None else port
+        if (
+            not isinstance(normalized_port, int)
+            or isinstance(normalized_port, bool)
+            or not 1 <= normalized_port <= 65535
+        ):
+            raise ValueError("router SSH port must be between 1 and 65535")
+        normalized_identity = (
+            self.store.router_identity
+            if identity_file is None
+            else identity_file.strip()
+        )
+        normalized_use_ssh_config = (
+            self.store.router_use_ssh_config
+            if use_ssh_config is None
+            else bool(use_ssh_config)
+        )
+        if not normalized_use_ssh_config:
+            try:
+                identity_path(normalized_identity)
+            except ValueError as exc:
+                raise ValueError(f"router SSH identity path is invalid: {exc}") from exc
+        self.store.router_host = (
+            original_target if normalized_use_ssh_config else normalized
+        )
+        self.store.router_user = normalized_user
+        self.store.router_port = normalized_port
+        self.store.router_identity = normalized_identity
+        self.store.router_use_ssh_config = normalized_use_ssh_config
         self.store.save()
-        self.router = RouterClient(normalized)
+        self.router = self._router_client_from_store()
         self.server_catalog = ServerCatalog((), {})
-        return normalized
+        if normalized_use_ssh_config:
+            return original_target
+        return f"{normalized_user}@{normalized}"
 
     def set_read_only(self, read_only: bool) -> None:
         self.store.read_only = bool(read_only)
@@ -278,7 +332,7 @@ class WindowsController:
 
     def repair_companion(self) -> EnsureResult:
         self._require_companion_write("repairing the router companion")
-        return RouterInstaller(self.router).ensure()
+        return RouterInstaller(self.router).ensure(allow_install=False)
 
     def restore_native(self) -> dict[str, Any]:
         self._require_companion_write("removing the router companion")
@@ -332,3 +386,17 @@ class WindowsController:
             raise ControllerError(
                 f"the router companion must be installed before {action}"
             )
+
+    def _router_client_from_store(self) -> RouterClient:
+        if self.store.router_use_ssh_config:
+            return RouterClient(
+                self.store.router_host,
+                host_key_policy="yes",
+            )
+        return RouterClient(
+            self.store.router_host,
+            user=self.store.router_user,
+            port=self.store.router_port,
+            identity_file=self.store.router_identity,
+            host_key_policy="yes",
+        )

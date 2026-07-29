@@ -135,11 +135,15 @@ installer. Launch it from the Desktop shortcut or directly:
 
 The application delegates host-key and private-key handling to Windows
 OpenSSH. It does not copy, generate, or store a private key, and its background
-router commands use `BatchMode=yes`. Password prompts and first-contact
-host-key prompts therefore fail closed.
+router commands use `BatchMode=yes` plus `StrictHostKeyChecking=yes`. Password
+prompts and first-contact host-key prompts therefore fail closed.
 
-An SSH alias is the easiest configuration, especially when a non-default port
-or dedicated key is used. Create or edit `%USERPROFILE%\.ssh\config`:
+The fresh Settings values are host `192.168.1.1`, user `root`, port `22`, and
+private-key path `~/.ssh/astrill_lazy_router_ed25519`. Change the key path to an
+existing authorized key, or create and authorize the dedicated key through
+your normal DD-WRT provisioning method. An SSH alias can also be used as the
+host field. Select **Use OpenSSH config for user, port, and private key** when
+the alias should supply those options:
 
 ```sshconfig
 Host astrill-router
@@ -153,16 +157,18 @@ Then establish trust deliberately:
 
 1. Obtain the router SSH host-key fingerprint through a trusted path, such as
    its local console or the record made when SSH was provisioned.
-2. Open **Settings** in Astrill Lazy Router and enter `astrill-router`, or a
-   direct target such as `root@192.168.1.1`.
+2. Open **Settings** in Astrill Lazy Router and enter the host or alias, SSH
+   user, port, and private-key path. For a complete alias, select **Use OpenSSH
+   config for user, port, and private key**.
 3. Select **Open interactive SSH setup**.
 4. Compare the fingerprint shown by `ssh.exe` with the trusted fingerprint.
    Type `yes` only when they match.
 5. Complete public-key setup if needed, close the terminal, and select **Save
    and test**. The test must succeed without a password prompt.
 
-The application never supplies `StrictHostKeyChecking=no` and never
-auto-accepts a new key. If OpenSSH reports that a host key changed, first
+The interactive terminal explicitly uses `StrictHostKeyChecking=ask`. The
+application never supplies `StrictHostKeyChecking=no` and never auto-accepts a
+new key. If OpenSSH reports that a host key changed, first
 verify that the router was intentionally replaced, reset, or rekeyed. Only
 after that independent verification should the affected entry named in the
 error be removed:
@@ -176,9 +182,10 @@ ssh-keygen.exe -R "192.168.1.1"
 Substitute the exact host, IP, or `[host]:port` named by OpenSSH. Do not delete
 the complete `known_hosts` file to bypass a mismatch.
 
-The Settings target accepts only an SSH alias, hostname, IP address, or
-`user@host` without spaces or command-line options. Put advanced options such
-as `Port` in the OpenSSH config alias.
+The Settings host accepts only an SSH alias, hostname, IP address, or
+`user@host` without spaces or command-line options. User, port, and private
+key also have dedicated validated fields. Relative private-key paths are
+rejected; use an absolute path or one beginning with `~`.
 
 ## Safe First Use
 

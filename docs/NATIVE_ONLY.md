@@ -18,6 +18,11 @@ A fresh desktop configuration starts in this mode. It has no seeded policy,
 does not enable login startup, and does not install, repair, reconnect, commit,
 or otherwise modify the router.
 
+Startup still performs read-only SSH, Astrill, and companion presence checks.
+When installation is required, the GUI asks for explicit approval. Approving
+companion installation changes the local configuration to read-write companion
+mode; dismissing the dialog leaves native-only mode unchanged.
+
 ## Safe Inspection
 
 Configure a key-only SSH alias named `astrill-router`, then run:
@@ -39,9 +44,11 @@ The native client reader does not require `/tmp/astrill-lazy/alctl` and creates
 no file on the router. It transfers tagged hexadecimal snapshots because the
 validated DD-WRT BusyBox image has `hexdump` but no `base64` command.
 
-The GUI displays a read-only banner, disables native setting controls and all
-router mutation buttons, and uses the same companion-free client reader for
-the Devices page. Its 60-second monitor refreshes status only.
+The GUI displays a read-only banner, disables policy and native-setting
+mutations, and uses the same companion-free client reader for the Devices page.
+Its 60-second monitor refreshes status only. The SSH, Astrill installer, and
+companion onboarding actions remain available because each has its own explicit
+confirmation.
 
 ## Native Include-Mode Example
 
@@ -107,6 +114,12 @@ if inspection-only operation is desired.
 
 Keep Telnet or another console available until key login has been tested.
 Credentials must never be committed to this repository.
+
+The Router page automates local key creation and can authorize that key using a
+password supplied for one operation. The password entry defaults to `admin` for
+factory-style DD-WRT setups but is never stored. Existing installations should
+enter their actual password. The setup stages and verifies key login before it
+disables SSH password authentication, and it does not alter Telnet.
 
 On the workstation:
 

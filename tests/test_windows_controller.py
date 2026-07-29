@@ -128,13 +128,14 @@ def test_configure_router_validates_and_persists_without_connecting(
 ) -> None:
     store = make_store(tmp_path / "config.json")
     initial_router = FakeRouter()
-    created: list[str] = []
+    created: list[tuple[str, dict[str, object]]] = []
 
     class ConfiguredRouter(FakeRouter):
-        def __init__(self, host: str) -> None:
+        def __init__(self, host: str, **options: object) -> None:
             super().__init__()
             self.host = host
-            created.append(host)
+            self.options = options
+            created.append((host, options))
 
     monkeypatch.setattr(controller_module, "RouterClient", ConfiguredRouter)
     controller = WindowsController(
@@ -144,9 +145,24 @@ def test_configure_router_validates_and_persists_without_connecting(
     )
 
     assert controller.configure_router(" root@192.168.1.1 ") == ("root@192.168.1.1")
-    assert created == ["root@192.168.1.1"]
-    assert controller.router.host == "root@192.168.1.1"  # type: ignore[attr-defined]
-    assert ConfigStore(store.path).router_host == "root@192.168.1.1"
+    assert created == [
+        (
+            "192.168.1.1",
+            {
+                "user": "root",
+                "port": 22,
+                "identity_file": "~/.ssh/astrill_lazy_router_ed25519",
+                "host_key_policy": "yes",
+            },
+        )
+    ]
+    assert controller.router.host == "192.168.1.1"  # type: ignore[attr-defined]
+    assert controller.router.options["user"] == "root"  # type: ignore[attr-defined]
+    saved = ConfigStore(store.path)
+    assert saved.router_host == "192.168.1.1"
+    assert saved.router_user == "root"
+    assert saved.router_port == 22
+    assert saved.router_identity == "~/.ssh/astrill_lazy_router_ed25519"
     assert initial_router.read_calls == []
     assert initial_router.write_calls == []
 
@@ -159,9 +175,93 @@ def test_configure_router_validates_and_persists_without_connecting(
     ):
         with pytest.raises(ValueError, match="router target"):
             controller.configure_router(invalid)
+    with pytest.raises(ValueError, match="SSH user"):
+        controller.configure_router("router.local", user="root admin")
+    with pytest.raises(ValueError, match="SSH port"):
+        controller.configure_router("router.local", port=0)
+    with pytest.raises(ValueError, match="identity"):
+        controller.configure_router("router.local", identity_file="bad\nkey")
+    with pytest.raises(ValueError, match="absolute or start with"):
+        controller.configure_router("router.local", identity_file="relative-key")
 
-    assert created == ["root@192.168.1.1"]
-    assert ConfigStore(store.path).router_host == "root@192.168.1.1"
+    assert len(created) == 1
+    assert ConfigStore(store.path).router_host == "192.168.1.1"
+
+    assert (
+        controller.configure_router(
+            "router.local",
+            user="admin",
+            port=2222,
+            identity_file="~/.ssh/router_ed25519",
+        )
+        == "admin@router.local"
+    )
+    saved = ConfigStore(store.path)
+    assert saved.router_host == "router.local"
+    assert saved.router_user == "admin"
+    assert saved.router_port == 2222
+    assert saved.router_identity == "~/.ssh/router_ed25519"
+    assert created[-1][1]["host_key_policy"] == "yes"
+
+
+def test_legacy_ssh_alias_and_composite_target_keep_openssh_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        """
+{
+  "schema_version": 1,
+  "router_host": "admin@router-alias",
+  "active_region": "active-astrill",
+  "enabled_extensions": ["core-catalog"],
+  "rules": []
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    created: list[tuple[str, dict[str, object]]] = []
+
+    class ConfiguredRouter(FakeRouter):
+        def __init__(self, host: str, **options: object) -> None:
+            super().__init__()
+            created.append((host, options))
+
+    monkeypatch.setattr(controller_module, "RouterClient", ConfiguredRouter)
+    store = ConfigStore(path)
+    controller = WindowsController(store=store, catalog=load_catalog())
+
+    assert store.router_use_ssh_config is True
+    assert created == [("admin@router-alias", {"host_key_policy": "yes"})]
+
+    controller.set_read_only(True)
+    loaded = ConfigStore(path)
+    assert loaded.router_host == "admin@router-alias"
+    assert loaded.router_use_ssh_config is True
+
+    assert (
+        controller.configure_router(
+            "admin@192.168.1.1",
+            user="ignored",
+            port=2222,
+            identity_file="~/.ssh/router",
+            use_ssh_config=False,
+        )
+        == "admin@192.168.1.1"
+    )
+    assert created[-1] == (
+        "192.168.1.1",
+        {
+            "user": "admin",
+            "port": 2222,
+            "identity_file": "~/.ssh/router",
+            "host_key_policy": "yes",
+        },
+    )
+    loaded = ConfigStore(path)
+    assert loaded.router_host == "192.168.1.1"
+    assert loaded.router_user == "admin"
+    assert loaded.router_use_ssh_config is False
 
 
 def test_read_only_blocks_every_router_mutation_before_dispatch(
@@ -349,7 +449,8 @@ def test_writable_router_operations_use_only_injected_fakes(
                 status={"ok": True},
             )
 
-        def ensure(self) -> EnsureResult:
+        def ensure(self, *, allow_install: bool = True) -> EnsureResult:
+            assert allow_install is False
             return EnsureResult(status={"ok": True}, action="none")
 
         def uninstall(self) -> dict[str, Any]:

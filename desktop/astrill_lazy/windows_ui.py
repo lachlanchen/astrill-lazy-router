@@ -4,9 +4,19 @@ import ctypes
 import json
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import (
+    QObject,
+    QRunnable,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -30,6 +40,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QStyle,
@@ -55,19 +66,20 @@ from .windows_controller import WindowsController
 APP_NAME = "Astrill Lazy Router"
 
 COLORS = {
-    "window": "#f4f6f8",
-    "sidebar": "#17251f",
-    "sidebar_hover": "#243a31",
-    "sidebar_active": "#2f5947",
+    "window": "#f5f3ff",
+    "sidebar": "#111827",
+    "sidebar_hover": "#3730a3",
+    "sidebar_active": "#7c3aed",
     "card": "#ffffff",
-    "border": "#d9e0e4",
-    "text": "#182129",
-    "muted": "#67747d",
-    "green": "#18794e",
-    "green_dark": "#11623f",
-    "blue": "#176b9b",
-    "orange": "#c76b17",
-    "red": "#b42318",
+    "border": "#d8d5ff",
+    "text": "#111827",
+    "muted": "#64748b",
+    "primary": "#6d28d9",
+    "primary_dark": "#5b21b6",
+    "green": "#059669",
+    "blue": "#0284c7",
+    "orange": "#ea580c",
+    "red": "#dc2626",
 }
 
 STYLE_SHEET = f"""
@@ -75,42 +87,61 @@ QMainWindow, QWidget#root {{
     background: {COLORS["window"]};
     color: {COLORS["text"]};
     font-family: "Segoe UI";
-    font-size: 10pt;
+    font-size: 10.5pt;
 }}
 QFrame#sidebar {{
-    background: {COLORS["sidebar"]};
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 {COLORS["sidebar"]},
+        stop: 0.52 #312e81,
+        stop: 1 #0f766e
+    );
     border: none;
 }}
 QLabel#brand {{
     color: white;
-    font-size: 17pt;
-    font-weight: 700;
+    font-size: 19pt;
+    font-weight: 800;
 }}
-QLabel#brandSub, QLabel#sidebarStatus {{
-    color: #b8c7c0;
+QLabel#brandSub {{
+    color: #a5f3fc;
+    font-weight: 600;
+}}
+QLabel#sidebarStatus {{
+    color: white;
+    background: rgba(255, 255, 255, 28);
+    border: 1px solid rgba(255, 255, 255, 45);
+    border-radius: 9px;
+    padding: 10px 12px;
 }}
 QListWidget#navigation {{
     background: transparent;
     border: none;
-    color: #d7e0dc;
+    color: #e0e7ff;
     outline: 0;
+    font-size: 11pt;
 }}
 QListWidget#navigation::item {{
-    border-radius: 7px;
-    margin: 2px 8px;
-    padding: 10px 12px;
+    border-radius: 10px;
+    margin: 2px 2px;
+    padding: 10px 14px;
 }}
 QListWidget#navigation::item:hover {{
     background: {COLORS["sidebar_hover"]};
+    color: white;
 }}
 QListWidget#navigation::item:selected {{
-    background: {COLORS["sidebar_active"]};
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 {COLORS["sidebar_active"]},
+        stop: 1 #0891b2
+    );
     color: white;
-    font-weight: 600;
+    font-weight: 700;
 }}
 QLabel#pageTitle {{
-    font-size: 18pt;
-    font-weight: 700;
+    font-size: 22pt;
+    font-weight: 800;
     color: {COLORS["text"]};
 }}
 QLabel#pageSubtitle, QLabel.muted {{
@@ -119,12 +150,24 @@ QLabel#pageSubtitle, QLabel.muted {{
 QFrame.card, QGroupBox {{
     background: {COLORS["card"]};
     border: 1px solid {COLORS["border"]};
-    border-radius: 8px;
+    border-radius: 12px;
+}}
+QFrame#metric_controller {{
+    border-top: 4px solid #7c3aed;
+}}
+QFrame#metric_tunnel {{
+    border-top: 4px solid #06b6d4;
+}}
+QFrame#metric_endpoint {{
+    border-top: 4px solid #f97316;
+}}
+QFrame#metric_rules {{
+    border-top: 4px solid #10b981;
 }}
 QGroupBox {{
-    margin-top: 10px;
-    padding: 12px;
-    font-weight: 600;
+    margin-top: 12px;
+    padding: 14px;
+    font-weight: 700;
 }}
 QGroupBox::title {{
     subcontrol-origin: margin;
@@ -132,19 +175,21 @@ QGroupBox::title {{
     padding: 0 5px;
 }}
 QLabel.metricValue {{
-    font-size: 15pt;
-    font-weight: 700;
+    color: #4f46e5;
+    font-size: 17pt;
+    font-weight: 800;
 }}
 QLabel.metricCaption {{
     color: {COLORS["muted"]};
     font-size: 9pt;
 }}
 QLabel#accessBanner {{
-    background: #fff4e5;
-    color: #8d4900;
-    border: 1px solid #f2c98b;
-    border-radius: 6px;
-    padding: 9px 12px;
+    background: #ffedd5;
+    color: #9a3412;
+    border: 1px solid #fb923c;
+    border-radius: 9px;
+    padding: 11px 14px;
+    font-weight: 600;
 }}
 QLabel#statusGood {{
     color: {COLORS["green"]};
@@ -156,31 +201,33 @@ QLabel#statusBad {{
 }}
 QPushButton {{
     background: white;
-    border: 1px solid #bdc8ce;
-    border-radius: 6px;
-    padding: 7px 12px;
-    min-height: 18px;
+    border: 1px solid #c4b5fd;
+    border-radius: 9px;
+    padding: 8px 14px;
+    min-height: 22px;
+    font-weight: 600;
 }}
 QPushButton:hover {{
-    background: #f0f4f2;
-    border-color: #879a91;
+    background: #ede9fe;
+    border-color: #8b5cf6;
 }}
 QPushButton:pressed {{
-    background: #e3ebe7;
+    background: #ddd6fe;
 }}
 QPushButton:disabled {{
-    color: #9aa5ab;
-    background: #f1f3f4;
-    border-color: #d9dfe2;
+    color: #94a3b8;
+    background: #e9e7f2;
+    border-color: #d8d5e5;
 }}
 QPushButton#primary {{
     color: white;
-    background: {COLORS["green"]};
-    border-color: {COLORS["green"]};
-    font-weight: 600;
+    background: {COLORS["primary"]};
+    border-color: {COLORS["primary"]};
+    font-weight: 700;
 }}
 QPushButton#primary:hover {{
-    background: {COLORS["green_dark"]};
+    background: {COLORS["primary_dark"]};
+    border-color: {COLORS["primary_dark"]};
 }}
 QPushButton#primary:disabled {{
     color: #9aa5ab;
@@ -189,26 +236,35 @@ QPushButton#primary:disabled {{
 }}
 QPushButton#danger {{
     color: {COLORS["red"]};
+    border-color: #fda4af;
+}}
+QPushButton#danger:hover {{
+    color: white;
+    background: {COLORS["red"]};
+    border-color: {COLORS["red"]};
 }}
 QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QTableWidget, QTreeWidget {{
     background: white;
-    border: 1px solid #cbd4d9;
-    border-radius: 5px;
-    padding: 5px;
-    selection-background-color: #dcebe4;
+    border: 1px solid #c7d2fe;
+    border-radius: 8px;
+    padding: 7px;
+    selection-background-color: #c4b5fd;
     selection-color: {COLORS["text"]};
 }}
 QTreeWidget, QTableWidget {{
-    alternate-background-color: #f7f9fa;
-    gridline-color: #e4e9ec;
+    alternate-background-color: #f8f7ff;
+    gridline-color: #e5e7ff;
+}}
+QTreeWidget::item, QTableWidget::item {{
+    padding: 5px 8px;
 }}
 QHeaderView::section {{
-    background: #eef2f4;
-    color: #44515a;
+    background: #ede9fe;
+    color: #4338ca;
     border: none;
-    border-bottom: 1px solid #cbd4d9;
-    padding: 7px;
-    font-weight: 600;
+    border-bottom: 1px solid #c4b5fd;
+    padding: 8px 10px;
+    font-weight: 700;
 }}
 QProgressBar {{
     background: #e5eaed;
@@ -217,7 +273,30 @@ QProgressBar {{
     max-height: 3px;
 }}
 QProgressBar::chunk {{
-    background: {COLORS["green"]};
+    background: {COLORS["primary"]};
+}}
+QScrollArea {{
+    background: transparent;
+    border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background: transparent;
+}}
+QScrollBar:vertical {{
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}}
+QScrollBar::handle:vertical {{
+    background: #a78bfa;
+    border-radius: 4px;
+    min-height: 28px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: #7c3aed;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
 }}
 """
 
@@ -387,8 +466,16 @@ class MainWindow(QMainWindow):
         self._syncing_access = False
 
         self.setWindowTitle(APP_NAME)
-        self.setMinimumSize(940, 620)
-        self.resize(1240, 790)
+        self.setMinimumSize(960, 640)
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            self.resize(1360, 860)
+        else:
+            available = screen.availableGeometry()
+            self.resize(
+                min(1360, max(960, available.width() - 48)),
+                min(860, max(640, available.height() - 48)),
+            )
         self.setWindowIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon)
         )
@@ -414,10 +501,10 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(238)
+        sidebar.setFixedWidth(252)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(12, 22, 12, 16)
-        side.setSpacing(8)
+        side.setContentsMargins(16, 24, 16, 18)
+        side.setSpacing(10)
 
         brand = QLabel("Astrill Lazy")
         brand.setObjectName("brand")
@@ -430,8 +517,19 @@ class MainWindow(QMainWindow):
         self.navigation = QListWidget()
         self.navigation.setObjectName("navigation")
         self.navigation.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.navigation.setUniformItemSizes(True)
+        self.navigation.setSpacing(2)
+        self.navigation.setVerticalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
+        self.navigation.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.navigation.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         for _page_id, title, _subtitle in self.PAGE_DEFINITIONS:
-            self.navigation.addItem(QListWidgetItem(title))
+            item = QListWidgetItem(title)
+            item.setSizeHint(QSize(0, 48))
+            self.navigation.addItem(item)
         self.navigation.currentRowChanged.connect(self._select_page)
         side.addWidget(self.navigation, 1)
 
@@ -443,8 +541,8 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(24, 18, 24, 18)
-        content_layout.setSpacing(12)
+        content_layout.setContentsMargins(24, 22, 24, 22)
+        content_layout.setSpacing(16)
 
         header = QHBoxLayout()
         titles = QVBoxLayout()
@@ -490,13 +588,23 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_endpoints_page())
         self.stack.addWidget(self._build_astrill_page())
         self.stack.addWidget(self._build_router_page())
-        self.stack.addWidget(self._build_settings_page())
+        self.stack.addWidget(self._scrollable_page(self._build_settings_page()))
+
+    @staticmethod
+    def _scrollable_page(page: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(page)
+        return scroll
 
     def _build_policies_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
 
         metrics = QHBoxLayout()
         self.metric_labels: dict[str, QLabel] = {}
@@ -507,8 +615,11 @@ class MainWindow(QMainWindow):
             ("rules", "Enabled policies"),
         ):
             card = QFrame()
+            card.setObjectName(f"metric_{key}")
             card.setProperty("class", "card")
             card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(16, 14, 16, 14)
+            card_layout.setSpacing(4)
             value = QLabel("...")
             value.setProperty("class", "metricValue")
             label = QLabel(caption)
@@ -560,6 +671,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
         search_row = QHBoxLayout()
         self.service_search = QLineEdit()
         self.service_search.setPlaceholderText(
@@ -616,6 +728,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
         note = QLabel(
             "Country preferences share one Astrill tunnel. Several requested "
             "countries cannot be active at the same time."
@@ -643,6 +756,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
         row = QHBoxLayout()
         row.addWidget(
             QLabel("DHCP leases, static reservations, and active LAN neighbors")
@@ -682,6 +796,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
         row = QHBoxLayout()
         self.endpoint_search = QLineEdit()
         self.endpoint_search.setPlaceholderText("Search Astrill endpoints")
@@ -726,6 +841,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
         row = QHBoxLayout()
         note = QLabel(
             "Allowlisted native Astrill values. Editable values are validated "
@@ -768,7 +884,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
 
         connection = QGroupBox("Astrill connection")
         connection_layout = QHBoxLayout(connection)
@@ -815,13 +931,29 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
 
         connection = QGroupBox("Router SSH")
         form = QFormLayout(connection)
         self.host_entry = QLineEdit(self.controller.store.router_host)
-        self.host_entry.setPlaceholderText("astrill-router or root@192.168.1.1")
-        form.addRow("SSH target", self.host_entry)
+        self.host_entry.setPlaceholderText("192.168.1.1 or astrill-router")
+        form.addRow("Host or alias", self.host_entry)
+        self.user_entry = QLineEdit(self.controller.store.router_user)
+        self.user_entry.setPlaceholderText("root")
+        form.addRow("SSH user", self.user_entry)
+        self.port_entry = QSpinBox()
+        self.port_entry.setRange(1, 65535)
+        self.port_entry.setValue(self.controller.store.router_port)
+        form.addRow("SSH port", self.port_entry)
+        self.identity_entry = QLineEdit(self.controller.store.router_identity)
+        self.identity_entry.setPlaceholderText("~/.ssh/astrill_lazy_router_ed25519")
+        form.addRow("Private key", self.identity_entry)
+        self.ssh_config_check = QCheckBox(
+            "Use OpenSSH config for user, port, and private key"
+        )
+        self.ssh_config_check.setChecked(self.controller.store.router_use_ssh_config)
+        self.ssh_config_check.toggled.connect(self._sync_ssh_fields)
+        form.addRow("", self.ssh_config_check)
         host_actions = QHBoxLayout()
         save_test = QPushButton("Save and test")
         save_test.clicked.connect(self._save_and_test_host)
@@ -834,11 +966,12 @@ class MainWindow(QMainWindow):
         guidance = QLabel(
             "The app never auto-accepts an SSH host key. Use the interactive "
             "setup button to inspect and accept the DD-WRT fingerprint, then "
-            "return here and test key-only access."
+            "complete public-key setup and return here to test key-only access."
         )
         guidance.setWordWrap(True)
         guidance.setProperty("class", "muted")
         form.addRow("", guidance)
+        self._sync_ssh_fields()
         layout.addWidget(connection)
 
         safety = QGroupBox("Safety")
@@ -1513,11 +1646,17 @@ class MainWindow(QMainWindow):
 
     def _save_and_test_host(self) -> None:
         try:
-            target = self.controller.configure_router(self.host_entry.text())
+            self.controller.configure_router(
+                self.host_entry.text(),
+                user=self.user_entry.text(),
+                port=self.port_entry.value(),
+                identity_file=self.identity_entry.text(),
+                use_ssh_config=self.ssh_config_check.isChecked(),
+            )
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid SSH target", str(exc))
             return
-        self.host_entry.setText(target)
+        self._show_saved_router_fields()
         self._run_task(
             "Testing key-only SSH",
             self.controller.test_connection,
@@ -1532,21 +1671,60 @@ class MainWindow(QMainWindow):
 
     def _open_ssh_setup(self) -> None:
         try:
-            target = self.controller.configure_router(self.host_entry.text())
+            self.controller.configure_router(
+                self.host_entry.text(),
+                user=self.user_entry.text(),
+                port=self.port_entry.value(),
+                identity_file=self.identity_entry.text(),
+                use_ssh_config=self.ssh_config_check.isChecked(),
+            )
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid SSH target", str(exc))
             return
         from PySide6.QtCore import QProcess
 
+        self._show_saved_router_fields()
+        arguments = [
+            "/k",
+            "ssh.exe",
+            "-o",
+            "StrictHostKeyChecking=ask",
+        ]
+        if self.controller.store.router_use_ssh_config:
+            arguments.append(self.controller.store.router_host)
+        else:
+            target = (
+                f"{self.controller.store.router_user}@"
+                f"{self.controller.store.router_host}"
+            )
+            arguments.extend(("-p", str(self.controller.store.router_port)))
+            identity = Path(self.controller.store.router_identity).expanduser()
+            if identity.is_file():
+                arguments.extend(("-i", str(identity)))
+            arguments.append(target)
         if not QProcess.startDetached(
             "cmd.exe",
-            ["/k", "ssh.exe", target],
+            arguments,
         ):
             QMessageBox.warning(
                 self,
                 "SSH setup",
                 "Could not open the interactive Windows SSH terminal.",
             )
+
+    def _show_saved_router_fields(self) -> None:
+        self.host_entry.setText(self.controller.store.router_host)
+        self.user_entry.setText(self.controller.store.router_user)
+        self.port_entry.setValue(self.controller.store.router_port)
+        self.identity_entry.setText(self.controller.store.router_identity)
+        self.ssh_config_check.setChecked(self.controller.store.router_use_ssh_config)
+        self._sync_ssh_fields()
+
+    def _sync_ssh_fields(self) -> None:
+        explicit = not self.ssh_config_check.isChecked()
+        self.user_entry.setEnabled(explicit)
+        self.port_entry.setEnabled(explicit)
+        self.identity_entry.setEnabled(explicit)
 
     def _toggle_read_only(self, checked: bool) -> None:
         if self._syncing_access:

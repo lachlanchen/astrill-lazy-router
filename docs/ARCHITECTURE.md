@@ -97,12 +97,12 @@ verification.
 
 The desktop reconciles the companion at launch and every 60 seconds. It first
 reads status over SSH. A matching version with its jump and watchdog present is
-left untouched; a stopped current runtime is started in place; only a missing,
-outdated, or fingerprint-mismatched package invokes the NVRAM installer. A
-current package can also be reconstructed from its stored bootstrap without a
-rewrite. An identical package that still cannot recover requires the explicit
-Install/Upgrade action, preventing automatic repeated NVRAM writes. This
-lifecycle is separate from Astrill connection management and does not change
+left untouched; a stopped current runtime may be started in place; and a
+current package can be reconstructed from its stored bootstrap without a
+rewrite. A missing, outdated, fingerprint-mismatched, or non-repairable package
+only opens the Install/Upgrade confirmation. The monitor cannot invoke the
+NVRAM installer, preventing silent or repeated package writes. This lifecycle
+is separate from Astrill connection management and does not change
 `astrill_autostart`.
 
 `Restore Astrill Only` records native tunnel state, removes all

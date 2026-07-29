@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 from astrill_lazy.router import (
@@ -43,6 +44,61 @@ def test_remote_timeout_is_reported_as_a_router_error(
     monkeypatch.setattr(subprocess, "run", time_out)
     with pytest.raises(RouterError, match="timed out after 7 seconds"):
         client.status()
+
+
+def test_remote_commands_use_stable_key_only_ssh_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+
+    def complete(
+        arguments: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess:
+        captured.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, b"ready\n", b"")
+
+    monkeypatch.setattr(subprocess, "run", complete)
+    client = RouterClient(
+        "192.168.1.1",
+        user="root",
+        port=2222,
+        identity_file="~/.ssh/router-key",
+    )
+
+    assert client.ping()
+    assert captured[0] == "ssh"
+    assert "BatchMode=yes" in captured
+    assert "ConnectTimeout=8" in captured
+    assert "ConnectionAttempts=2" in captured
+    assert "ServerAliveInterval=15" in captured
+    assert "ServerAliveCountMax=3" in captured
+    assert "StrictHostKeyChecking=accept-new" in captured
+    assert captured[captured.index("-p") + 1] == "2222"
+    assert captured[captured.index("-i") + 1] == str(
+        Path("~/.ssh/router-key").expanduser()
+    )
+    assert "root@192.168.1.1" in captured
+
+
+def test_remote_commands_can_require_a_preverified_host_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+
+    def complete(
+        arguments: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess:
+        captured.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, b"ready\n", b"")
+
+    monkeypatch.setattr(subprocess, "run", complete)
+    client = RouterClient("192.168.1.1", host_key_policy="yes")
+
+    assert client.ping()
+    assert "StrictHostKeyChecking=yes" in captured
+    assert "StrictHostKeyChecking=accept-new" not in captured
+    with pytest.raises(ValueError, match="host-key policy"):
+        RouterClient(host_key_policy="no")
 
 
 def test_native_clients_merge_read_only_router_sources() -> None:

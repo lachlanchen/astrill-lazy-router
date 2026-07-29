@@ -54,6 +54,11 @@ def test_config_store_round_trip_is_private(tmp_path: Path) -> None:
     store = ConfigStore(path)
     store.rules = [default_uu_rule()]
     store.enabled_extensions = ["core-catalog"]
+    store.router_host = "192.168.50.1"
+    store.router_user = "root"
+    store.router_port = 2222
+    store.router_identity = "~/.ssh/test-router"
+    store.router_use_ssh_config = False
     store.companion_enabled = False
     store.read_only = False
     store.save()
@@ -63,17 +68,28 @@ def test_config_store_round_trip_is_private(tmp_path: Path) -> None:
     loaded = ConfigStore(path)
     assert loaded.rules[0].selector == "uu-remote"
     assert loaded.enabled_extensions == ["core-catalog"]
+    assert loaded.router_host == "192.168.50.1"
+    assert loaded.router_user == "root"
+    assert loaded.router_port == 2222
+    assert loaded.router_identity == "~/.ssh/test-router"
+    assert loaded.router_use_ssh_config is False
     assert loaded.companion_enabled is False
     assert loaded.read_only is False
     document = json.loads(path.read_text(encoding="utf-8"))
     assert document["schema_version"] == 1
     assert document["companion_enabled"] is False
     assert document["read_only"] is False
+    assert "password" not in document
 
 
 def test_fresh_config_store_starts_native_only_and_read_only(tmp_path: Path) -> None:
     store = ConfigStore(tmp_path / "missing.json")
 
+    assert store.router_host == "192.168.1.1"
+    assert store.router_user == "root"
+    assert store.router_port == 22
+    assert store.router_identity == "~/.ssh/astrill_lazy_router_ed25519"
+    assert store.router_use_ssh_config is False
     assert store.companion_enabled is False
     assert store.read_only is True
     assert store.rules == []
@@ -98,6 +114,10 @@ def test_legacy_config_keeps_its_writable_companion_behavior(tmp_path: Path) -> 
 
     assert store.companion_enabled is True
     assert store.read_only is False
+    assert store.router_use_ssh_config is True
+
+    store.save()
+    assert ConfigStore(path).router_use_ssh_config is True
 
 
 @pytest.mark.skipif(
@@ -149,6 +169,45 @@ def test_router_reconcile_skips_current_runtime() -> None:
 
     result = RouterInstaller(CurrentClient()).ensure()  # type: ignore[arg-type]
     assert result.action == "none"
+
+
+def test_companion_check_requires_confirmation_when_not_installed() -> None:
+    class MissingClient:
+        def companion_presence(self) -> dict[str, object]:
+            return {"installed": False, "version": None, "runtime": False}
+
+    check = RouterInstaller(MissingClient()).check()  # type: ignore[arg-type]
+
+    assert check.action == "install"
+    assert check.installed_version is None
+    assert "not installed" in check.reason
+
+
+def test_automatic_reconcile_cannot_install_without_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MissingClient:
+        def status(self) -> dict[str, object]:
+            raise RouterError("runtime missing")
+
+        def ping(self) -> bool:
+            return True
+
+        def raw(self, arguments: list[str], *, timeout: int | None = None) -> str:
+            assert timeout is None
+            assert arguments[:2] == ["nvram", "get"]
+            return ""
+
+    monkeypatch.setattr("astrill_lazy.installer.time.sleep", lambda _seconds: None)
+    installer = RouterInstaller(MissingClient())  # type: ignore[arg-type]
+    monkeypatch.setattr(
+        installer,
+        "install",
+        lambda: pytest.fail("automatic reconcile must not install"),
+    )
+
+    with pytest.raises(RouterError, match="requires Install / Upgrade confirmation"):
+        installer.ensure(allow_install=False)
 
 
 def test_router_reconcile_repairs_runtime_before_reinstalling() -> None:

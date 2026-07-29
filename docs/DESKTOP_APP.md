@@ -39,14 +39,36 @@ astrill-lazy autostart status
 astrill-lazy autostart disable
 ```
 
-At startup and every 60 seconds, a native-only or read-only Ubuntu GUI performs
-status reads only. A writable Ubuntu configuration with companion mode enabled
-checks the DD-WRT companion: a missing or outdated companion is installed,
-while a current companion with a stopped watchdog is repaired in place. A
-healthy runtime is only read, not rewritten.
+At startup and every 60 seconds, the Ubuntu GUI checks key-only SSH, the native
+Astrill applet, and the DD-WRT companion. A healthy current companion is only
+read. A current stored package with a stopped runtime can be repaired in place.
+A missing, outdated, or non-repairable package opens a confirmation dialog and
+is never installed silently.
 The package fingerprint prevents an identical broken package from being
 automatically written on every monitor cycle; the Install/Upgrade action is the
 explicit recovery override.
+
+## Ubuntu Router Onboarding
+
+The Ubuntu Router page stores only the host, SSH user, port, and dedicated
+identity path. Fresh defaults are `192.168.1.1`, `root`, port `22`, and
+`~/.ssh/astrill_lazy_router_ed25519`. Save & Check creates the local Ed25519 key
+when needed and tests it with bounded connection attempts and keepalives.
+Authorize Key accepts a transient router password, verifies key login before
+disabling SSH password login, and never writes the password to disk.
+
+If the native Astrill applet is absent, Install Applet accepts a user-provided
+URL or shell command. The displayed template replaces both private installer
+path values with `xxx`. The desktop downloads or accepts at most 512 KiB,
+reports the SHA-256 digest and transport security, then asks again before
+running the script as router root. The input, downloaded script, and installer
+token are not persisted.
+
+Copyable redacted template:
+
+```sh
+eval `wget -q -O - http://astroutercn.com/router/install/xxx/xxx`
+```
 
 ## Native Windows Installation
 
@@ -69,7 +91,8 @@ The Windows frontend refreshes status every 60 seconds but does not
 automatically install or repair the companion. Those actions remain explicit
 in its Router view. Follow the
 [Windows build, install, and verified SSH setup](WINDOWS_APP.md) before first
-use.
+use. Its spacious native layout uses a scrollable Settings page and adapts its
+opening size to the available Windows desktop.
 
 ## Frontend Differences
 
@@ -104,7 +127,8 @@ them with `ASTRILL_LAZY_NOVNC_DISPLAY`, `ASTRILL_LAZY_VNC_PORT`, and
 separate X display cannot move or focus windows in the active desktop session.
 
 The current deployment keeps this isolated controller available after reboot
-through the lingering user systemd instance:
+through the lingering user systemd instance, without requiring an interactive
+desktop login:
 
 ```bash
 ./scripts/install-novnc-service.sh
@@ -115,12 +139,11 @@ systemctl --user status \
 The installer renders the unit from the actual checkout path, so clones named
 `astrill-lazy-router` or stored outside `~/Projects` do not depend on a
 hard-coded source directory. It also records the selected display and ports in
-`~/.config/astrill-lazy/novnc.env`. The validated defaults deliberately avoid
-port `6086`, which another virtual desktop already owns on this workstation:
-
-```bash
-./scripts/install-novnc-service.sh
-```
+`~/.config/astrill-lazy/novnc.env`. The unit supervises Xvfb, Openbox, x11vnc,
+websockify, and the GTK application as one stack. It restarts the complete
+stack after any component exits, while an explicit `systemctl --user stop`
+still leaves it stopped. The validated defaults deliberately avoid port `6086`,
+which another virtual desktop already owns on this workstation.
 
 The Mac desktop application `Astrill Lazy Router.app` and legacy Windows
 shortcuts
@@ -278,15 +301,17 @@ installed program and survives uninstall. `XDG_CONFIG_HOME`, when explicitly
 set, overrides the platform default. Both use schema version 1.
 It contains:
 
-- the SSH host alias;
+- the SSH host or alias, user, port, identity-file path, and whether OpenSSH
+  config supplies those connection options;
 - active country and endpoint metadata;
 - enabled extension IDs;
 - editable source rules;
 - application profile metadata and allocated lease addresses;
-- the enabled/disabled companion state and route recommendation results.
+- the enabled/disabled companion state and route recommendation results;
 - the read-only/read-write router access guard.
 
-It contains no Astrill account credential or SSH private key.
+It contains no Astrill account credential, router password, or SSH private-key
+contents.
 
 A fresh configuration is native-only, read-only, and has no seeded policy.
 Legacy files that predate the access guard retain their existing writable

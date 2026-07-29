@@ -42,6 +42,15 @@ class EnsureResult:
     action: str
 
 
+@dataclass(frozen=True)
+class CompanionCheck:
+    action: str
+    expected_version: str
+    installed_version: str | None
+    status: dict[str, Any] | None
+    reason: str
+
+
 class RouterInstaller:
     def __init__(self, client: RouterClient) -> None:
         self.client = client
@@ -56,7 +65,54 @@ class RouterInstaller:
         archive = build_router_package(self.router_root)
         return hashlib.md5(archive, usedforsecurity=False).hexdigest()
 
-    def ensure(self) -> EnsureResult:
+    def check(self) -> CompanionCheck:
+        presence = self.client.companion_presence()
+        installed_version = presence.get("version")
+        if not presence.get("installed"):
+            return CompanionCheck(
+                "install",
+                self.expected_version,
+                None,
+                None,
+                "The router companion is not installed.",
+            )
+        if installed_version != self.expected_version:
+            return CompanionCheck(
+                "install",
+                self.expected_version,
+                str(installed_version) if installed_version else None,
+                None,
+                "The installed companion does not match the desktop package.",
+            )
+        try:
+            status = self.client.status()
+        except RouterError:
+            status = None
+        if status is not None and self._runtime_is_current(status):
+            return CompanionCheck(
+                "none",
+                self.expected_version,
+                str(installed_version),
+                status,
+                "The router companion is current and healthy.",
+            )
+        if self._stored_package_is_current():
+            return CompanionCheck(
+                "repair",
+                self.expected_version,
+                str(installed_version),
+                status,
+                "The current companion is stored but its runtime needs repair.",
+            )
+        return CompanionCheck(
+            "install",
+            self.expected_version,
+            str(installed_version),
+            status,
+            "The companion runtime cannot be repaired from the stored package.",
+        )
+
+    def ensure(self, *, allow_install: bool = True) -> EnsureResult:
         try:
             status = self.client.status()
         except RouterError:
@@ -68,8 +124,7 @@ class RouterInstaller:
             except RouterError:
                 if self._stored_package_is_current():
                     return self._reconstruct_current_package()
-                result = self.install()
-                return EnsureResult(result.status, "installed")
+                return self._install_or_require_confirmation(allow_install)
 
         if self._runtime_is_current(status):
             return EnsureResult(status, "none")
@@ -93,6 +148,14 @@ class RouterInstaller:
                 )
         elif self._stored_package_is_current():
             return self._reconstruct_current_package()
+        return self._install_or_require_confirmation(allow_install)
+
+    def _install_or_require_confirmation(self, allow_install: bool) -> EnsureResult:
+        if not allow_install:
+            raise RouterError(
+                "companion installation or rewrite requires Install / Upgrade "
+                "confirmation"
+            )
         result = self.install()
         return EnsureResult(result.status, "installed")
 

@@ -2,6 +2,11 @@
 
 ## 0.2.3 - 2026-07-29
 
+- Add automatic SSH, native Astrill, and companion checks; configurable stable
+  key-only SSH; confirmation-gated companion installation; and transient,
+  hash-reviewed user-provided Astrill installation.
+- Restart the persistent noVNC and GTK controller stack after any component
+  exits, while retaining boot startup through the lingering user manager.
 - Add a native-only, read-only first-run mode so an already-working Astrill
   router can be inspected without companion installation or router writes.
 - Preserve writable companion behavior for legacy configuration files while

@@ -23,12 +23,16 @@ from .device_policy import (
 )
 from .installer import RouterInstaller
 from .router import RouterClient, RouterError
+from .ssh_setup import ensure_local_identity, read_public_key
 from .store import ConfigStore
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="astrill-lazy")
     parser.add_argument("--router", default=None, help="SSH host alias")
+    parser.add_argument("--router-user", default=None, help="SSH user")
+    parser.add_argument("--router-port", default=None, type=int, help="SSH port")
+    parser.add_argument("--identity", default=None, help="SSH private key path")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("gui", help="open the native control application")
     subparsers.add_parser("status", help="show router and Astrill status")
@@ -46,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("rollback", help="restore the previous router rules")
     subparsers.add_parser("install-router", help="install or upgrade the router plugin")
     subparsers.add_parser("uninstall-router", help="remove the router plugin")
+    subparsers.add_parser("setup-ssh", help="create the dedicated local SSH identity")
     autostart = subparsers.add_parser(
         "autostart", help="manage desktop-session autostart"
     )
@@ -131,6 +136,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if arguments.command == "setup-ssh":
+        store = ConfigStore()
+        configured_identity = arguments.identity or store.router_identity
+        try:
+            private_key = ensure_local_identity(configured_identity)
+            public_key = read_public_key(configured_identity)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"astrill-lazy: {exc}", file=sys.stderr)
+            return 1
+        _print_json(
+            {
+                "identity": str(private_key),
+                "public_key": public_key,
+                "password_saved": False,
+            }
+        )
+        return 0
+
     if arguments.command == "device-policy":
         try:
             policy = load_device_policy(arguments.policy)
@@ -202,7 +225,30 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     host = arguments.router or store.router_host
-    router = RouterClient(host)
+    router_port = (
+        arguments.router_port
+        if arguments.router_port is not None
+        else store.router_port
+    )
+    if not 1 <= router_port <= 65535:
+        parser.error("--router-port must be between 1 and 65535")
+    use_ssh_config = store.router_use_ssh_config and not any(
+        (
+            arguments.router,
+            arguments.router_user,
+            arguments.router_port,
+            arguments.identity,
+        )
+    )
+    if use_ssh_config:
+        router = RouterClient(host)
+    else:
+        router = RouterClient(
+            host,
+            user=arguments.router_user or store.router_user,
+            port=router_port,
+            identity_file=arguments.identity or store.router_identity,
+        )
     try:
         if arguments.command == "status":
             _print_json(

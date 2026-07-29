@@ -7,6 +7,7 @@ import shlex
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .native_settings import (
@@ -30,9 +31,26 @@ class CommandResult:
 
 
 class RouterClient:
-    def __init__(self, host: str = "astrill-router", timeout: int = 15) -> None:
+    def __init__(
+        self,
+        host: str = "astrill-router",
+        timeout: int = 15,
+        *,
+        user: str | None = None,
+        port: int | None = None,
+        identity_file: str | Path | None = None,
+        host_key_policy: str = "accept-new",
+    ) -> None:
+        if host_key_policy not in {"accept-new", "yes"}:
+            raise ValueError("SSH host-key policy must be 'accept-new' or 'yes'")
         self.host = host
         self.timeout = timeout
+        self.user = user
+        self.port = port
+        self.host_key_policy = host_key_policy
+        self.identity_file = (
+            str(Path(identity_file).expanduser()) if identity_file is not None else None
+        )
 
     def ping(self) -> bool:
         result = self._run_remote(["printf", "ready"])
@@ -249,13 +267,7 @@ done
 
     def fetch_astrill_payload(self) -> bytes:
         result = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "BatchMode=yes",
-                self.host,
-                "cat /dev/astrill/astrillvpn",
-            ],
+            [*self._ssh_arguments(), self._target(), "cat /dev/astrill/astrillvpn"],
             check=False,
             capture_output=True,
             timeout=self.timeout,
@@ -301,7 +313,7 @@ done
         effective_timeout = timeout or self.timeout
         try:
             result = subprocess.run(
-                ["ssh", "-o", "BatchMode=yes", self.host, remote_command],
+                [*self._ssh_arguments(), self._target(), remote_command],
                 input=input_bytes,
                 check=False,
                 capture_output=True,
@@ -322,6 +334,39 @@ done
                 message or f"router command failed with {result.returncode}"
             )
         return decoded
+
+    def _target(self) -> str:
+        return f"{self.user}@{self.host}" if self.user else self.host
+
+    def _ssh_arguments(self) -> list[str]:
+        arguments = [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "PreferredAuthentications=publickey",
+            "-o",
+            "PasswordAuthentication=no",
+            "-o",
+            "KbdInteractiveAuthentication=no",
+            "-o",
+            f"StrictHostKeyChecking={self.host_key_policy}",
+            "-o",
+            "ConnectTimeout=8",
+            "-o",
+            "ConnectionAttempts=2",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "TCPKeepAlive=yes",
+        ]
+        if self.port is not None:
+            arguments.extend(("-p", str(self.port)))
+        if self.identity_file is not None:
+            arguments.extend(("-o", "IdentitiesOnly=yes", "-i", self.identity_file))
+        return arguments
 
 
 def _last_json_line(output: str) -> str:

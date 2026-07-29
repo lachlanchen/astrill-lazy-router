@@ -3,7 +3,7 @@
 ## Trust Boundaries
 
 - The router controller runs as DD-WRT root.
-- The desktop app runs as the logged-in Ubuntu user.
+- The desktop app runs as the logged-in Ubuntu or Windows user.
 - Only the application namespace helper runs through Polkit.
 - Astrill remains an independent privileged applet.
 - Catalog extensions are data-only and are not executed.
@@ -13,6 +13,15 @@
 The router uses key-only SSH through the `astrill-router` alias. Password SSH is
 disabled. The private key remains under `~/.ssh`; only its public key is stored
 in DD-WRT NVRAM.
+
+Fresh desktop profiles can instead address `192.168.1.1` directly. The GUI
+stores the host, user, port, and identity path, but never the router password.
+Authorize Key passes a transient password to `sshpass` through its environment,
+verifies the generated Ed25519 key, and only then disables SSH password login.
+That authorization workflow is Ubuntu-only. The Windows controller does not
+use `sshpass`: its background commands require a previously verified host key
+with `StrictHostKeyChecking=yes`, and its interactive setup explicitly prompts
+with `StrictHostKeyChecking=ask`.
 
 Telnet remains enabled as a deliberate recovery mechanism. This is less secure
 than SSH on an untrusted LAN. Disable it only after confirming another console
@@ -28,16 +37,21 @@ reconciliation uses the existing key-only SSH alias and stores no router or
 Ubuntu password.
 
 A fresh configuration is native-only and read-only. The GUI and CLI block
-companion installation, policy apply/rollback/refresh, endpoint switching,
-connection changes, and native-setting writes until the local operator runs
-`astrill-lazy access read-write`. The guard prevents accidents; it is not a
-security boundary against someone who controls the user account or invokes SSH
-directly.
+policy apply/rollback/refresh, endpoint switching, connection changes, and
+native-setting writes until the local operator enables write access. The GUI's
+separately confirmed companion onboarding action can enable write access after
+a successful install. The guard prevents accidents; it is not a security
+boundary against someone who controls the user account or invokes SSH directly.
 
 The native settings mirror uses an explicit safe-key allowlist. Astrill
 account values, router passwords, installer URLs, and generated OpenVPN
 credentials are neither requested nor returned. Writes use normalized values,
 commit once, and read every changed key back for exact verification.
+
+Astrill installer input is transient. The GUI uses a redacted `xxx/xxx`
+template, limits downloaded or pasted shell text to 512 KiB, displays its
+SHA-256 digest, and requires a second confirmation before root execution. A
+repository test rejects token-bearing Astrill installer paths.
 
 ## Input Handling
 

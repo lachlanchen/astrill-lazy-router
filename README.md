@@ -149,7 +149,9 @@ shared or untrusted LAN.
 - GTK 4, Libadwaita, and Python GObject introspection for Ubuntu;
 - PySide6 and Windows OpenSSH Client for the native Windows build;
 - a DD-WRT router with a working Astrill applet;
-- key-only root SSH available through the `astrill-router` host alias;
+- LAN access to DD-WRT SSH (first-run defaults are `192.168.1.1`, user `root`,
+  port `22`, and a dedicated Ed25519 identity path; Ubuntu onboarding can
+  generate and authorize it, while Windows uses an existing authorized key);
 - enough router NVRAM for the packaged companion.
 
 Review [router prerequisites and rollback](docs/ROUTER_INSTALL.md) before the
@@ -177,8 +179,12 @@ login startup is opt-in:
 ASTRILL_LAZY_ENABLE_AUTOSTART=1 ./scripts/install-desktop.sh
 ```
 
-When an existing writable configuration has companion mode enabled, the GUI
-checks the router at startup and repairs or installs only when required.
+The GUI automatically checks SSH, the native Astrill applet, and the companion.
+It prepares the local SSH identity without a password and repairs only a
+verified current companion package automatically. Router key authorization, a
+user-supplied Astrill installer, and companion installation each require an
+explicit confirmation. Passwords, installer scripts, and installer tokens are
+never saved in the desktop configuration.
 
 ### Build and install on Windows
 

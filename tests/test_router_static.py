@@ -47,6 +47,11 @@ def test_novnc_service_is_rendered_from_the_checked_out_repository() -> None:
     assert "--install-only" in installer
     assert "DBUS_SESSION_BUS_ADDRESS" in installer
 
+    runner = (ROOT / "scripts" / "run-novnc-debug.sh").read_text(encoding="utf-8")
+    for component in ("Xvfb", "openbox", "x11vnc", "websockify", "Astrill Lazy GUI"):
+        assert f':{component}"' in runner
+    assert "restarting the noVNC stack" in runner
+
 
 def test_desktop_installer_selects_a_supported_python_and_opt_in_autostart() -> None:
     installer = (ROOT / "scripts" / "install-desktop.sh").read_text(encoding="utf-8")

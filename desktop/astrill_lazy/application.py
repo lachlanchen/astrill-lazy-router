@@ -19,6 +19,12 @@ from .astrill import (
     group_by_region,
     parse_applet,
 )
+from .astrill_install import (
+    ASTRILL_INSTALL_TEMPLATE,
+    AstrillInstaller,
+    install_astrill,
+    prepare_astrill_installer,
+)
 from .autostart import (
     disable_autostart,
     enable_autostart,
@@ -31,13 +37,14 @@ from .detector import (
     RouteRecommendation,
     detect_rules,
 )
-from .installer import EnsureResult, RouterInstaller
+from .installer import CompanionCheck, EnsureResult, RouterInstaller
 from .launcher import ApplicationLauncher, parse_command
 from .models import MatchKind, Region, RouteTarget, Rule, Service
 from .native_page import NativeSettingsPage
 from .native_settings import NativeAstrillSettings
 from .router import RouterClient
 from .service_policy import ServiceRouteMode, service_policy_route
+from .ssh_setup import authorize_router_key, ensure_local_identity
 from .store import ConfigStore
 
 APP_ID = "io.github.lachlanchen.AstrillLazyRouter"
@@ -126,10 +133,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_size_request(880, 600)
 
         self.store = ConfigStore()
+        self.ssh_setup_error: str | None = None
+        try:
+            ensure_local_identity(self.store.router_identity)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.ssh_setup_error = str(exc)
         self.catalog: Catalog = load_catalog(self.store.enabled_extensions)
-        self.router = RouterClient(self.store.router_host)
+        self.router = self._router_client_from_store()
         self.launcher = ApplicationLauncher()
         self.router_status: dict[str, Any] = {}
+        self.astrill_applet_available: bool | None = None
+        self.router_companion_check: CompanionCheck | None = None
         self.native_settings: NativeAstrillSettings | None = None
         self.servers: tuple[AstrillServer, ...] | None = None
         self.servers_loading = False
@@ -145,6 +159,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._updating_protocol = False
         self._updating_astrill_connection = False
         self._protocol_user_selected = False
+        self._astrill_install_prompted = False
+        self._companion_install_prompted = False
+        self._ssh_setup_prompted = False
         self.router_install_buttons: list[Gtk.Button] = []
 
         self._install_css()
@@ -159,10 +176,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_countries()
         self._render_extensions()
         self.native_page.set_read_only(self.store.read_only)
-        if self.store.companion_enabled and not self.store.read_only:
-            self.ensure_router_companion(quiet=False)
-        else:
-            self.refresh_router()
+        self.check_router_environment(quiet=False)
         self.load_servers()
         self.refresh_native_settings(quiet=True)
         self.router_monitor_id = GLib.timeout_add_seconds(
@@ -587,9 +601,87 @@ class MainWindow(Adw.ApplicationWindow):
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         content.add_css_class("page-content")
 
+        connection_heading = Gtk.Label(label="Router Connection")
+        connection_heading.set_xalign(0)
+        connection_heading.add_css_class("section-title")
+        content.append(connection_heading)
+        connection_list = Gtk.ListBox()
+        connection_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        connection_list.add_css_class("catalog-list")
+
+        self.router_host_entry = Gtk.Entry()
+        self.router_host_entry.set_text(self.store.router_host)
+        self.router_host_entry.set_width_chars(20)
+        self.router_host_entry.set_max_length(255)
+        host_row = Adw.ActionRow(
+            title="Router address",
+            subtitle="IPv4 address, DNS name, or OpenSSH host alias",
+        )
+        host_row.add_prefix(Gtk.Image.new_from_icon_name("network-server-symbolic"))
+        host_row.add_suffix(self.router_host_entry)
+        connection_list.append(host_row)
+
+        self.router_user_entry = Gtk.Entry()
+        self.router_user_entry.set_text(self.store.router_user)
+        self.router_user_entry.set_width_chars(12)
+        self.router_user_entry.set_max_length(64)
+        user_row = Adw.ActionRow(
+            title="SSH user",
+            subtitle="DD-WRT administrative shell account",
+        )
+        user_row.add_prefix(Gtk.Image.new_from_icon_name("avatar-default-symbolic"))
+        user_row.add_suffix(self.router_user_entry)
+        connection_list.append(user_row)
+
+        self.router_port_entry = Gtk.Entry()
+        self.router_port_entry.set_text(str(self.store.router_port))
+        self.router_port_entry.set_width_chars(7)
+        self.router_port_entry.set_max_length(5)
+        port_row = Adw.ActionRow(title="SSH port", subtitle="LAN management port")
+        port_row.add_prefix(Gtk.Image.new_from_icon_name("network-wired-symbolic"))
+        port_row.add_suffix(self.router_port_entry)
+        connection_list.append(port_row)
+
+        self.router_identity_entry = Gtk.Entry()
+        self.router_identity_entry.set_text(self.store.router_identity)
+        self.router_identity_entry.set_width_chars(28)
+        self.router_identity_entry.set_max_length(4096)
+        identity_row = Adw.ActionRow(
+            title="Dedicated identity",
+            subtitle="Generated locally; the private key never leaves this computer",
+        )
+        identity_row.add_prefix(Gtk.Image.new_from_icon_name("channel-secure-symbolic"))
+        identity_row.add_suffix(self.router_identity_entry)
+        connection_list.append(identity_row)
+
+        self.router_ssh_row = Adw.ActionRow(
+            title="Key-only SSH",
+            subtitle=self.ssh_setup_error or "Checking router access",
+        )
+        self.router_ssh_row.set_use_markup(False)
+        self.router_ssh_icon = Gtk.Image.new_from_icon_name("network-offline-symbolic")
+        self.router_ssh_row.add_prefix(self.router_ssh_icon)
+        save_connection = _button_with_icon(
+            "Save & Check",
+            "document-save-symbolic",
+            self._save_router_connection,
+        )
+        save_connection.set_valign(Gtk.Align.CENTER)
+        self.router_ssh_row.add_suffix(save_connection)
+        authorize_key = _button_with_icon(
+            "Authorize Key",
+            "dialog-password-symbolic",
+            self.confirm_authorize_router_key,
+        )
+        authorize_key.set_valign(Gtk.Align.CENTER)
+        self.router_ssh_row.add_suffix(authorize_key)
+        connection_list.append(self.router_ssh_row)
+        content.append(connection_list)
+
         astrill_heading = Gtk.Label(label="Astrill Connection")
         astrill_heading.set_xalign(0)
         astrill_heading.add_css_class("section-title")
+        astrill_heading.add_css_class("toolbar-section")
         content.append(astrill_heading)
         self.router_astrill_row = Adw.ActionRow(
             title="Shared tunnel",
@@ -600,6 +692,13 @@ class MainWindow(Adw.ApplicationWindow):
             "network-offline-symbolic"
         )
         self.router_astrill_row.add_prefix(self.router_astrill_icon)
+        self.astrill_install_button = _button_with_icon(
+            "Install Applet",
+            "software-update-available-symbolic",
+            lambda _button: self.confirm_install_astrill(force=True),
+        )
+        self.astrill_install_button.set_valign(Gtk.Align.CENTER)
+        self.router_astrill_row.add_suffix(self.astrill_install_button)
         self.choose_location_button = _button_with_icon(
             "Choose",
             "find-location-symbolic",
@@ -2115,12 +2214,154 @@ class MainWindow(Adw.ApplicationWindow):
             "Could not roll back router policy",
         )
 
+    def _router_client_from_store(self) -> RouterClient:
+        if self.store.router_use_ssh_config:
+            return RouterClient(self.store.router_host)
+        return RouterClient(
+            self.store.router_host,
+            user=self.store.router_user,
+            port=self.store.router_port,
+            identity_file=self.store.router_identity,
+        )
+
+    def _save_router_connection(self, _button: Gtk.Button | None = None) -> None:
+        if not self._apply_router_connection_fields():
+            return
+        self._companion_install_prompted = False
+        self._ssh_setup_prompted = False
+        self.check_router_environment(quiet=False)
+
+    def _apply_router_connection_fields(self) -> bool:
+        host = self.router_host_entry.get_text().strip()
+        user = self.router_user_entry.get_text().strip()
+        identity = self.router_identity_entry.get_text().strip()
+        try:
+            port = int(self.router_port_entry.get_text().strip())
+            if not host or any(character.isspace() for character in host):
+                raise ValueError("router address must not be empty or contain spaces")
+            if not user or any(character.isspace() for character in user):
+                raise ValueError("SSH user must not be empty or contain spaces")
+            if not 1 <= port <= 65535:
+                raise ValueError("SSH port must be between 1 and 65535")
+            ensure_local_identity(identity)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.toast(f"Could not save router connection: {exc}")
+            return False
+
+        self.store.router_host = host
+        self.store.router_user = user
+        self.store.router_port = port
+        self.store.router_identity = identity
+        self.store.router_use_ssh_config = False
+        self.store.save()
+        self.router = self._router_client_from_store()
+        self.router_ssh_icon.set_from_icon_name("content-loading-symbolic")
+        self.router_ssh_row.set_subtitle("Checking key-only SSH")
+        return True
+
+    def confirm_authorize_router_key(self, _button: Gtk.Button | None = None) -> None:
+        if not self._apply_router_connection_fields():
+            return
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Authorize the dedicated SSH key?",
+            "The password is used once and is never saved. The router keeps "
+            "Telnet unchanged, enables LAN SSH, verifies key login, then "
+            "disables SSH password login and WAN SSH management.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("authorize", "Authorize Key")
+        dialog.set_response_appearance("authorize", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        form.set_size_request(420, -1)
+        password_label = Gtk.Label(label="Router password")
+        password_label.set_xalign(0)
+        password = Gtk.PasswordEntry()
+        password.set_show_peek_icon(True)
+        password.set_text("admin")
+        form.append(password_label)
+        form.append(password)
+        dialog.set_extra_child(form)
+
+        def response(_dialog: Adw.MessageDialog, response_id: str) -> None:
+            if response_id != "authorize":
+                password.set_text("")
+                return
+            supplied_password = password.get_text()
+            password.set_text("")
+            self._run_task(
+                lambda: authorize_router_key(self.router, supplied_password),
+                lambda _result: self._router_key_authorized(),
+                "Router SSH setup failed",
+            )
+
+        dialog.connect("response", response)
+        dialog.present()
+
+    def _router_key_authorized(self) -> None:
+        self.router_ssh_icon.set_from_icon_name("object-select-symbolic")
+        self.router_ssh_row.set_subtitle(
+            f"Connected as {self.store.router_user} on port {self.store.router_port}"
+        )
+        self.toast("Router SSH key authorized")
+        self._ssh_setup_prompted = True
+        self.check_router_environment(quiet=False)
+
+    def check_router_environment(self, *, quiet: bool = True) -> None:
+        def check() -> tuple[dict[str, Any], CompanionCheck]:
+            if not self.router.ping():
+                raise RuntimeError("router did not acknowledge SSH")
+            native_status = self.router.native_astrill_status()
+            companion = RouterInstaller(self.router).check()
+            return native_status, companion
+
+        self._run_task(
+            check,
+            self._router_environment_checked,
+            "Could not check router setup",
+            quiet=quiet,
+        )
+
+    def _router_environment_checked(
+        self, result: tuple[dict[str, Any], CompanionCheck]
+    ) -> None:
+        native_status, companion = result
+        self.astrill_applet_available = native_status.get("health") == "healthy"
+        self.router_companion_check = companion
+        self.router_ssh_icon.set_from_icon_name("object-select-symbolic")
+        self.router_ssh_row.set_subtitle(
+            f"Connected as {self.store.router_user} on port {self.store.router_port}"
+        )
+
+        if native_status.get("health") != "healthy":
+            self._router_refreshed(native_status)
+            self.confirm_install_astrill()
+            return
+        if companion.action == "none":
+            if self.store.companion_enabled:
+                self._router_refreshed(companion.status or native_status)
+            else:
+                self._router_refreshed(native_status)
+                self._confirm_use_detected_companion(companion)
+            return
+        if companion.action == "repair":
+            self._router_refreshed(companion.status or native_status)
+            if self.store.companion_enabled and not self.store.read_only:
+                self.ensure_router_companion()
+            else:
+                self._confirm_companion_install(companion)
+            return
+        self._router_refreshed(native_status)
+        self._confirm_companion_install(companion)
+
     def ensure_router_companion(self, *, quiet: bool = True) -> None:
         if not self.store.companion_enabled or self.store.read_only:
             self.refresh_router()
             return
         self._run_task(
-            lambda: RouterInstaller(self.router).ensure(),
+            lambda: RouterInstaller(self.router).ensure(allow_install=False),
             self._router_companion_ensured,
             "Could not reconcile the router companion",
             quiet=quiet,
@@ -2133,7 +2374,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.toast("Install the companion before repairing its runtime")
             return
         self._run_task(
-            lambda: RouterInstaller(self.router).ensure(),
+            lambda: RouterInstaller(self.router).ensure(allow_install=False),
             self._manual_companion_ensured,
             "Could not repair the router companion",
         )
@@ -2145,17 +2386,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _router_companion_ensured(self, result: EnsureResult) -> None:
         self._router_refreshed(result.status)
-        if result.action == "installed":
-            self.toast("Router companion installed automatically")
-        elif result.action == "repaired":
+        if result.action == "repaired":
             self.toast("Router companion runtime repaired")
 
     def _monitor_router_companion(self) -> bool:
         if self.busy_count == 0:
-            if self.store.companion_enabled and not self.store.read_only:
-                self.ensure_router_companion()
-            else:
-                self.refresh_router()
+            self.check_router_environment()
         return GLib.SOURCE_CONTINUE
 
     def _router_refreshed(self, status: dict[str, Any]) -> None:
@@ -2271,6 +2507,8 @@ class MainWindow(Adw.ApplicationWindow):
         writable = not self.store.read_only and self.busy_count == 0
         companion_writable = self.store.companion_enabled and writable
         self.astrill_connection_switch.set_sensitive(writable)
+        self.astrill_install_button.set_visible(self.astrill_applet_available is False)
+        self.astrill_install_button.set_sensitive(self.busy_count == 0)
         self.choose_location_button.set_sensitive(companion_writable)
         self.protocol_dropdown.set_sensitive(companion_writable)
         for control in (
@@ -2282,7 +2520,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.restore_native_button.set_sensitive(companion_writable)
         self.apply_button.set_sensitive(companion_writable)
         for button in self.router_install_buttons:
-            button.set_sensitive(writable)
+            button.set_sensitive(self.busy_count == 0)
         self.native_page.set_read_only(self.store.read_only)
         self._update_recommendation_controls()
 
@@ -2437,13 +2675,176 @@ class MainWindow(Adw.ApplicationWindow):
             "Application launch failed",
         )
 
-    def install_router(self, _button: Gtk.Button | None = None) -> None:
-        if not self._require_write_access("installing the router companion"):
+    def confirm_install_astrill(
+        self,
+        _button: Gtk.Button | None = None,
+        *,
+        force: bool = False,
+    ) -> None:
+        if self._astrill_install_prompted and not force:
             return
+        self._astrill_install_prompted = True
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Provide the Astrill installer?",
+            "The installer runs as root on the router and can change network "
+            "access. Its URL, token, and content are kept only for this "
+            "operation and are never saved.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("review", "Review Installer")
+        dialog.set_response_appearance("review", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        form.set_size_request(520, -1)
+        source_label = Gtk.Label(label="Installer URL or shell command")
+        source_label.set_xalign(0)
+        source = Gtk.PasswordEntry()
+        source.set_show_peek_icon(True)
+        source.set_text(ASTRILL_INSTALL_TEMPLATE)
+        form.append(source_label)
+        form.append(source)
+        dialog.set_extra_child(form)
+
+        def response(_dialog: Adw.MessageDialog, response_id: str) -> None:
+            if response_id != "review":
+                source.set_text("")
+                return
+            supplied = source.get_text()
+            source.set_text("")
+            self._run_task(
+                lambda: prepare_astrill_installer(supplied),
+                self._review_astrill_installer,
+                "Could not prepare the Astrill installer",
+            )
+
+        dialog.connect("response", response)
+        dialog.present()
+
+    def _review_astrill_installer(self, installer: AstrillInstaller) -> None:
+        transport_warning = (
+            "\nThe download used unencrypted HTTP."
+            if installer.insecure_transport
+            else ""
+        )
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Run this Astrill installer?",
+            f"Source: {installer.source}\n"
+            f"Size: {installer.size} bytes\n"
+            f"SHA-256: {installer.sha256}{transport_warning}\n\n"
+            "This executes third-party shell code as router root.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("install", "Install Astrill")
+        dialog.set_response_appearance("install", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect(
+            "response",
+            lambda _dialog, response: (
+                response == "install" and self._install_astrill(installer)
+            ),
+        )
+        dialog.present()
+
+    def _install_astrill(self, installer: AstrillInstaller) -> None:
+        self._run_task(
+            lambda: install_astrill(self.router, installer),
+            self._astrill_installed,
+            "Astrill installation failed",
+        )
+
+    def _astrill_installed(self, status: dict[str, Any]) -> None:
+        self.astrill_applet_available = True
+        self._router_refreshed(status)
+        self.toast("Astrill applet installed")
+        self.load_servers()
+        self.refresh_native_settings(quiet=True)
+        self.check_router_environment(quiet=False)
+
+    def _confirm_use_detected_companion(self, check: CompanionCheck) -> None:
+        if self._companion_install_prompted:
+            return
+        self._companion_install_prompted = True
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Use the detected router companion?",
+            f"Version {check.installed_version or check.expected_version} is "
+            "already installed and healthy. Enabling it allows this desktop "
+            "to apply and repair policy routing.",
+        )
+        dialog.add_response("cancel", "Keep Native Only")
+        dialog.add_response("enable", "Use Companion")
+        dialog.set_response_appearance("enable", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def response(_dialog: Adw.MessageDialog, response_id: str) -> None:
+            if response_id != "enable":
+                return
+            self.store.companion_enabled = True
+            self.store.read_only = False
+            self.store.save()
+            self.native_page.set_read_only(False)
+            self.access_banner.set_revealed(False)
+            if check.status is not None:
+                self._router_refreshed(check.status)
+            self.toast("Router companion enabled")
+
+        dialog.connect("response", response)
+        dialog.present()
+
+    def _confirm_companion_install(
+        self,
+        check: CompanionCheck | None,
+        *,
+        force: bool = False,
+    ) -> None:
+        if self._companion_install_prompted and not force:
+            return
+        self._companion_install_prompted = True
+        expected = (
+            check.expected_version
+            if check is not None
+            else RouterInstaller(self.router).expected_version
+        )
+        reason = (
+            check.reason if check is not None else "A manual reinstall was requested."
+        )
+        dialog = Adw.MessageDialog.new(
+            self,
+            f"Install router companion {expected}?",
+            f"{reason}\n\n"
+            "This writes a validated package to DD-WRT NVRAM, adds its MyPage "
+            "entries, and starts the policy watchdog. Native Astrill files, "
+            "account data, endpoint, and connection state are not replaced.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("install", "Install Companion")
+        dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect(
+            "response",
+            lambda _dialog, response: (
+                response == "install" and self._install_router_companion()
+            ),
+        )
+        dialog.present()
+
+    def install_router(self, _button: Gtk.Button | None = None) -> None:
+        self._confirm_companion_install(self.router_companion_check, force=True)
+
+    def _install_router_companion(self) -> None:
 
         def success(result: Any) -> None:
             self.store.companion_enabled = True
+            self.store.read_only = False
             self.store.save()
+            self.native_page.set_read_only(False)
+            self.access_banner.set_revealed(False)
             self._router_refreshed(result.status)
             self.toast(f"Router companion {result.version} installed")
 
@@ -2524,6 +2925,17 @@ class MainWindow(Adw.ApplicationWindow):
         if prefix == "Could not reach the router":
             self.sidebar_status_icon.set_from_icon_name("network-offline-symbolic")
             self.sidebar_status_label.set_label("Router unavailable")
+        if prefix in {"Could not check router setup", "Router SSH setup failed"}:
+            self.router_ssh_icon.set_from_icon_name("network-offline-symbolic")
+            self.router_ssh_row.set_subtitle(message)
+            self.sidebar_status_icon.set_from_icon_name("network-offline-symbolic")
+            self.sidebar_status_label.set_label("Router unavailable")
+            if (
+                prefix == "Could not check router setup"
+                and not self._ssh_setup_prompted
+            ):
+                self._ssh_setup_prompted = True
+                self.confirm_authorize_router_key()
         if prefix == "Could not load Astrill endpoints":
             self.servers_loading = False
         if prefix in {
