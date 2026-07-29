@@ -882,6 +882,8 @@ set_astrill_connection() {
             /dev/astrill/astrillvpn stop > "$BASE/astrill-connection.log" 2>&1 || true
             attempts=0
             while [ "$attempts" -lt 65 ]; do
+                # pgrep -f is not reliable across the supported BusyBox builds.
+                # shellcheck disable=SC2009
                 if ! ip route show table main | grep -q ' dev tun0' &&
                    ! ps w | grep astrill/openvpn.conf | grep -vq grep; then
                     ensure_routes >/dev/null 2>&1 || true
