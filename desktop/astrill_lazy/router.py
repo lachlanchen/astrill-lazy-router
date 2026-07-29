@@ -13,6 +13,8 @@ from .native_settings import (
     normalize_native_changes,
 )
 
+DOMAIN_REFRESH_TIMEOUT = 180
+
 
 class RouterError(RuntimeError):
     pass
@@ -58,7 +60,7 @@ class RouterClient:
         return json.loads(_last_json_line(result.stdout))
 
     def refresh(self) -> dict[str, Any]:
-        result = self._run_alctl(["refresh", "--json"])
+        result = self._run_alctl(["refresh", "--json"], timeout=DOMAIN_REFRESH_TIMEOUT)
         return json.loads(_last_json_line(result.stdout))
 
     def clients(self) -> list[dict[str, Any]]:
@@ -259,13 +261,19 @@ done
         timeout: int | None = None,
     ) -> CommandResult:
         remote_command = shlex.join(arguments)
-        result = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", self.host, remote_command],
-            input=input_bytes,
-            check=False,
-            capture_output=True,
-            timeout=timeout or self.timeout,
-        )
+        effective_timeout = timeout or self.timeout
+        try:
+            result = subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", self.host, remote_command],
+                input=input_bytes,
+                check=False,
+                capture_output=True,
+                timeout=effective_timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RouterError(
+                f"router command timed out after {effective_timeout} seconds"
+            ) from exc
         decoded = CommandResult(
             stdout=result.stdout.decode(errors="replace"),
             stderr=result.stderr.decode(errors="replace"),
