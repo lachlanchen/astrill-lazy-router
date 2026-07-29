@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a branded project README, repository screenshot, GitHub Sponsors panel,
+  and concise guides across the profile's 11-language navigation set.
 - Add provider-country filtering, persistent multi-selection, and Suggested,
   Direct, or Astrill batch actions to the Services catalog.
 - Restore mixed per-service route suggestions while showing the actual route
