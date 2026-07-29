@@ -116,9 +116,11 @@ disconnected; a changed connected session uses a confirmed, verified
 `Apply & Reconnect`.
 
 The Endpoints view remains the searchable country-grouped browser and quick
-connect surface. On Windows, **Test PC latency** is a manual-only bounded TCP
-reachability test from the PC: it sends no command to DD-WRT, does not measure
-bandwidth, and never switches the endpoint. The separately confirmed Windows
+connect surface. Both frontends offer a manual-only bounded TCP reachability
+test from the desktop's current network path. Ubuntu's **Ping** action measures
+the visible rows; Windows **Test PC latency** can measure the selected, visible,
+or all loaded rows. The tests send no command to DD-WRT, do not measure
+bandwidth, and never switch the endpoint. The separately confirmed Windows
 connect action changes DD-WRT only; it neither installs a VPN nor changes local
 PC routing. It uses the optional companion so a failed connection can restore
 the router's previous endpoint settings.

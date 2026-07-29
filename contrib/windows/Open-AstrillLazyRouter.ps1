@@ -3,9 +3,10 @@ param(
     [int]$LocalPort = 16087,
     [int]$RemotePort = 6087,
     [string[]]$SshHosts = @(
+        "lachlan@OptiPlex-7090.local",
+        "lachlan@192.168.1.100",
         "lachlan@lachlanserver.local",
         "lachlan@lachlanserver",
-        "lachlan@192.168.1.99",
         "lachlan@192.168.24.108"
     )
 )

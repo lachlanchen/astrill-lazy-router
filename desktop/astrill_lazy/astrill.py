@@ -151,7 +151,19 @@ class AstrillEndpoint:
     protocol_code: int
     port_index: int
     protocol_original: int | None = None
+    address: str | None = None
     resolved_ip: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.address is not None
+            and self.resolved_ip is not None
+            and self.address != self.resolved_ip
+        ):
+            raise ValueError("Astrill endpoint address aliases conflict")
+        address = self.address if self.address is not None else self.resolved_ip
+        object.__setattr__(self, "address", address)
+        object.__setattr__(self, "resolved_ip", address)
 
     @property
     def router_pro(self) -> bool:
@@ -239,6 +251,26 @@ class AstrillServer:
             for index in sorted(common_indexes)
         )
 
+    def tcp_probe_target(self) -> tuple[str, int] | None:
+        candidates = [
+            endpoint
+            for node in self.nodes
+            for endpoint in node.endpoints
+            if endpoint.address is not None and endpoint.mode == 1
+        ]
+        if not candidates:
+            return None
+        endpoint = min(
+            candidates,
+            key=lambda item: (
+                _probe_port(item) != 443,
+                item.router_pro,
+                item.port_index,
+                item.address or "",
+            ),
+        )
+        return endpoint.address, _probe_port(endpoint)
+
 
 def parse_astrill_favorites(value: str) -> tuple[AstrillFavorite, ...]:
     if not value:
@@ -323,6 +355,15 @@ def _validate_port(value: str) -> None:
         raise ValueError("Astrill port must be between 1 and 65535")
     if len(bounds) == 2 and bounds[0] > bounds[1]:
         raise ValueError("Astrill port range is reversed")
+
+
+def _probe_port(endpoint: AstrillEndpoint) -> int:
+    bounds = [int(part) for part in endpoint.port.split("-", 1)]
+    if len(bounds) == 1:
+        return bounds[0]
+    if bounds[0] <= 443 <= bounds[1]:
+        return 443
+    return bounds[0]
 
 
 def _extract_list_literal(script: str) -> str:
@@ -416,7 +457,7 @@ def _parse_server(
                 protocol_original=(
                     int(match.group(7)) if match.group(7) is not None else None
                 ),
-                resolved_ip=(
+                address=(
                     endpoint_addresses.get(int(match.group(1)))
                     if endpoint_addresses
                     else None

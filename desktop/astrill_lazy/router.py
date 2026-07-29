@@ -38,6 +38,19 @@ class AstrillConnectionResult:
     settings: NativeAstrillSettings
 
 
+@dataclass(frozen=True)
+class RouterMonitorSnapshot:
+    native_status: dict[str, Any]
+    settings: NativeAstrillSettings
+    companion_presence: dict[str, Any]
+    companion_status: dict[str, Any] | None
+
+    def selected_status(self, companion_enabled: bool) -> dict[str, Any]:
+        if companion_enabled and self.companion_status is not None:
+            return self.companion_status
+        return self.native_status
+
+
 class RouterClient:
     def __init__(
         self,
@@ -135,6 +148,101 @@ printf 'runtime\\t%s\\n' "$runtime"
             "version": values.get("astrill_lazy_version") or None,
             "runtime": values.get("runtime") == "true",
         }
+
+    def monitor_snapshot(self, *, include_companion: bool) -> RouterMonitorSnapshot:
+        """Read status, settings, and companion markers in one SSH session."""
+        keys = " ".join(shlex.quote(key) for key in SAFE_NATIVE_ASTRILL_KEYS)
+        companion_status = (
+            """
+if [ -x /tmp/astrill-lazy/alctl ]; then
+    printf 'companion_status\\t'
+    /tmp/astrill-lazy/alctl status --json 2>/dev/null |
+        tail -n 1 |
+        hexdump -v -e '1/1 "%02x"'
+    printf '\\n'
+fi
+"""
+            if include_companion
+            else ""
+        )
+        script = f"""
+vpn_state=down
+ip route show table main | grep -q ' dev tun0' && vpn_state=up
+[ -x /dev/astrill/astrillvpn ] && applet=true || applet=false
+[ -x /tmp/astrill-lazy/alctl ] && companion_runtime=true || companion_runtime=false
+printf 'meta:vpn_state\\t%s\\n' "$vpn_state"
+printf 'meta:applet\\t%s\\n' "$applet"
+printf 'presence:runtime\\t%s\\n' "$companion_runtime"
+printf 'meta:wan_iface\\t'
+nvram get wan_iface | hexdump -v -e '1/1 "%02x"'
+printf '\\n'
+for key in astrill_lazy_installed astrill_lazy_version astrill_lazy_pkg_md5; do
+    printf 'presence:%s\\t' "$key"
+    nvram get "$key" | hexdump -v -e '1/1 "%02x"'
+    printf '\\n'
+done
+for key in {keys}; do
+    printf 'setting:%s\\t' "$key"
+    nvram get "$key" | hexdump -v -e '1/1 "%02x"'
+    printf '\\n'
+done
+{companion_status}
+"""
+        values = _decode_tagged_hex(
+            self.run_script(script, timeout=30),
+            plain_tags={
+                "meta:vpn_state",
+                "meta:applet",
+                "presence:runtime",
+            },
+        )
+        required_meta = {
+            "meta:vpn_state",
+            "meta:applet",
+            "meta:wan_iface",
+            "presence:runtime",
+            "presence:astrill_lazy_installed",
+            "presence:astrill_lazy_version",
+            "presence:astrill_lazy_pkg_md5",
+        }
+        missing_meta = required_meta - values.keys()
+        if missing_meta:
+            raise RouterError(
+                "router omitted monitor fields: " + ", ".join(sorted(missing_meta))
+            )
+        missing_settings = {
+            key for key in SAFE_NATIVE_ASTRILL_KEYS if f"setting:{key}" not in values
+        }
+        if missing_settings:
+            raise RouterError(
+                "router omitted native Astrill settings: "
+                + ", ".join(sorted(missing_settings))
+            )
+
+        settings = NativeAstrillSettings.from_dict(
+            {key: values[f"setting:{key}"] for key in SAFE_NATIVE_ASTRILL_KEYS}
+        )
+        parsed_companion: dict[str, Any] | None = None
+        raw_companion = values.get("companion_status", "").strip()
+        if raw_companion:
+            try:
+                candidate = json.loads(_last_json_line(raw_companion))
+            except (json.JSONDecodeError, RouterError):
+                candidate = None
+            if isinstance(candidate, dict):
+                parsed_companion = candidate
+
+        return RouterMonitorSnapshot(
+            native_status=_native_status_from_monitor(settings, values),
+            settings=settings,
+            companion_presence={
+                "installed": (values["presence:astrill_lazy_installed"] == "1"),
+                "version": values["presence:astrill_lazy_version"] or None,
+                "runtime": values["presence:runtime"] == "true",
+                "package_md5": values["presence:astrill_lazy_pkg_md5"] or None,
+            },
+            companion_status=parsed_companion,
+        )
 
     def switch_astrill(
         self,
@@ -538,6 +646,35 @@ def _decode_tagged_hex(
                 f"router returned invalid encoded data for {tag}"
             ) from exc
     return values
+
+
+def _native_status_from_monitor(
+    settings: NativeAstrillSettings,
+    values: dict[str, str],
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "ok": True,
+        "version": None,
+        "native_mode": True,
+        "health": ("healthy" if values.get("meta:applet") == "true" else "degraded"),
+        "vpn_state": values.get("meta:vpn_state", "down"),
+        "astrill_status": settings.integer("astrill_status"),
+        "astrill_server_id": settings.integer("astrill_serverid"),
+        "astrill_protocol": settings.integer("astrill_protocol"),
+        "wan_interface": values.get("meta:wan_iface", ""),
+        "active_chain": None,
+        "watchdog": False,
+        "jump_installed": False,
+        "rules_count": 0,
+        "origin_count": 0,
+        "direct_rules": 0,
+        "vpn_rules": 0,
+        "resolved_addresses": 0,
+        "unresolved_domains": 0,
+        "last_apply": 0,
+        "rules": [],
+    }
 
 
 def _parse_native_clients(output: str) -> list[dict[str, Any]]:

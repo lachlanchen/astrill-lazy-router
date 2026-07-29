@@ -62,6 +62,22 @@ def test_desktop_installer_selects_a_supported_python_and_opt_in_autostart() -> 
     assert "ASTRILL_LAZY_ENABLE_AUTOSTART" in installer
 
 
+def test_remote_novnc_launchers_prefer_the_current_ubuntu_host() -> None:
+    macos = (ROOT / "contrib" / "macos" / "open-astrill-lazy.applescript").read_text(
+        encoding="utf-8"
+    )
+    windows = (ROOT / "contrib" / "windows" / "Open-AstrillLazyRouter.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"glassagent-ubuntu"' in macos
+    for launcher in (macos, windows):
+        assert "lachlan@192.168.1.100" in launcher
+        assert "127.0.0.1:" in launcher
+        assert "BatchMode=yes" in launcher
+        assert "password" not in launcher.casefold()
+
+
 def test_policy_controller_never_evaluates_rule_content() -> None:
     controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
     helper = (ROOT / "helpers" / "astrill-lazy-netns").read_text(encoding="ascii")

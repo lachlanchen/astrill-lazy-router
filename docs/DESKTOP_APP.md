@@ -40,10 +40,12 @@ astrill-lazy autostart disable
 ```
 
 At startup, the Ubuntu GUI performs one environment check covering key-only
-SSH, the native Astrill applet, and the DD-WRT companion. A healthy current
-companion is only read. A current stored package with a stopped runtime can be
-repaired in place. A missing, outdated, or non-repairable package opens a
-confirmation dialog and is never installed silently.
+SSH, native status and settings, companion presence, and companion health in
+one read-only snapshot. A healthy current companion is only read. A current
+stored package with a stopped runtime can be repaired in place. A missing,
+outdated, or non-repairable package opens a confirmation dialog and is never
+installed silently. The larger applet endpoint catalog is fetched afterward,
+so startup does not place two concurrent SSH handshakes on the router.
 
 The desktop does not repeat that check on a timer or poll DD-WRT over SSH in
 the background. Later reads are manual, requested when a page first needs its
@@ -119,7 +121,7 @@ confirmation-gated, one-time LAN Telnet session.
 | Companion policies and recovery | Yes | Yes |
 | Service, domain, network, and device policy | Yes | Yes |
 | Endpoint and safe native-setting controls | Yes | Yes |
-| Manual endpoint TCP latency | Not exposed | Windows PC-side; no router command |
+| Manual endpoint TCP latency | Visible rows; desktop-side Ping | Selected, visible, or all rows; persistent PC-side results |
 | Per-application routing identity | Linux macvlan namespace | Not available; no Windows WFP backend |
 | Route detection and recommendations | Yes | Not exposed |
 | Extension and login-startup controls | Yes | Startup is installer-managed; no in-app switch |
@@ -187,7 +189,10 @@ noVNC installer creates both Desktop and Start Menu shortcuts. It is separate
 from `install-native.ps1`, which installs the Qt application with a Desktop
 shortcut only and removes its same-named Start Menu shortcut. Do not install
 both Windows options unless replacing the same-named shortcut is intentional.
-The launchers do not run or take focus until opened by the user.
+The launchers do not run or take focus until opened by the user. Current
+defaults prefer
+`glassagent-ubuntu`, `OptiPlex-7090.local`, and `192.168.1.100`, with the prior
+server addresses retained as fallbacks.
 
 ## Ubuntu Views
 
@@ -287,16 +292,25 @@ country tokens, identifies the current endpoint, and provides a quick
 confirmed reconnect using a selected Astrill protocol. The Connection view is
 the full endpoint-specific editor.
 
-The Windows Endpoints view also offers **Test PC latency** for the selected,
-visible, or all loaded endpoints. It runs only when clicked and opens bounded
-TCP connections from the Windows PC; it sends no command to DD-WRT and never
-switches the router endpoint. The displayed value is TCP-connect latency and
-reachability over the PC's current path, not bandwidth or VPN throughput.
-Results are saved in a validated local sidecar cache and restored without
-network activity when the app restarts. The view marks results older than 24
-hours or tied to a changed endpoint target for manual retesting. Its Sort
-control offers Astrill's default order, region order, and numeric fastest-first
-PC latency order; clearing results removes the saved cache.
+The applet's encoded address map is parsed into validated IPv4 probe targets.
+Ubuntu's **Ping** action measures the currently visible endpoints only when
+clicked, using at most 12 desktop threads and a 1.5-second TCP-connect timeout.
+Its results remain in memory until the endpoint catalog is reloaded.
+
+The Windows Endpoints view offers **Test PC latency** for the selected, visible,
+or all loaded endpoints. It also runs only when clicked and opens bounded TCP
+connections from the Windows PC. Results are saved in a validated local
+sidecar cache and restored without network activity when the app restarts. The
+view marks results older than 24 hours or tied to a changed endpoint target for
+manual retesting. Its Sort control offers Astrill's default order, region
+order, and numeric fastest-first PC latency order; clearing results removes the
+saved cache.
+
+Neither frontend's latency action sends a command to DD-WRT or switches the
+router endpoint. The displayed value is TCP-connect latency and reachability
+over the desktop's current path, not bandwidth or VPN throughput. The tests
+are never started by page navigation, endpoint loading, filtering, or a
+background timer.
 
 ### Router
 

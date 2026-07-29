@@ -25,6 +25,26 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.7" date="2026-07-30">
+      <description>
+        <p>Persists validated Windows PC endpoint-latency results and adds
+        Default, Region, and numeric latency endpoint sorting without
+        automatic tests or recurring router polling.</p>
+      </description>
+    </release>
+    <release version="0.2.6" date="2026-07-29">
+      <description>
+        <p>Adds on-demand latency measurements for real Astrill endpoint
+        addresses and updates secure remote noVNC launch targets.</p>
+      </description>
+    </release>
+    <release version="0.2.5" date="2026-07-29">
+      <description>
+        <p>Combines startup router state into one read-only SSH snapshot and
+        runs deeper companion recovery checks only after detecting degraded
+        state.</p>
+      </description>
+    </release>
     <release version="0.2.4" date="2026-07-29">
       <description>
         <p>Adds a synchronized native Astrill connection view with validated

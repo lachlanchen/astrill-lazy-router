@@ -65,8 +65,14 @@ class RouterInstaller:
         archive = build_router_package(self.router_root)
         return hashlib.md5(archive, usedforsecurity=False).hexdigest()
 
-    def check(self) -> CompanionCheck:
-        presence = self.client.companion_presence()
+    def check(
+        self,
+        *,
+        presence: dict[str, Any] | None = None,
+        status: dict[str, Any] | None = None,
+    ) -> CompanionCheck:
+        if presence is None:
+            presence = self.client.companion_presence()
         installed_version = presence.get("version")
         if not presence.get("installed"):
             return CompanionCheck(
@@ -84,10 +90,11 @@ class RouterInstaller:
                 None,
                 "The installed companion does not match the desktop package.",
             )
-        try:
-            status = self.client.status()
-        except RouterError:
-            status = None
+        if status is None:
+            try:
+                status = self.client.status()
+            except RouterError:
+                status = None
         if status is not None and self._runtime_is_current(status):
             return CompanionCheck(
                 "none",

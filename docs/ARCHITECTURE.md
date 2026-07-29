@@ -112,6 +112,17 @@ package only opens the Install/Upgrade confirmation. No background desktop
 monitor can invoke the NVRAM installer. This lifecycle is separate from
 Astrill connection management and does not change `astrill_autostart`.
 
+The applet endpoint payload is a separate, larger read. Startup queues it only
+after the health snapshot completes instead of opening both SSH sessions
+concurrently.
+
+The same payload contains an encoded-address lookup table. The desktop parser
+associates those validated IPv4 addresses with each endpoint and selects a
+fixed TCP port, preferring 443, for a manually requested latency probe. Probes
+run on the desktop with bounded concurrency and are never part of router
+reconciliation. They therefore report current desktop-path connection latency
+without changing router marks, tables, routes, or Astrill state.
+
 ## Native Connection Mirror
 
 The desktop reads an explicit NVRAM allowlist and the installed applet's server

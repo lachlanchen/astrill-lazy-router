@@ -1,12 +1,35 @@
 # Changelog
 
-## Unreleased
+## 0.2.7 - 2026-07-30
 
 - Persist validated Windows PC endpoint-latency results in a separate local
   cache without triggering automatic probes or involving DD-WRT.
 - Add explicit Default, Region, and numeric PC-latency endpoint ordering while
   retaining selection across filters and marking stale or changed targets for
   a manual retest.
+
+## 0.2.6 - 2026-07-29
+
+- Parse Astrill's encoded endpoint-address map and expose a validated TCP probe
+  target for every current applet location.
+- Add on-demand, visible-row endpoint latency measurements to the Ubuntu
+  frontend with bounded desktop concurrency, stable result labels, timeout
+  reporting, and no router write or background polling.
+- Prefer the current OptiPlex 7090 hostname, LAN address, and macOS SSH alias in
+  the secure Mac and Windows noVNC launchers.
+
+## 0.2.5 - 2026-07-29
+
+- Collapse native status, allowlisted settings, companion presence, and
+  companion health into one read-only SSH startup snapshot.
+- Reuse the startup snapshot for the connection mirror and reserve additional
+  package and repair checks for detected companion degradation.
+- Sequence the larger endpoint-catalog transfer after startup health checks so
+  the router does not process concurrent SSH sessions during GUI launch.
+- Add live verification evidence for all-device UU Remote Direct routing and
+  matched Ubuntu/macOS performance through the active Astrill endpoint.
+- Replace LINE's non-resolving legacy app domain with its current official
+  LIFF and Mini App hosts.
 
 ## 0.2.4 - 2026-07-29
 
