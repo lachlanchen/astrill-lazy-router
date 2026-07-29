@@ -34,11 +34,15 @@ or recovery path, and do not couple that change to a policy upgrade.
 The DD-WRT web account is separate from Telnet root access. Its password was not
 guessed, reset, or stored by this project.
 
-Desktop login startup is a mode `0644` freedesktop entry in the current user's
-configuration when explicitly enabled. It stores only the absolute GUI
-executable path. Companion
-reconciliation uses the existing key-only SSH alias and stores no router or
-Ubuntu password.
+Ubuntu desktop login startup is a mode `0644` freedesktop entry in the current
+user's configuration when explicitly enabled. Windows native installation
+creates a current-user Startup-folder shortcut without administrator access;
+it points only to the installed executable and is removed by uninstall when
+its target matches that executable. Companion reconciliation uses the existing
+key-only SSH alias and stores no router or Ubuntu password. It may reconstruct
+an already-confirmed, fingerprint-matched package from router NVRAM after
+reboot, but it never silently installs or persistently rewrites a missing,
+stale, or inconsistent package.
 
 A fresh configuration is native-only and read-only. The GUI and CLI block
 policy apply/rollback/refresh, endpoint switching, connection changes, and

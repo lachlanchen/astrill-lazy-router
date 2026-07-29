@@ -59,9 +59,17 @@ function Remove-MatchingShortcut {
     $Shell = New-Object -ComObject WScript.Shell
     try {
         $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-        $Target = [IO.Path]::GetFullPath(
-            [Environment]::ExpandEnvironmentVariables($Shortcut.TargetPath)
+        $ExpandedTarget = [Environment]::ExpandEnvironmentVariables(
+            $Shortcut.TargetPath
         )
+        if ([string]::IsNullOrWhiteSpace($ExpandedTarget)) {
+            return
+        }
+        try {
+            $Target = [IO.Path]::GetFullPath($ExpandedTarget)
+        } catch {
+            return
+        }
         if ($Target.Equals(
                 $InstalledExecutable,
                 [StringComparison]::OrdinalIgnoreCase
@@ -80,10 +88,14 @@ function Remove-MatchingShortcut {
 $DesktopShortcut = Join-Path (
     [Environment]::GetFolderPath("Desktop")
 ) "Astrill Lazy Router.lnk"
+$StartupShortcut = Join-Path (
+    [Environment]::GetFolderPath("Startup")
+) "Astrill Lazy Router.lnk"
 $StartMenuShortcut = Join-Path (
     [Environment]::GetFolderPath("Programs")
 ) "Astrill Lazy Router.lnk"
 Remove-MatchingShortcut -ShortcutPath $DesktopShortcut
+Remove-MatchingShortcut -ShortcutPath $StartupShortcut
 Remove-MatchingShortcut -ShortcutPath $StartMenuShortcut
 
 if (Test-Path -LiteralPath $InstallDirectory) {

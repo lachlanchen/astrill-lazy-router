@@ -110,7 +110,11 @@ simultaneously.
 
 The Astrill view mirrors supported native settings through an explicit
 allowlist. The Endpoints view discovers the applet's server list, shows the
-current endpoint, and performs a confirmed reconnect when switching servers.
+current endpoint, and provides an explicit confirmed action to select a server
+and reconnect the router's shared tunnel. The Windows action changes DD-WRT
+only; it does not install or connect a VPN, or change local routing, on the PC.
+Endpoint switching requires the optional companion so a failed connection can
+restore the router's previous endpoint settings.
 
 ### Devices and applications
 
@@ -198,11 +202,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\contrib\windows\install-native.ps1
 ```
 
-The per-user installer creates one Desktop shortcut, deliberately creates no
-Start Menu entry, and does not launch the app. Before the first connection,
-use **Set up key via Telnet** to confirm the DD-WRT SSH fingerprint, generate
-the dedicated key, send its public half through the one-time LAN Telnet
-session, and verify strict key-only Windows OpenSSH access.
+The per-user installer creates a Desktop shortcut and a current-user Startup
+shortcut, deliberately creates no Start Menu entry, and does not launch the
+app during installation. The Startup shortcut opens the app automatically
+after Windows sign-in, including the first sign-in after a reboot. Startup
+reuses a healthy companion, restores its validated runtime from retained
+router NVRAM when `/tmp` was cleared, or falls back to native-only mode when
+the router no longer has it. It never silently rewrites a missing or
+incompatible companion. Before the first connection, use **Set up key via
+Telnet** to confirm the DD-WRT SSH fingerprint, generate the dedicated key,
+send its public half through the one-time LAN Telnet session, and verify strict
+key-only Windows OpenSSH access.
 See [Native Windows Application](docs/WINDOWS_APP.md) for the complete build,
 installation, safety, and host-key procedure.
 

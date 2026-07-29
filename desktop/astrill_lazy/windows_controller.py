@@ -57,6 +57,7 @@ class WindowsController:
         self.catalog = catalog or load_catalog(self.store.enabled_extensions)
         self.router = router or self._router_client_from_store()
         self.server_catalog = ServerCatalog((), {})
+        self.recovery_notice: str | None = None
 
     def configure_router(
         self,
@@ -181,6 +182,50 @@ class WindowsController:
         if self.store.companion_enabled:
             return self.router.status()
         return self.router.native_astrill_status()
+
+    def reconcile_status(self) -> dict[str, Any]:
+        """Resume safely after a router reboot or lost companion installation."""
+        self.recovery_notice = None
+        if not self.store.companion_enabled:
+            return self.router.native_astrill_status()
+
+        presence = self.router.companion_presence()
+        if not presence.get("installed"):
+            if presence.get("runtime"):
+                raise ControllerError(
+                    "the companion runtime exists without its persistent router "
+                    "markers; use Restore native only or a separately confirmed "
+                    "Install / upgrade before making router changes"
+                )
+            self.store.companion_enabled = False
+            self.store.save()
+            self.recovery_notice = (
+                "The router no longer has the companion. Native-only mode was "
+                "resumed; Install / upgrade remains separately confirmed."
+            )
+            return self.router.native_astrill_status()
+
+        installer = RouterInstaller(self.router)
+        check = installer.check()
+        if check.action == "none":
+            if check.status is None:
+                raise ControllerError(
+                    "the router companion passed inspection without returning status"
+                )
+            return check.status
+        if check.action == "repair":
+            result = installer.ensure(allow_install=False)
+            self.recovery_notice = (
+                "The validated companion runtime was restored from router NVRAM "
+                "after reboot."
+            )
+            return result.status
+
+        installed = check.installed_version or "unknown"
+        raise ControllerError(
+            f"router companion {installed} requires the separately confirmed "
+            f"Install / upgrade action: {check.reason}"
+        )
 
     def load_clients(self) -> list[dict[str, Any]]:
         if self.store.companion_enabled:

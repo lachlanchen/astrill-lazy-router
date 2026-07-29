@@ -467,6 +467,7 @@ class MainWindow(QMainWindow):
         self.clients: list[dict[str, Any]] = []
         self.native_settings: NativeAstrillSettings | None = None
         self._syncing_access = False
+        self._endpoint_protocol_user_selected = False
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(960, 640)
@@ -800,6 +801,14 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
+        scope = QLabel(
+            "Choose the endpoint for the router's one shared Astrill tunnel. "
+            "This controls DD-WRT only; it does not install, connect, or reroute "
+            "a VPN on this Windows computer."
+        )
+        scope.setWordWrap(True)
+        layout.addWidget(scope)
+
         row = QHBoxLayout()
         self.endpoint_search = QLineEdit()
         self.endpoint_search.setPlaceholderText("Search Astrill endpoints")
@@ -808,15 +817,25 @@ class MainWindow(QMainWindow):
         row.addWidget(QLabel("Protocol"))
         self.protocol = QComboBox()
         self.protocol.addItems(list(ASTRILL_PROTOCOL_NAMES))
+        self.protocol.activated.connect(self._endpoint_protocol_selected)
+        self.protocol.currentIndexChanged.connect(
+            lambda _index: self._sync_endpoint_action_ui()
+        )
         row.addWidget(self.protocol)
-        load = QPushButton("Load endpoints")
-        load.clicked.connect(self._load_endpoints)
-        row.addWidget(load)
-        connect = QPushButton("Connect selected")
-        connect.setObjectName("primary")
-        connect.clicked.connect(self._connect_endpoint)
-        row.addWidget(connect)
+        self.load_endpoints_button = QPushButton("Load endpoints")
+        self.load_endpoints_button.clicked.connect(self._load_endpoints)
+        row.addWidget(self.load_endpoints_button)
+        self.connect_endpoint_button = QPushButton(
+            "Connect router to selected endpoint"
+        )
+        self.connect_endpoint_button.setObjectName("primary")
+        self.connect_endpoint_button.clicked.connect(self._connect_endpoint)
+        row.addWidget(self.connect_endpoint_button)
         layout.addLayout(row)
+
+        self.endpoint_action_status = QLabel("")
+        self.endpoint_action_status.setWordWrap(True)
+        layout.addWidget(self.endpoint_action_status)
 
         self.endpoint_tree = QTreeWidget()
         self.endpoint_tree.setHeaderLabels(
@@ -837,7 +856,11 @@ class MainWindow(QMainWindow):
         self.endpoint_tree.itemDoubleClicked.connect(
             lambda _item, _column: self._connect_endpoint()
         )
+        self.endpoint_tree.currentItemChanged.connect(
+            lambda _current, _previous: self._sync_endpoint_action_ui()
+        )
         layout.addWidget(self.endpoint_tree)
+        self._sync_endpoint_action_ui()
         return page
 
     def _build_astrill_page(self) -> QWidget:
@@ -1376,17 +1399,28 @@ class MainWindow(QMainWindow):
         self._render_countries()
         self._update_status_metrics()
 
+    def _endpoint_protocol_selected(self, _index: int) -> None:
+        self._endpoint_protocol_user_selected = True
+        self._sync_endpoint_action_ui()
+
     def _render_endpoints(self) -> None:
         if not hasattr(self, "endpoint_tree"):
             return
         query = self.endpoint_search.text().strip().casefold()
         current_id = int(self.router_status.get("astrill_server_id", 0) or 0)
         connected = self.router_status.get("vpn_state") == "up"
+        selected_id = current_id
+        selected_item = self.endpoint_tree.currentItem()
+        if selected_item is not None:
+            selected_server = selected_item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(selected_server, AstrillServer):
+                selected_id = selected_server.id
         group_by_id: dict[int, str] = {}
         for region_id, servers in self.controller.server_catalog.groups.items():
             for server in servers:
                 group_by_id.setdefault(server.id, region_id)
         self.endpoint_tree.clear()
+        item_to_select: QTreeWidgetItem | None = None
         for server in self.controller.server_catalog.servers:
             if query and query not in server.name.casefold():
                 continue
@@ -1407,8 +1441,30 @@ class MainWindow(QMainWindow):
             )
             item.setData(0, Qt.ItemDataRole.UserRole, server)
             self.endpoint_tree.addTopLevelItem(item)
+            if server.id == selected_id:
+                item_to_select = item
+        if item_to_select is not None:
+            self.endpoint_tree.setCurrentItem(item_to_select)
+        self._sync_endpoint_action_ui()
 
     def _connect_endpoint(self) -> None:
+        if self.busy_count:
+            self.statusBar().showMessage(
+                "Wait for the current router action to finish.", 4000
+            )
+            return
+        if self.controller.store.read_only:
+            self._select_something(
+                "The read-only guard blocks endpoint changes. Turn it off in "
+                "Settings before connecting the router to another endpoint."
+            )
+            return
+        if not self.controller.store.companion_enabled:
+            self._select_something(
+                "Install and enable the DD-WRT companion before switching the "
+                "router's Astrill endpoint."
+            )
+            return
         item = self.endpoint_tree.currentItem()
         if item is None:
             self._select_something("Select an Astrill endpoint first.")
@@ -1417,21 +1473,114 @@ class MainWindow(QMainWindow):
         if not isinstance(server, AstrillServer):
             return
         protocol = self.protocol.currentIndex()
+        try:
+            server.endpoint_for(protocol)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Unsupported endpoint protocol", str(exc))
+            return
         detail = (
-            f"Connect the shared tunnel to {server.name} using "
-            f"{ASTRILL_PROTOCOL_NAMES[protocol]}?\n\nVPN-routed traffic will "
-            "pause briefly."
+            f"Connect the router's shared Astrill tunnel to {server.name} using "
+            f"{ASTRILL_PROTOCOL_NAMES[protocol]}?\n\nThis writes the selected "
+            "endpoint to DD-WRT and reconnects the router tunnel, so all "
+            "Astrill-routed traffic will pause briefly. It does not change this "
+            "Windows computer's VPN or local routing."
         )
         if (
-            QMessageBox.question(self, "Switch Astrill endpoint", detail)
+            QMessageBox.warning(
+                self,
+                "Switch router Astrill endpoint",
+                detail,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
             != QMessageBox.StandardButton.Yes
         ):
             return
         self._run_task(
-            "Switching Astrill endpoint",
+            f"Connecting router to {server.name}",
             lambda: self.controller.switch_server(server, protocol),
-            self._status_loaded,
+            self._endpoint_connected,
         )
+
+    def _endpoint_connected(self, status: object) -> None:
+        self._endpoint_protocol_user_selected = False
+        self._status_loaded(status)
+
+    def _sync_endpoint_action_ui(self) -> None:
+        if not hasattr(self, "connect_endpoint_button"):
+            return
+        idle = self.busy_count == 0
+        read_only = self.controller.store.read_only
+        companion_enabled = self.controller.store.companion_enabled
+        selected: AstrillServer | None = None
+        item = self.endpoint_tree.currentItem()
+        if item is not None:
+            value = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(value, AstrillServer):
+                selected = value
+
+        protocol_supported = False
+        if selected is not None:
+            try:
+                selected.endpoint_for(self.protocol.currentIndex())
+                protocol_supported = True
+            except ValueError:
+                pass
+
+        self.load_endpoints_button.setEnabled(idle)
+        self.endpoint_search.setEnabled(idle)
+        self.protocol.setEnabled(idle)
+        self.endpoint_tree.setEnabled(idle)
+        self.connect_endpoint_button.setEnabled(
+            idle
+            and not read_only
+            and companion_enabled
+            and selected is not None
+            and protocol_supported
+        )
+
+        current_id = int(self.router_status.get("astrill_server_id", 0) or 0)
+        connected = self.router_status.get("vpn_state") == "up"
+        reconnecting = selected is not None and selected.id == current_id and connected
+        self.connect_endpoint_button.setText(
+            "Reconnect router to selected endpoint"
+            if reconnecting
+            else "Connect router to selected endpoint"
+        )
+
+        if not idle:
+            message = "A router action is in progress. Endpoint controls are locked."
+        elif read_only:
+            message = (
+                "Inspection is available. Turn off the read-only guard in Settings "
+                "to connect the router to a selected endpoint."
+            )
+        elif not companion_enabled:
+            message = (
+                "Inspection is available. Install the DD-WRT companion to enable "
+                "safe endpoint switching and rollback."
+            )
+        elif selected is None:
+            message = (
+                "Select an endpoint, choose its protocol, then connect the router."
+            )
+        elif not protocol_supported:
+            message = (
+                f"{selected.name} does not offer "
+                f"{ASTRILL_PROTOCOL_NAMES[self.protocol.currentIndex()]}. "
+                "Choose another protocol or endpoint."
+            )
+        else:
+            if reconnecting:
+                message = (
+                    f"{selected.name} is connected on the router. The action will "
+                    "reconnect that shared tunnel using the chosen protocol."
+                )
+            else:
+                message = (
+                    f"Ready to connect the router's shared tunnel to {selected.name}."
+                )
+        self.endpoint_action_status.setText(message)
 
     def _load_native_settings(self) -> None:
         self._run_task(
@@ -1479,19 +1628,33 @@ class MainWindow(QMainWindow):
     def _refresh_status(self, *, quiet: bool = False) -> None:
         self._run_task(
             "Refreshing router status",
-            self.controller.refresh_status,
+            self.controller.reconcile_status,
             self._status_loaded,
             quiet=quiet,
         )
 
     def _status_loaded(self, status: object) -> None:
         self.router_status = dict(status)  # type: ignore[arg-type]
+        protocol = int(self.router_status.get("astrill_protocol", 0) or 0)
+        if (
+            not self._endpoint_protocol_user_selected
+            and 0 <= protocol < self.protocol.count()
+        ):
+            self.protocol.blockSignals(True)
+            self.protocol.setCurrentIndex(protocol)
+            self.protocol.blockSignals(False)
         self.raw_status.setPlainText(
             json.dumps(self.router_status, indent=2, sort_keys=True)
         )
         self._update_status_metrics()
         self._render_endpoints()
         self._render_countries()
+        if self.controller.recovery_notice:
+            notice = self.controller.recovery_notice
+            QTimer.singleShot(
+                0,
+                lambda: self.statusBar().showMessage(notice, 12000),
+            )
 
     def _update_status_metrics(self) -> None:
         status = self.router_status
@@ -1918,6 +2081,7 @@ class MainWindow(QMainWindow):
                 "Restore native only",
             ):
                 self.companion_action_buttons[label].setEnabled(companion_writable)
+        self._sync_endpoint_action_ui()
         self._sync_ssh_fields()
 
     def _region_choices(self) -> list[tuple[str, str]]:

@@ -14,14 +14,22 @@ Use native-only, read-only mode when:
 - a second or unfamiliar router should be audited before any change; or
 - the desktop application is being evaluated without a deployment decision.
 
-A fresh desktop configuration starts in this mode. It has no seeded policy,
-does not enable login startup, and does not install, repair, reconnect, commit,
-or otherwise modify the router.
+A fresh desktop configuration starts in this mode. It has no seeded policy and
+does not itself change platform login-startup integration, install, repair,
+reconnect, commit, or otherwise modify the router. Ubuntu startup remains
+opt-in; the native Windows installer manages its per-user Startup shortcut
+independently of router access mode.
 
-Startup still performs read-only SSH, Astrill, and companion presence checks.
-When installation is required, the GUI asks for explicit approval. Approving
-companion installation changes the local configuration to read-write companion
-mode; dismissing the dialog leaves native-only mode unchanged.
+Native-only startup performs read-only SSH, Astrill, and companion presence
+checks. For a previously confirmed companion, Windows startup can reconstruct
+the current validated runtime from its retained NVRAM package after a router
+reboot. If the router retained neither its markers nor runtime, the desktop
+falls back to native-only mode. Network unavailability never triggers that
+fallback, and a missing, stale, or inconsistent package is never silently
+installed or rewritten. When installation is required, the GUI asks for
+explicit approval. Approving companion installation changes the local
+configuration to read-write companion mode; dismissing the dialog leaves
+native-only mode unchanged.
 
 ## Safe Inspection
 
@@ -195,7 +203,7 @@ desktop application.
 | Companion-disabled mode had no independent write guard | Native Save and connection controls could still mutate DD-WRT | `read_only` now guards every router mutation path |
 | Devices always called `alctl clients` | Native-only routers could not load LAN inventory | A local parser now merges read-only DHCP, static, and ARP snapshots |
 | The noVNC unit named one developer checkout path | A clone under `astrill-lazy-router` failed after reboot | The installer now renders the actual absolute checkout path |
-| Desktop installation always enabled login startup | Evaluation changed session startup unexpectedly | Autostart is opt-in |
+| Ubuntu source installation always enabled login startup | Evaluation changed its desktop session unexpectedly | Ubuntu autostart is opt-in |
 | A Conda `python3` could resolve to Python 3.10 | The installer could create an environment below the declared Python 3.11 minimum | The installer now selects and verifies a compatible interpreter |
 | A common noVNC web port was already occupied | A second isolated test display could not bind | Display, VNC, and web ports remain separately overridable |
 | Applet endpoint count differed by one from an earlier note | A dynamic upstream list looked like a regression | Tests and docs treat the count as observed data, not a constant |

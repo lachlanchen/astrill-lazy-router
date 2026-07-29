@@ -19,8 +19,8 @@ The native Windows application provides:
 - the 261-profile service catalog and Suggested, Direct, or Astrill batch
   policy actions;
 - country-preference and shared-endpoint summaries;
-- confirmed Astrill connect and disconnect controls, plus companion-backed
-  endpoint changes;
+- confirmed Astrill connect and disconnect controls, plus a companion-backed
+  action that selects an endpoint and reconnects the router's shared tunnel;
 - installation, repair, refresh, rollback, and complete removal of the
   optional DD-WRT companion;
 - a local read-only guard that is enabled for every fresh configuration.
@@ -113,10 +113,19 @@ The installer:
   `%LOCALAPPDATA%\Programs\Astrill Lazy Router`;
 - stages an update before replacing the installed copy;
 - refuses to update while the installed application is running;
-- creates one **Desktop shortcut only**;
+- creates one Desktop shortcut and one current-user Startup shortcut;
 - removes an older same-named Start Menu shortcut;
-- does not create a Start Menu entry, enable login startup, request
-  administrator access, or launch the application.
+- does not create a Start Menu entry, request administrator access, or launch
+  the application during installation.
+
+The Startup shortcut is recreated idempotently on every install or update. It
+launches the installed app after the current user signs in, including after a
+Windows reboot; it does not run before sign-in or as a Windows service. Its
+location is:
+
+```text
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Astrill Lazy Router.lnk
+```
 
 To install a bundle built in another directory:
 
@@ -207,8 +216,24 @@ A fresh Windows configuration is:
 
 The application refreshes status on startup and every 60 seconds. In
 native-only mode those refreshes read the Astrill applet and DD-WRT state
-directly. Unlike the Ubuntu startup integration, the Windows frontend does not
-automatically install or repair the companion.
+directly.
+
+When the local configuration records a previously confirmed companion,
+refresh also reconciles router-reboot state:
+
+- a current, healthy runtime is reused as-is;
+- if the validated current package remains in NVRAM but `/tmp` was cleared,
+  the runtime is reconstructed from that stored package without rewriting
+  NVRAM;
+- if neither persistent markers nor a runtime remain, the desktop falls back
+  atomically to native-only mode and keeps **Install / upgrade** available;
+- SSH or router unavailability leaves companion mode unchanged so the next
+  monitor refresh can retry.
+
+An inconsistent runtime or a package requiring a version rewrite fails closed.
+The app never silently installs or rewrites a missing or incompatible
+companion; that still requires the separate **Install / upgrade**
+confirmation.
 
 Recommended first-use sequence:
 
@@ -222,13 +247,23 @@ Recommended first-use sequence:
 5. Select **Install / upgrade** in **Router** and confirm the exact DD-WRT
    writes. On a fresh profile that confirmation also disables the local guard;
    a failed installation restores it automatically.
-6. Apply policies only through the separate confirmation when intended.
+6. In **Endpoints**, load the server list, select a server and protocol, then
+   select **Connect router to selected endpoint**. The separate confirmation
+   writes the endpoint to DD-WRT and briefly reconnects the shared router
+   tunnel. It does not connect a VPN or change routing on the Windows PC.
+7. Apply policies only through the separate confirmation when intended.
 
 Guarded remote write operations include native Astrill setting changes,
 connection changes, companion installation, policy application, endpoint
 switching, domain refresh, rollback, and companion removal. Destructive or
 traffic-interrupting actions add confirmation dialogs, and the controller
 checks the read-only guard again even when a button remains visible.
+
+The endpoint list remains available for read-only inspection. Switching is
+enabled only while the app is idle, the read-only guard is off, the companion
+is enabled, and a server is selected. The companion transaction restores the
+previous router endpoint settings when the requested endpoint does not connect.
+All Astrill-targeted devices and policies still share that one router tunnel.
 
 The guard is an accident-prevention feature, not an authorization boundary.
 A user who can edit the configuration or invoke `ssh.exe` directly can still
@@ -255,8 +290,9 @@ Other intentional boundaries:
 - one router Astrill tunnel means one active VPN endpoint for all VPN policies;
 - routing enforcement occurs on DD-WRT, not in the Windows network stack;
 - the policy engine is currently IPv4;
-- the Windows UI does not expose Ubuntu login autostart, Polkit helpers,
-  extension management, route detection, or namespace lifecycle controls;
+- Windows login startup is installer-managed rather than exposed as an in-app
+  switch; the Windows UI does not expose Polkit helpers, extension management,
+  route detection, or namespace lifecycle controls;
 - the native app does not use or expose noVNC.
 
 ## Configuration And Uninstall
@@ -283,8 +319,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 Close the application first. `-Force` terminates only a running executable
 from the expected per-user installation directory. Uninstall removes the
-application folder and matching shortcuts but deliberately preserves user
-configuration and SSH keys.
+application folder and matching Desktop, Startup, and legacy Start Menu
+shortcuts but deliberately preserves unrelated shortcuts, user configuration,
+and SSH keys.
 
 ## Native App Versus The noVNC Launcher
 

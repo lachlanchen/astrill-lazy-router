@@ -9,6 +9,13 @@
   exits, while retaining boot startup through the lingering user manager.
 - Add a native-only, read-only first-run mode so an already-working Astrill
   router can be inspected without companion installation or router writes.
+- Start the native Windows frontend after sign-in through a per-user Startup
+  shortcut, recreate it safely on update, and remove it on uninstall without
+  adding a Start Menu entry.
+- Reconcile native Windows status after router reboot: reuse a healthy
+  companion, reconstruct its validated runtime from retained NVRAM, or fall
+  back to native-only mode when the router no longer retains it, without
+  silently rewriting a package.
 - Preserve writable companion behavior for legacy configuration files while
   adding an explicit `astrill-lazy access` guard for new deployments.
 - Add companion-free LAN client discovery and a sanitized native inspection

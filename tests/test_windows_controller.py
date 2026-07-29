@@ -373,6 +373,44 @@ def test_read_only_blocks_every_router_mutation_before_dispatch(
     assert router.write_calls == []
 
 
+def test_endpoint_switch_requires_companion_and_dispatches_selected_protocol(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+    server = make_server()
+
+    with pytest.raises(ControllerError, match="companion must be installed"):
+        controller.switch_server(server, 2)
+    assert router.write_calls == []
+
+    store.companion_enabled = True
+    assert controller.switch_server(server, 2) == {
+        "ok": True,
+        "astrill_server_id": 1,
+    }
+    assert router.write_calls == [
+        (
+            "switch",
+            {
+                "server_id": 1,
+                "sid": 7,
+                "encoded_ip": 123,
+                "port": "443",
+                "port_index": 0,
+                "protocol": 2,
+                "vpn_mode": 6,
+            },
+        )
+    ]
+
+
 def test_local_policy_service_and_device_mutations_are_saved_atomically(
     tmp_path: Path,
 ) -> None:

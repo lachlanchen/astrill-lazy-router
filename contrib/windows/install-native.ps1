@@ -108,9 +108,13 @@ if (-not (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf)) {
 $DesktopShortcut = Join-Path (
     [Environment]::GetFolderPath("Desktop")
 ) "Astrill Lazy Router.lnk"
+$StartupDirectory = [Environment]::GetFolderPath("Startup")
+$StartupShortcut = Join-Path $StartupDirectory "Astrill Lazy Router.lnk"
 $StartMenuShortcut = Join-Path (
     [Environment]::GetFolderPath("Programs")
 ) "Astrill Lazy Router.lnk"
+
+New-Item -ItemType Directory -Path $StartupDirectory -Force | Out-Null
 
 $Shell = New-Object -ComObject WScript.Shell
 try {
@@ -120,6 +124,14 @@ try {
     $Shortcut.WorkingDirectory = $InstallDirectory
     $Shortcut.IconLocation = "$InstalledExecutable,0"
     $Shortcut.Description = "Control Astrill policy routing"
+    $Shortcut.Save()
+
+    $Shortcut = $Shell.CreateShortcut($StartupShortcut)
+    $Shortcut.TargetPath = $InstalledExecutable
+    $Shortcut.Arguments = ""
+    $Shortcut.WorkingDirectory = $InstallDirectory
+    $Shortcut.IconLocation = "$InstalledExecutable,0"
+    $Shortcut.Description = "Launch Astrill Lazy Router after sign-in"
     $Shortcut.Save()
 } finally {
     if ($null -ne $Shell) {
@@ -134,4 +146,5 @@ Remove-Item -LiteralPath $StartMenuShortcut -Force `
 
 Write-Output "Installed Astrill Lazy Router at $InstallDirectory"
 Write-Output "Created Desktop shortcut: $DesktopShortcut"
+Write-Output "Enabled login startup: $StartupShortcut"
 Write-Output "The application was not launched."

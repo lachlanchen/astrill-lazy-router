@@ -83,13 +83,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 The application is installed under
 `%LOCALAPPDATA%\Programs\Astrill Lazy Router`. The installer creates one
-Desktop shortcut, removes the older same-named Start Menu shortcut, creates no
-new Start Menu entry, and does not launch the application. It needs Windows
-OpenSSH Client at runtime but does not need WSL, GTK, or noVNC.
+Desktop shortcut and one current-user Startup shortcut, removes the older
+same-named Start Menu shortcut, creates no new Start Menu entry, and does not
+launch the application during installation. The Startup shortcut opens it
+after Windows sign-in, including after a reboot. It needs Windows OpenSSH
+Client at runtime but does not need WSL, GTK, or noVNC.
 
-The Windows frontend refreshes status every 60 seconds but does not
-automatically install or repair the companion. Those actions remain explicit
-in its Router view. Follow the
+The Windows frontend refreshes status every 60 seconds. For a previously
+confirmed companion it can restore the validated current runtime from the
+package retained in router NVRAM after a reboot; this does not rewrite NVRAM.
+If the router retained no companion, it falls back to native-only mode.
+Installing or rewriting a package remains an explicit action in the Router
+view. Follow the
 [Windows build, install, and verified SSH setup](WINDOWS_APP.md) before first
 use. Its spacious native layout uses a scrollable Settings page and adapts its
 opening size to the available Windows desktop. Guided Settings onboarding can
@@ -106,7 +111,7 @@ confirmation-gated, one-time LAN Telnet session.
 | Endpoint and safe native-setting controls | Yes | Yes |
 | Per-application routing identity | Linux macvlan namespace | Not available; no Windows WFP backend |
 | Route detection and recommendations | Yes | Not exposed |
-| Extension and login-startup controls | Yes | Not exposed |
+| Extension and login-startup controls | Yes | Startup is installer-managed; no in-app switch |
 | Isolated noVNC session | Optional | Not needed |
 
 ## Isolated Ubuntu noVNC Debugging
