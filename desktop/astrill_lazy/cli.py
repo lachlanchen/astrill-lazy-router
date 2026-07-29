@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from .astrill import parse_applet
 from .autostart import (
@@ -13,6 +14,13 @@ from .autostart import (
 )
 from .catalog import load_catalog
 from .compiler import compile_rules
+from .device_policy import (
+    TrafficContext,
+    compile_country_routes,
+    decide_route,
+    load_country_networks,
+    load_device_policy,
+)
 from .installer import RouterInstaller
 from .router import RouterClient, RouterError
 from .store import ConfigStore
@@ -41,6 +49,32 @@ def build_parser() -> argparse.ArgumentParser:
     switch = subparsers.add_parser("switch", help="switch the active Astrill server")
     switch.add_argument("server_id", type=int)
     switch.add_argument("--protocol", type=int, choices=range(4), default=None)
+
+    device_policy = subparsers.add_parser(
+        "device-policy",
+        help="validate and inspect a device-local routing policy",
+    )
+    device_commands = device_policy.add_subparsers(dest="device_command", required=True)
+    validate = device_commands.add_parser(
+        "validate", help="validate a device policy without changing routes"
+    )
+    validate.add_argument("policy", type=Path)
+
+    decide = device_commands.add_parser(
+        "decide", help="evaluate one destination without changing routes"
+    )
+    decide.add_argument("policy", type=Path)
+    decide.add_argument("--application", action="append", default=[])
+    decide.add_argument("--service", action="append", default=[])
+    decide.add_argument("--domain")
+    decide.add_argument("--ip")
+    decide.add_argument("--country")
+
+    routes = device_commands.add_parser(
+        "routes", help="compile country CIDRs without changing system routes"
+    )
+    routes.add_argument("policy", type=Path)
+    routes.add_argument("country_networks", type=Path)
     return parser
 
 
@@ -63,6 +97,60 @@ def main(argv: list[str] | None = None) -> int:
                 "path": str(autostart_path()),
             }
         )
+        return 0
+
+    if arguments.command == "device-policy":
+        try:
+            policy = load_device_policy(arguments.policy)
+            if arguments.device_command == "validate":
+                _print_json(
+                    {
+                        "ok": True,
+                        "schema_version": policy.schema_version,
+                        "tunnels": len(policy.tunnels),
+                        "enabled_tunnels": sum(item.enabled for item in policy.tunnels),
+                        "country_groups": len(policy.country_groups),
+                        "rules": len(policy.rules),
+                        "enabled_rules": sum(item.enabled for item in policy.rules),
+                        "enforcing": False,
+                    }
+                )
+            elif arguments.device_command == "decide":
+                service_ids = set(arguments.service)
+                if arguments.domain:
+                    service_ids.update(_services_for_domain(arguments.domain))
+                context = TrafficContext(
+                    application_ids=tuple(arguments.application),
+                    service_ids=tuple(sorted(service_ids)),
+                    domain=arguments.domain,
+                    destination_ip=arguments.ip,
+                    country_code=arguments.country,
+                )
+                decision = decide_route(policy, context)
+                result = decision.to_dict()
+                result["context"] = {
+                    "application_ids": list(context.application_ids),
+                    "service_ids": list(context.service_ids),
+                    "domain": context.domain,
+                    "destination_ip": context.destination_ip,
+                    "country_code": context.country_code,
+                }
+                result["enforcing"] = False
+                _print_json(result)
+            elif arguments.device_command == "routes":
+                plans = compile_country_routes(
+                    policy, load_country_networks(arguments.country_networks)
+                )
+                _print_json(
+                    {
+                        "ok": True,
+                        "enforcing": False,
+                        "plans": [item.to_dict() for item in plans],
+                    }
+                )
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"astrill-lazy: {exc}", file=sys.stderr)
+            return 1
         return 0
 
     store = ConfigStore()
@@ -147,6 +235,18 @@ def main(argv: list[str] | None = None) -> int:
 
 def _print_json(value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True))
+
+
+def _services_for_domain(domain: str) -> set[str]:
+    normalized = domain.rstrip(".").casefold()
+    matches: set[str] = set()
+    for service in load_catalog().services:
+        if any(
+            normalized == seed or normalized.endswith(f".{seed}")
+            for seed in service.domains
+        ):
+            matches.add(service.id)
+    return matches
 
 
 if __name__ == "__main__":

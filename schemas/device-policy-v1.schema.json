@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lachlanchen/astrill-lazy-router/schemas/device-policy-v1.schema.json",
+  "title": "Astrill Lazy Device Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "default_route", "tunnels", "rules"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "default_route": {
+      "$ref": "#/$defs/route"
+    },
+    "tunnels": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/tunnel"
+      }
+    },
+    "country_groups": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/country_group"
+      }
+    },
+    "rules": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]{1,64}$"
+    },
+    "route": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": {
+              "const": "direct"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "tunnel_ids"],
+          "properties": {
+            "mode": {
+              "const": "tunnel"
+            },
+            "tunnel_ids": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/identifier"
+              }
+            },
+            "fallback": {
+              "enum": ["direct", "block"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "tunnel_ids"],
+          "properties": {
+            "mode": {
+              "const": "auto"
+            },
+            "tunnel_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/identifier"
+              }
+            },
+            "fallback": {
+              "enum": ["direct", "block"]
+            }
+          }
+        }
+      ]
+    },
+    "tunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "provider",
+        "region",
+        "configuration_ref"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "provider": {
+          "enum": ["astrill", "openvpn", "wireguard"]
+        },
+        "region": {
+          "$ref": "#/$defs/identifier"
+        },
+        "configuration_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "country_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "country_codes"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "country_codes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          }
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "selector", "route"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "kind": {
+          "enum": ["application", "service", "domain", "network", "country"]
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "route": {
+          "$ref": "#/$defs/route"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9999,
+          "default": 500
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  }
+}

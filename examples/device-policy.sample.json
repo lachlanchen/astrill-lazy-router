@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "default_route": {
+    "mode": "auto",
+    "tunnel_ids": [
+      "los-angeles",
+      "tokyo",
+      "singapore"
+    ],
+    "fallback": "direct"
+  },
+  "tunnels": [
+    {
+      "id": "los-angeles",
+      "name": "Los Angeles",
+      "provider": "astrill",
+      "region": "united-states",
+      "configuration_ref": "profiles/los-angeles",
+      "enabled": true
+    },
+    {
+      "id": "tokyo",
+      "name": "Tokyo",
+      "provider": "astrill",
+      "region": "japan",
+      "configuration_ref": "profiles/tokyo",
+      "enabled": true
+    },
+    {
+      "id": "singapore",
+      "name": "Singapore",
+      "provider": "astrill",
+      "region": "singapore",
+      "configuration_ref": "profiles/singapore",
+      "enabled": true
+    }
+  ],
+  "country_groups": [
+    {
+      "id": "europe",
+      "name": "Europe",
+      "country_codes": [
+        "AD",
+        "AL",
+        "AT",
+        "BA",
+        "BE",
+        "BG",
+        "BY",
+        "CH",
+        "CZ",
+        "DE",
+        "DK",
+        "EE",
+        "ES",
+        "FI",
+        "FR",
+        "GB",
+        "GR",
+        "HR",
+        "HU",
+        "IE",
+        "IS",
+        "IT",
+        "LI",
+        "LT",
+        "LU",
+        "LV",
+        "MC",
+        "MD",
+        "ME",
+        "MK",
+        "MT",
+        "NL",
+        "NO",
+        "PL",
+        "PT",
+        "RO",
+        "RS",
+        "RU",
+        "SE",
+        "SI",
+        "SK",
+        "SM",
+        "UA",
+        "VA"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "uu-remote-direct",
+      "name": "UU Remote",
+      "kind": "service",
+      "selector": "uu-remote",
+      "route": {
+        "mode": "direct"
+      },
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "id": "wechat-direct",
+      "name": "WeChat",
+      "kind": "service",
+      "selector": "wechat",
+      "route": {
+        "mode": "direct"
+      },
+      "priority": 110,
+      "enabled": true
+    },
+    {
+      "id": "taobao-direct",
+      "name": "Taobao",
+      "kind": "service",
+      "selector": "taobao",
+      "route": {
+        "mode": "direct"
+      },
+      "priority": 120,
+      "enabled": true
+    },
+    {
+      "id": "meituan-direct",
+      "name": "Meituan",
+      "kind": "service",
+      "selector": "meituan",
+      "route": {
+        "mode": "direct"
+      },
+      "priority": 130,
+      "enabled": true
+    },
+    {
+      "id": "china-direct",
+      "name": "China destinations",
+      "kind": "country",
+      "selector": "CN",
+      "route": {
+        "mode": "direct"
+      },
+      "priority": 500,
+      "enabled": true
+    },
+    {
+      "id": "hong-kong-singapore",
+      "name": "Hong Kong destinations",
+      "kind": "country",
+      "selector": "HK",
+      "route": {
+        "mode": "tunnel",
+        "tunnel_ids": [
+          "singapore"
+        ],
+        "fallback": "direct"
+      },
+      "priority": 500,
+      "enabled": true
+    },
+    {
+      "id": "japan-tokyo",
+      "name": "Japan destinations",
+      "kind": "country",
+      "selector": "JP",
+      "route": {
+        "mode": "tunnel",
+        "tunnel_ids": [
+          "tokyo"
+        ],
+        "fallback": "direct"
+      },
+      "priority": 500,
+      "enabled": true
+    },
+    {
+      "id": "singapore-local",
+      "name": "Singapore destinations",
+      "kind": "country",
+      "selector": "SG",
+      "route": {
+        "mode": "tunnel",
+        "tunnel_ids": [
+          "singapore"
+        ],
+        "fallback": "direct"
+      },
+      "priority": 500,
+      "enabled": true
+    },
+    {
+      "id": "taiwan-tokyo",
+      "name": "Taiwan destinations",
+      "kind": "country",
+      "selector": "TW",
+      "route": {
+        "mode": "tunnel",
+        "tunnel_ids": [
+          "tokyo"
+        ],
+        "fallback": "direct"
+      },
+      "priority": 500,
+      "enabled": true
+    },
+    {
+      "id": "europe-auto",
+      "name": "Europe destinations",
+      "kind": "country",
+      "selector": "europe",
+      "route": {
+        "mode": "auto",
+        "tunnel_ids": [
+          "los-angeles",
+          "tokyo",
+          "singapore"
+        ],
+        "fallback": "direct"
+      },
+      "priority": 500,
+      "enabled": true
+    },
+    {
+      "id": "united-states-la",
+      "name": "United States destinations",
+      "kind": "country",
+      "selector": "US",
+      "route": {
+        "mode": "tunnel",
+        "tunnel_ids": [
+          "los-angeles"
+        ],
+        "fallback": "direct"
+      },
+      "priority": 500,
+      "enabled": true
+    }
+  ]
+}

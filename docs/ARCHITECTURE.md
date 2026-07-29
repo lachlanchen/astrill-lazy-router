@@ -11,6 +11,12 @@ Astrill Lazy Router has three deliberately small trust domains:
 3. Astrill continues to own its tunnel, DNS behavior, low-order marks, server
    configuration, and OpenVPN process.
 
+The device-local policy model is a fourth, currently non-enforcing trust
+domain. It validates Direct and multi-tunnel decisions without touching the
+router or host routes. Platform-specific privileged backends remain separate
+and must consume the same versioned policy only after opening their own
+provider sessions. See [Device-local routing](DEVICE_ROUTING.md).
+
 The desktop sends a versioned, tab-separated compiled document over key-only
 SSH. The router never parses desktop JSON and never executes catalog code.
 

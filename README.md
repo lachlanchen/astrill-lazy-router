@@ -24,6 +24,9 @@ The current deployment provides:
 - an audited native-only restore that disables automatic companion reinstall;
 - discovery and switching of all 178 server endpoints in the installed Astrill
   applet;
+- a validated, non-enforcing device policy schema for Direct, fixed-tunnel,
+  and three-endpoint Auto routing by app, service, domain, network, or
+  destination country;
 - an encrypted, round-trip-verified recovery backup.
 
 The current deployment keeps `UU Remote`, `WeChat`, `Taobao`, and `Meituan`
@@ -48,6 +51,7 @@ astrill-lazy refresh
 astrill-lazy rollback
 astrill-lazy install-router
 astrill-lazy autostart status
+astrill-lazy device-policy validate examples/device-policy.sample.json
 ```
 
 The SSH target defaults to the `astrill-router` host alias. The desktop
@@ -100,6 +104,7 @@ repository. Native credentials are never read by the desktop settings mirror.
 - [Desktop application](docs/DESKTOP_APP.md)
 - [Router installation and rollback](docs/ROUTER_INSTALL.md)
 - [Rule model](docs/RULE_MODEL.md)
+- [Device-local routing](docs/DEVICE_ROUTING.md)
 - [Extensions](docs/EXTENSIONS.md)
 - [Backup and restore](docs/BACKUP_RESTORE.md)
 - [Security](docs/SECURITY.md)

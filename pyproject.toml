@@ -45,6 +45,9 @@ where = ["desktop"]
   "router/bootstrap.sh",
   "router/VERSION"
 ]
+"share/astrill-lazy/schemas" = [
+  "schemas/device-policy-v1.schema.json"
+]
 "libexec" = ["helpers/astrill-lazy-netns"]
 "share/applications" = [
   "data/io.github.lachlanchen.AstrillLazyRouter.desktop"
