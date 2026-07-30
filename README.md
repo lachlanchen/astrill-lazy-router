@@ -413,6 +413,7 @@ firewall behavior, and Astrill integration must be verified independently.
 | [Router installation](docs/ROUTER_INSTALL.md) | Prerequisites, installation, persistence, operations, and rollback |
 | [Native-only operation](docs/NATIVE_ONLY.md) | Safe inspection, write guard, second-router evidence, and DD-WRT SSH lessons |
 | [Rule model](docs/RULE_MODEL.md) | Selectors, priorities, compilation, and native composition |
+| [Hybrid policy storage](docs/HYBRID_POLICY_STORAGE.md) | Proposed persistent core, owner-scoped RAM overlays, reboot restoration, and route-intent migration |
 | [Device-local routing](docs/DEVICE_ROUTING.md) | Validated non-enforcing multi-endpoint policy model |
 | [Extensions](docs/EXTENSIONS.md) | Data-only service, country, and region catalogs |
 | [Backup and restore](docs/BACKUP_RESTORE.md) | Encrypted backup boundaries and recovery |
