@@ -264,13 +264,13 @@ Recommended first-use sequence:
    writes. On a fresh profile that confirmation also disables the local guard;
    a failed installation restores it automatically.
 6. In **Endpoints**, load the server list, select a server and protocol, then
-   select **Connect router to selected endpoint**. The separate confirmation
+   add or remove its router favorite as needed. **Auto reconnect to next
+   favorite server** and **Start automatically after router boot** mirror the
+   corresponding native Astrill settings. Select **Connect router to selected
+   endpoint** only when changing the active tunnel; its separate confirmation
    writes the endpoint to DD-WRT and briefly reconnects the shared router
    tunnel. It does not connect a VPN or change routing on the Windows PC.
-7. To change DD-WRT's native Astrill favorites, select **Sync favorites**,
-   choose an endpoint, and use **Add selected favorite** or **Remove selected
-   favorite**. Review the separate confirmation before approving the write.
-8. Apply policies only through the separate confirmation when intended.
+7. Apply policies only through the separate confirmation when intended.
 
 Guarded remote write operations include native Astrill setting changes,
 connection changes, companion installation, policy application, endpoint
@@ -283,6 +283,15 @@ enabled only while the app is idle, the read-only guard is off, the companion
 is enabled, and a server is selected. The companion transaction restores the
 previous router endpoint settings when the requested endpoint does not connect.
 All Astrill-targeted devices and policies still share that one router tunnel.
+
+Favorites do not require the companion. Each endpoint row displays the
+router's native favorite state; **Add selected favorite** and **Remove selected
+favorite** merge against a fresh `astrill_favlist` read, commit once, and
+render the verified readback. **Sync from router** and page-demand reads bring
+favorites plus the two connection-behavior checkboxes back from Astrill's
+router page. Favorite and behavior writes refuse to replace pending edits in
+the full **Astrill** view; synchronization preserves the draft while updating
+the read-only favorite summary and endpoint controls.
 
 **Test PC latency** is a separate, manual inspection action. It can test the
 selected endpoint, endpoints visible under the current search, or all loaded
@@ -319,7 +328,7 @@ filter.
 
 The endpoint table's **Favorite** column mirrors native Astrill favorite
 membership from DD-WRT. Loading or reloading the endpoint catalog schedules
-one favorite read after the catalog is available. **Sync favorites** performs
+one favorite read after the catalog is available. **Sync from router** performs
 the same read explicitly, and a completed favorite or native-settings action
 applies its verified readback. These are event-driven reads; the Windows app
 does not schedule a recurring SSH poll.

@@ -434,3 +434,84 @@ def test_failed_favorite_sync_preserves_last_valid_state_and_finishes_loading(
     assert rows[favorite.server_id].text(ENDPOINT_FAVORITE_COLUMN) == "★ Favorite"
     assert "existing GUI state preserved" in window.endpoint_favorite_status.text()
     window.close()
+
+
+def test_endpoint_connection_behavior_follows_native_readback(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, _servers = _window(tmp_path, monkeypatch)
+    window._native_settings_loaded(
+        NativeAstrillSettings.from_dict(
+            {
+                "astrill_favlist": "",
+                "astrill_autocycle": "1",
+                "astrill_autostart": "0",
+            }
+        )
+    )
+    assert window.endpoint_autocycle.isChecked()
+    assert not window.endpoint_autostart.isChecked()
+
+    window._native_settings_loaded(
+        NativeAstrillSettings.from_dict(
+            {
+                "astrill_favlist": "",
+                "astrill_autocycle": "0",
+                "astrill_autostart": "1",
+            }
+        )
+    )
+    assert not window.endpoint_autocycle.isChecked()
+    assert window.endpoint_autostart.isChecked()
+    window.close()
+
+
+def test_endpoint_connection_behavior_writes_only_selected_key(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, _servers = _window(tmp_path, monkeypatch)
+    window.controller.store.read_only = False
+    initial = NativeAstrillSettings.from_dict(
+        {
+            "astrill_favlist": "",
+            "astrill_autocycle": "1",
+            "astrill_autostart": "0",
+        }
+    )
+    window._native_settings_loaded(initial)
+    changes: list[dict[str, object]] = []
+
+    def save_native_settings(values: dict[str, object]) -> NativeAstrillSettings:
+        changes.append(values)
+        return NativeAstrillSettings.from_dict({**initial.values, **values})
+
+    def run_now(
+        _label: str,
+        function: object,
+        success: object = None,
+        **options: object,
+    ) -> None:
+        result = function()  # type: ignore[operator]
+        if success is not None:
+            success(result)  # type: ignore[operator]
+        finished = options.get("finished_callback")
+        if finished is not None:
+            finished()  # type: ignore[operator]
+
+    monkeypatch.setattr(
+        window.controller,
+        "save_native_settings",
+        save_native_settings,
+    )
+    monkeypatch.setattr(window, "_run_task", run_now)
+
+    window.endpoint_autostart.click()
+
+    assert changes == [{"astrill_autostart": "1"}]
+    assert window.endpoint_autostart.isChecked()
+    assert window.endpoint_autocycle.isChecked()
+    window.close()

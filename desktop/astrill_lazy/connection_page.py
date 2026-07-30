@@ -177,13 +177,13 @@ class AstrillConnectionPage(Gtk.Box):
             ),
             (
                 "astrill_autocycle",
-                "Cycle favorite endpoints",
-                "Reconnect through saved favorites",
+                "Auto reconnect to next favorite server",
+                "Try the next saved endpoint if the VPN drops",
             ),
             (
                 "astrill_autostart",
-                "Connect after router boot",
-                "Native Astrill startup",
+                "Start automatically after router boot",
+                "Connect Astrill when DD-WRT starts",
             ),
         ):
             switch = Gtk.Switch()

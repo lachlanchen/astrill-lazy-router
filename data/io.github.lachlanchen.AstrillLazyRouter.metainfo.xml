@@ -27,9 +27,9 @@
   <releases>
     <release version="0.2.9" date="2026-07-30">
       <description>
-        <p>Adds confirmed bidirectional Windows endpoint favorite
-        synchronization with fresh reads, concurrent-change protection,
-        one-commit replacement, and exact readback without recurring
+        <p>Adds confirmed bidirectional native endpoint favorites with
+        concurrent-change protection plus synchronized next-favorite
+        reconnect and router-boot startup controls, without recurring
         polling or reconnecting Astrill.</p>
       </description>
     </release>

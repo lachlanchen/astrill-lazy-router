@@ -19,6 +19,7 @@ from .astrill import (
     AstrillServer,
     group_by_region,
     parse_applet,
+    parse_astrill_favorites,
 )
 from .astrill_install import (
     ASTRILL_INSTALL_TEMPLATE,
@@ -165,6 +166,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.endpoint_latency_pending: set[int] = set()
         self.endpoint_sort_field: EndpointSortField = "applet"
         self.endpoint_sort_descending = False
+        self.endpoint_native_pending: set[str] = set()
+        self.endpoint_favorite_pending: dict[int, bool] = {}
         self.clients: list[dict[str, Any]] = []
         self._clients_loading = False
         self._clients_loaded = False
@@ -178,6 +181,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._updating_autostart = False
         self._updating_protocol = False
         self._updating_astrill_connection = False
+        self._updating_endpoint_preferences = False
         self._protocol_user_selected = False
         self._astrill_install_prompted = False
         self._companion_install_prompted = False
@@ -588,6 +592,61 @@ class MainWindow(Adw.ApplicationWindow):
         )
         banner.set_revealed(True)
         content.append(banner)
+
+        behavior_heading = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        behavior_title = Gtk.Label(label="Router Connection")
+        behavior_title.set_xalign(0)
+        behavior_title.set_hexpand(True)
+        behavior_title.add_css_class("route-label")
+        behavior_heading.append(behavior_title)
+        full_settings = _button_with_icon(
+            "Full settings",
+            "preferences-system-symbolic",
+            lambda _button: self._show_connection(),
+        )
+        full_settings.add_css_class("compact-button")
+        behavior_heading.append(full_settings)
+        content.append(behavior_heading)
+
+        behavior_list = Gtk.ListBox()
+        behavior_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        behavior_list.add_css_class("catalog-list")
+        self.endpoint_autocycle_switch = Gtk.Switch()
+        self.endpoint_autocycle_switch.set_valign(Gtk.Align.CENTER)
+        self.endpoint_autocycle_row = Adw.ActionRow(
+            title="Auto reconnect to next favorite server",
+            subtitle="Waiting for native Astrill settings",
+        )
+        self.endpoint_autocycle_row.set_use_markup(False)
+        self.endpoint_autocycle_row.add_prefix(
+            Gtk.Image.new_from_icon_name("view-refresh-symbolic")
+        )
+        self.endpoint_autocycle_row.add_suffix(self.endpoint_autocycle_switch)
+        behavior_list.append(self.endpoint_autocycle_row)
+        self.endpoint_autostart_switch = Gtk.Switch()
+        self.endpoint_autostart_switch.set_valign(Gtk.Align.CENTER)
+        self.endpoint_autostart_row = Adw.ActionRow(
+            title="Start automatically after router boot",
+            subtitle="Waiting for native Astrill settings",
+        )
+        self.endpoint_autostart_row.set_use_markup(False)
+        self.endpoint_autostart_row.add_prefix(
+            Gtk.Image.new_from_icon_name("system-run-symbolic")
+        )
+        self.endpoint_autostart_row.add_suffix(self.endpoint_autostart_switch)
+        behavior_list.append(self.endpoint_autostart_row)
+        content.append(behavior_list)
+        self.endpoint_autocycle_switch.connect(
+            "notify::active",
+            self._endpoint_preference_toggled,
+            "astrill_autocycle",
+        )
+        self.endpoint_autostart_switch.connect(
+            "notify::active",
+            self._endpoint_preference_toggled,
+            "astrill_autostart",
+        )
+
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.location_search = Gtk.SearchEntry()
         self.location_search.set_placeholder_text("Search Astrill endpoints")
@@ -617,6 +676,17 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.protocol_dropdown.connect("notify::selected", self._on_protocol_selected)
         controls.append(self.protocol_dropdown)
+        self.endpoint_sync_button = Gtk.Button.new_from_icon_name(
+            "view-refresh-symbolic"
+        )
+        self.endpoint_sync_button.set_tooltip_text(
+            "Sync favorites and connection behavior from the router"
+        )
+        self.endpoint_sync_button.connect(
+            "clicked",
+            lambda _button: self.refresh_native_settings(quiet=False),
+        )
+        controls.append(self.endpoint_sync_button)
         self.endpoint_latency_button = _button_with_icon(
             "Ping",
             "network-transmit-receive-symbolic",
@@ -633,6 +703,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.location_list.add_css_class("catalog-list")
         content.append(self.location_list)
         content.append(_vertical_spacer())
+        self._sync_endpoint_connection_controls()
         self._render_locations()
         return _scroll_page(content)
 
@@ -947,6 +1018,15 @@ class MainWindow(Adw.ApplicationWindow):
             self.refresh_native_settings(quiet=True, force_native=True)
         if page_id == "connection" and self.native_settings is None:
             self.refresh_native_settings(quiet=True, force_connection=True)
+        if page_id == "locations":
+            self._sync_endpoint_connection_controls()
+            self._render_locations()
+        if (
+            page_id == "locations"
+            and self.servers is not None
+            and self.native_settings is not None
+        ):
+            self.refresh_native_settings(quiet=True)
 
     def _show_services(self) -> None:
         self.nav_list.select_row(self.nav_rows["services"])
@@ -1505,6 +1585,8 @@ class MainWindow(Adw.ApplicationWindow):
         current_id = int(self.router_status.get("astrill_server_id", 0))
         tunnel_connected = self.router_status.get("vpn_state") == "up"
         visible = self._visible_location_servers()
+        favorite_ids = self._endpoint_favorite_ids()
+        selected_protocol = self.protocol_dropdown.get_selected()
         self.location_list.append(self._endpoint_header_row())
         for server in visible:
             configured = server.id == current_id
@@ -1530,6 +1612,51 @@ class MainWindow(Adw.ApplicationWindow):
                 row.add_prefix(configured_icon)
             else:
                 row.add_prefix(Gtk.Image.new_from_icon_name("network-vpn-symbolic"))
+            favorite = Gtk.ToggleButton()
+            router_favorite = favorite_ids is not None and server.id in favorite_ids
+            is_favorite = self.endpoint_favorite_pending.get(
+                server.id,
+                router_favorite,
+            )
+            favorite.set_active(is_favorite)
+            favorite.set_child(
+                Gtk.Image.new_from_icon_name(
+                    "starred-symbolic" if is_favorite else "non-starred-symbolic"
+                )
+            )
+            favorite.add_css_class("flat")
+            favorite.set_size_request(38, -1)
+            favorite.set_valign(Gtk.Align.CENTER)
+            favorite.set_tooltip_text(
+                "Remove from router favorites"
+                if is_favorite
+                else "Add to router favorites"
+            )
+            try:
+                server.endpoint_for(selected_protocol)
+            except ValueError:
+                favorite_supported = False
+                favorite.set_tooltip_text(
+                    "This endpoint does not support the selected protocol"
+                )
+            else:
+                favorite_supported = True
+            favorite.set_sensitive(
+                favorite_ids is not None
+                and favorite_supported
+                and not self.store.read_only
+                and self.busy_count == 0
+                and not self._endpoint_connection_edits_dirty()
+                and "astrill_favlist" not in self.endpoint_native_pending
+            )
+            favorite.connect(
+                "toggled",
+                lambda button, item=server: self._endpoint_favorite_toggled(
+                    button,
+                    item,
+                ),
+            )
+            row.add_suffix(favorite)
             country = Gtk.Label(label=server.country_name())
             country.add_css_class("endpoint-country")
             country.set_size_request(126, -1)
@@ -1574,6 +1701,10 @@ class MainWindow(Adw.ApplicationWindow):
         row.set_selectable(False)
         row.add_css_class("endpoint-header")
         row.add_prefix(Gtk.Image.new_from_icon_name("network-server-symbolic"))
+        favorite = Gtk.Image.new_from_icon_name("starred-symbolic")
+        favorite.set_size_request(38, -1)
+        favorite.set_tooltip_text("Router favorite")
+        row.add_suffix(favorite)
         row.add_suffix(self._endpoint_sort_button("Country", "country", 126))
         row.add_suffix(self._endpoint_sort_button("Ping", "latency", 92))
         action = Gtk.Label(label="Action")
@@ -1581,6 +1712,181 @@ class MainWindow(Adw.ApplicationWindow):
         action.set_xalign(0.5)
         row.add_suffix(action)
         return row
+
+    def _endpoint_favorite_ids(self) -> set[int] | None:
+        if self.native_settings is None:
+            return None
+        try:
+            favorites = parse_astrill_favorites(
+                self.native_settings.get("astrill_favlist")
+            )
+        except ValueError:
+            return None
+        return {favorite.server_id for favorite in favorites}
+
+    def _endpoint_connection_edits_dirty(self) -> bool:
+        return self.connection_page.dirty or (
+            hasattr(self, "native_page") and self.native_page.dirty
+        )
+
+    def _endpoint_favorite_toggled(
+        self,
+        button: Gtk.ToggleButton,
+        server: AstrillServer,
+    ) -> None:
+        enabled = button.get_active()
+        favorite_ids = self._endpoint_favorite_ids()
+        if favorite_ids is None:
+            self.toast("Router favorites could not be parsed; no change was written")
+            self._render_locations()
+            return
+        if enabled == (server.id in favorite_ids):
+            return
+        if self.busy_count != 0:
+            self.toast("Wait for the current router action to finish")
+            self._render_locations()
+            return
+        if not self._require_write_access("changing an endpoint favorite"):
+            self._render_locations()
+            return
+        if self._endpoint_connection_edits_dirty():
+            self.toast("Save or reload pending Astrill edits before favorites")
+            self._render_locations()
+            return
+        protocol = self.protocol_dropdown.get_selected()
+        try:
+            server.endpoint_for(protocol)
+        except ValueError as exc:
+            self.toast(str(exc))
+            self._render_locations()
+            return
+
+        self.endpoint_native_pending.add("astrill_favlist")
+        self.endpoint_favorite_pending[server.id] = enabled
+        self._render_locations()
+
+        def success(settings: NativeAstrillSettings) -> None:
+            self.endpoint_native_pending.discard("astrill_favlist")
+            self.endpoint_favorite_pending.pop(server.id, None)
+            self._native_settings_refreshed(
+                settings,
+                notify=False,
+                force_connection=True,
+            )
+            verb = "Added" if enabled else "Removed"
+            self.toast(f"{verb} {server.name} {'to' if enabled else 'from'} favorites")
+
+        self._run_task(
+            lambda: self.router.set_native_astrill_favorite(
+                server,
+                protocol,
+                enabled,
+            ),
+            success,
+            "Could not update endpoint favorite",
+        )
+
+    def _endpoint_preference_toggled(
+        self,
+        switch: Gtk.Switch,
+        _param: Any,
+        key: str,
+    ) -> None:
+        if self._updating_endpoint_preferences:
+            return
+        if self.native_settings is None:
+            self.toast("Sync native Astrill settings before changing this option")
+            self._sync_endpoint_connection_controls()
+            return
+        enabled = switch.get_active()
+        if enabled == self.native_settings.enabled(key):
+            return
+        if self.busy_count != 0:
+            self.toast("Wait for the current router action to finish")
+            self._sync_endpoint_connection_controls()
+            return
+        if not self._require_write_access("changing router connection behavior"):
+            self._sync_endpoint_connection_controls()
+            return
+        if self._endpoint_connection_edits_dirty():
+            self.toast("Save or reload pending Astrill edits first")
+            self._sync_endpoint_connection_controls()
+            return
+
+        self.endpoint_native_pending.add(key)
+        self._sync_endpoint_connection_controls()
+
+        def success(settings: NativeAstrillSettings) -> None:
+            self.endpoint_native_pending.discard(key)
+            self._native_settings_refreshed(
+                settings,
+                notify=False,
+                force_connection=True,
+            )
+            label = (
+                "Automatic favorite failover"
+                if key == "astrill_autocycle"
+                else "Router-boot automatic connection"
+            )
+            self.toast(f"{label} {'enabled' if enabled else 'disabled'}")
+
+        self._run_task(
+            lambda: self.router.update_native_astrill_settings(
+                {key: "1" if enabled else "0"}
+            ),
+            success,
+            "Could not update router connection behavior",
+        )
+
+    def _sync_endpoint_connection_controls(self) -> None:
+        if not hasattr(self, "endpoint_autocycle_switch"):
+            return
+        settings = self.native_settings
+        favorite_ids = self._endpoint_favorite_ids()
+        self._updating_endpoint_preferences = True
+        try:
+            if "astrill_autocycle" not in self.endpoint_native_pending:
+                self.endpoint_autocycle_switch.set_active(
+                    settings is not None and settings.enabled("astrill_autocycle")
+                )
+            if "astrill_autostart" not in self.endpoint_native_pending:
+                self.endpoint_autostart_switch.set_active(
+                    settings is not None and settings.enabled("astrill_autostart")
+                )
+        finally:
+            self._updating_endpoint_preferences = False
+
+        if settings is None:
+            cycle_subtitle = "Waiting for native Astrill settings"
+            autostart_subtitle = "Waiting for native Astrill settings"
+        elif favorite_ids is None:
+            cycle_subtitle = "The router favorite list is invalid and was preserved"
+            autostart_subtitle = "Connect Astrill when DD-WRT starts"
+        else:
+            count = len(favorite_ids)
+            cycle_subtitle = (
+                f"{count} saved endpoint{'' if count == 1 else 's'}; "
+                "try the next one if VPN drops"
+            )
+            autostart_subtitle = "Connect Astrill when DD-WRT starts"
+        self.endpoint_autocycle_row.set_subtitle(cycle_subtitle)
+        self.endpoint_autostart_row.set_subtitle(autostart_subtitle)
+
+        editable = (
+            settings is not None
+            and not self.store.read_only
+            and self.busy_count == 0
+            and not self._endpoint_connection_edits_dirty()
+        )
+        self.endpoint_autocycle_switch.set_sensitive(
+            editable and "astrill_autocycle" not in self.endpoint_native_pending
+        )
+        self.endpoint_autostart_switch.set_sensitive(
+            editable and "astrill_autostart" not in self.endpoint_native_pending
+        )
+        self.endpoint_sync_button.set_sensitive(
+            self.busy_count == 0 and not self._native_settings_loading
+        )
 
     def _endpoint_sort_button(
         self,
@@ -2362,6 +2668,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.router_status,
             force=force_connection,
         )
+        self._sync_endpoint_connection_controls()
+        self._render_locations()
         self._render_services()
         if notify:
             self.toast("Native Astrill settings synchronized")
@@ -2942,6 +3250,8 @@ class MainWindow(Adw.ApplicationWindow):
             self._render_countries()
             self._render_locations()
             self._update_status()
+            if self.native_settings is None:
+                self.refresh_native_settings(quiet=True)
 
         self._run_task(load, success, "Could not load Astrill endpoints")
 
@@ -3331,6 +3641,14 @@ class MainWindow(Adw.ApplicationWindow):
             self.endpoint_latency_button.set_sensitive(self.servers is not None)
             self._render_locations()
         if prefix in {
+            "Could not update endpoint favorite",
+            "Could not update router connection behavior",
+        }:
+            self.endpoint_native_pending.clear()
+            self.endpoint_favorite_pending.clear()
+            self._sync_endpoint_connection_controls()
+            self._render_locations()
+        if prefix in {
             "Could not apply Astrill connection",
             "Could not change Astrill connection",
             "Could not save Astrill connection",
@@ -3348,6 +3666,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.native_page.set_busy(self.busy_count != 0)
         self.connection_page.set_busy(self.busy_count != 0)
+        self._sync_endpoint_connection_controls()
         self._update_recommendation_controls()
 
     def _require_write_access(self, action: str) -> bool:

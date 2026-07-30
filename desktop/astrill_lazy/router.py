@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .astrill import AstrillConnectionSelection
+from .astrill import (
+    AstrillConnectionSelection,
+    AstrillFavorite,
+    AstrillServer,
+    update_astrill_favorite_list,
+)
 from .native_settings import (
     SAFE_NATIVE_ASTRILL_KEYS,
     NativeAstrillSettings,
@@ -406,6 +411,30 @@ done
             {"astrill_favlist": normalized},
         )
         return settings
+
+    def set_native_astrill_favorite(
+        self,
+        server: AstrillServer,
+        protocol: int,
+        enabled: bool,
+    ) -> NativeAstrillSettings:
+        settings = self.native_astrill_settings()
+        current = settings.get("astrill_favlist")
+        record = (
+            AstrillFavorite.from_selection(
+                AstrillConnectionSelection.from_server(server, protocol, 0)
+            )
+            if enabled
+            else None
+        )
+        replacement = update_astrill_favorite_list(
+            current,
+            server.id,
+            record,
+        )
+        if replacement == current:
+            return settings
+        return self.replace_astrill_favorites(current, replacement)
 
     def save_astrill_connection(
         self,

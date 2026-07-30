@@ -603,6 +603,8 @@ class MainWindow(QMainWindow):
         self.native_settings: NativeAstrillSettings | None = None
         self._native_settings_loading = False
         self._syncing_access = False
+        self._syncing_endpoint_preferences = False
+        self._endpoint_native_pending: set[str] = set()
         self._endpoint_protocol_user_selected = False
 
         self.setWindowTitle(APP_NAME)
@@ -1008,6 +1010,7 @@ class MainWindow(QMainWindow):
         self.endpoint_favorite_sync_button.clicked.connect(
             self._sync_endpoint_favorites
         )
+        self.endpoint_favorite_sync_button.setText("Sync from router")
         favorite_layout.addWidget(self.endpoint_favorite_sync_button)
         self.endpoint_favorite_button = QPushButton("Add selected favorite")
         self.endpoint_favorite_button.setObjectName("favoriteAction")
@@ -1016,6 +1019,31 @@ class MainWindow(QMainWindow):
         )
         favorite_layout.addWidget(self.endpoint_favorite_button)
         layout.addWidget(favorite_card)
+
+        behavior = QGroupBox("Router connection behavior")
+        behavior_layout = QHBoxLayout(behavior)
+        self.endpoint_autocycle = QCheckBox("Auto reconnect to next favorite server")
+        self.endpoint_autocycle.setToolTip(
+            "Try the next saved endpoint if the router VPN drops."
+        )
+        self.endpoint_autocycle.toggled.connect(
+            lambda checked: self._endpoint_preference_changed(
+                "astrill_autocycle",
+                checked,
+            )
+        )
+        behavior_layout.addWidget(self.endpoint_autocycle)
+        self.endpoint_autostart = QCheckBox("Start automatically after router boot")
+        self.endpoint_autostart.setToolTip("Connect native Astrill when DD-WRT starts.")
+        self.endpoint_autostart.toggled.connect(
+            lambda checked: self._endpoint_preference_changed(
+                "astrill_autostart",
+                checked,
+            )
+        )
+        behavior_layout.addWidget(self.endpoint_autostart)
+        behavior_layout.addStretch(1)
+        layout.addWidget(behavior)
 
         latency_card = QFrame()
         latency_card.setObjectName("latencyCard")
@@ -1105,6 +1133,7 @@ class MainWindow(QMainWindow):
         self.endpoint_tree.itemDoubleClicked.connect(self._endpoint_double_clicked)
         self.endpoint_tree.currentItemChanged.connect(self._endpoint_selection_changed)
         layout.addWidget(self.endpoint_tree)
+        self._sync_endpoint_connection_controls()
         self._sync_endpoint_action_ui()
         return page
 
@@ -1266,8 +1295,12 @@ class MainWindow(QMainWindow):
         self.page_subtitle.setText(subtitle)
         if title == "Devices" and not self._clients_loaded:
             self._load_devices(quiet=True)
-        if title == "Endpoints" and not self._endpoint_catalog_loaded:
-            self._load_endpoints(quiet=True)
+        if title == "Endpoints":
+            self._sync_endpoint_action_ui()
+            if not self._endpoint_catalog_loaded:
+                self._load_endpoints(quiet=True)
+            elif not self._native_settings_loading and not self.native_page.dirty:
+                self._load_native_settings()
         if page_id == "astrill":
             if not self._clients_loaded:
                 self._load_devices(quiet=True)
@@ -1688,6 +1721,79 @@ class MainWindow(QMainWindow):
             return None
         value = item.data(ENDPOINT_NAME_COLUMN, Qt.ItemDataRole.UserRole)
         return value if isinstance(value, AstrillServer) else None
+
+    def _endpoint_preference_changed(self, key: str, checked: bool) -> None:
+        if self._syncing_endpoint_preferences:
+            return
+        if self.native_settings is None:
+            self._sync_endpoint_connection_controls()
+            return
+        if self.controller.store.read_only:
+            self._sync_endpoint_connection_controls()
+            self._select_something(
+                "Turn off the read-only guard in Settings before changing "
+                "router connection behavior."
+            )
+            return
+        if self.native_page.dirty:
+            self._sync_endpoint_connection_controls()
+            QMessageBox.information(
+                self,
+                "Unsaved Astrill settings",
+                "Save or reload the pending edits on the Astrill page before "
+                "changing router connection behavior.",
+            )
+            return
+        value = "1" if checked else "0"
+        if self.native_settings.get(key) == value:
+            return
+        self._endpoint_native_pending.add(key)
+
+        def updated(settings: NativeAstrillSettings) -> None:
+            self._endpoint_native_pending.discard(key)
+            self._native_settings_loaded(settings)
+
+        def finished() -> None:
+            self._endpoint_native_pending.discard(key)
+            self._sync_endpoint_connection_controls()
+
+        self._run_task(
+            "Updating router connection behavior",
+            lambda: self.controller.save_native_settings({key: value}),
+            updated,
+            finished_callback=finished,
+        )
+
+    def _sync_endpoint_connection_controls(self) -> None:
+        if not hasattr(self, "endpoint_autocycle"):
+            return
+        settings = self.native_settings
+        self._syncing_endpoint_preferences = True
+        try:
+            if "astrill_autocycle" not in self._endpoint_native_pending:
+                self.endpoint_autocycle.setChecked(
+                    settings is not None and settings.enabled("astrill_autocycle")
+                )
+            if "astrill_autostart" not in self._endpoint_native_pending:
+                self.endpoint_autostart.setChecked(
+                    settings is not None and settings.enabled("astrill_autostart")
+                )
+        finally:
+            self._syncing_endpoint_preferences = False
+
+        dirty = hasattr(self, "native_page") and self.native_page.dirty
+        editable = (
+            settings is not None
+            and self.busy_count == 0
+            and not self.controller.store.read_only
+            and not dirty
+        )
+        self.endpoint_autocycle.setEnabled(
+            editable and "astrill_autocycle" not in self._endpoint_native_pending
+        )
+        self.endpoint_autostart.setEnabled(
+            editable and "astrill_autostart" not in self._endpoint_native_pending
+        )
 
     def _render_endpoints(self) -> None:
         if not hasattr(self, "endpoint_tree"):
@@ -2223,6 +2329,7 @@ class MainWindow(QMainWindow):
             and selected is not None
             and protocol_supported
         )
+        self._sync_endpoint_connection_controls()
 
         current_id = int(self.router_status.get("astrill_server_id", 0) or 0)
         connected = self.router_status.get("vpn_state") == "up"
@@ -2285,6 +2392,7 @@ class MainWindow(QMainWindow):
 
     def _native_settings_finished(self) -> None:
         self._native_settings_loading = False
+        self._sync_endpoint_connection_controls()
 
     def _native_settings_loaded(self, settings: object) -> None:
         if not isinstance(settings, NativeAstrillSettings):
@@ -2324,6 +2432,7 @@ class MainWindow(QMainWindow):
         else:
             self.native_page.render_favorite_summary(settings)
         self._render_endpoints()
+        self._sync_endpoint_connection_controls()
         self._sync_endpoint_action_ui()
 
     def _save_native_settings(self) -> None:

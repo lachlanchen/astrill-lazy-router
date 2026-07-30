@@ -116,12 +116,19 @@ disconnected; a changed connected session uses a confirmed, verified
 `Apply & Reconnect`.
 
 The Endpoints view remains the searchable country-grouped browser and quick
-connect surface. Both frontends offer a manual-only bounded TCP reachability
-test from the desktop's current network path. Ubuntu's **Ping** action measures
-the visible rows. Its aligned Country, Ping, and Action columns can be sorted
-by country or by fastest/slowest measured latency, with unavailable results
-kept below valid measurements. Windows **Test PC latency** can measure the
-selected, visible, or all loaded rows.
+connect surface. Each row mirrors its native router favorite and can add or
+remove that favorite from either frontend. The same view mirrors **Auto
+reconnect to next favorite server** and **Start automatically after router
+boot**. Router web-applet changes appear after page-demand or explicit sync;
+desktop writes merge against a fresh router read, commit once, and use the
+readback as the new GUI state.
+
+Both frontends offer a manual-only bounded TCP reachability test from the
+desktop's current network path. Ubuntu's **Ping** action measures the visible
+rows. Its aligned Country, Ping, and Action columns can be sorted by country or
+by fastest/slowest measured latency, with unavailable results kept below valid
+measurements. Windows **Test PC latency** can measure the selected, visible, or
+all loaded rows.
 
 The tests send no command to DD-WRT, do not measure bandwidth, and never switch
 the endpoint. The separately confirmed Windows connect action changes DD-WRT

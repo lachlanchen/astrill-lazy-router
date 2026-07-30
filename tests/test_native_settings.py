@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 
 import pytest
+from astrill_lazy.astrill import AstrillEndpoint, AstrillNode, AstrillServer
 from astrill_lazy.models import RouteTarget
 from astrill_lazy.native_settings import (
     SAFE_NATIVE_ASTRILL_KEYS,
@@ -102,3 +103,56 @@ def test_router_native_settings_hex_transport_and_verified_write() -> None:
     assert updated.enabled("astrill_adsblock")
     assert "nvram set astrill_adsblock=1" in router.write_script
     assert "nvram commit" in router.write_script
+
+
+def test_router_favorite_update_merges_a_fresh_native_read() -> None:
+    original = "1109:536872021:1-65535:0:6:1109"
+    target = AstrillServer(
+        id=1,
+        name="USA - Test",
+        nodes=(
+            AstrillNode(
+                id=7,
+                weight=1,
+                endpoints=(
+                    AstrillEndpoint(
+                        encoded_ip=123,
+                        port="443",
+                        mode=0,
+                        protocol_code=134,
+                        port_index=0,
+                        protocol_original=5,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    class FakeRouter(RouterClient):
+        def __init__(self) -> None:
+            super().__init__("unused")
+            self.current = original
+            self.reads = 0
+            self.replacements: list[tuple[str, str]] = []
+
+        def native_astrill_settings(self) -> NativeAstrillSettings:
+            self.reads += 1
+            return NativeAstrillSettings.from_dict({"astrill_favlist": self.current})
+
+        def replace_astrill_favorites(
+            self,
+            expected_current: str,
+            replacement: str,
+        ) -> NativeAstrillSettings:
+            self.replacements.append((expected_current, replacement))
+            self.current = replacement
+            return NativeAstrillSettings.from_dict({"astrill_favlist": self.current})
+
+    router = FakeRouter()
+    updated = router.set_native_astrill_favorite(target, 2, True)
+
+    assert router.reads == 1
+    assert router.replacements == [
+        (original, f"{original},1:123:443:0:6:7"),
+    ]
+    assert updated.get("astrill_favlist") == router.current

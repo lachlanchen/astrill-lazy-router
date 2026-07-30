@@ -591,13 +591,13 @@ class WindowsNativeSettingsPage(QWidget):
             ),
             (
                 "astrill_autocycle",
-                "Cycle favorite endpoints",
-                "Reconnect through the saved endpoint list.",
+                "Auto reconnect to next favorite server",
+                "Try the next saved endpoint if the VPN drops.",
             ),
             (
                 "astrill_autostart",
-                "Connect after router boot",
-                "Start the native Astrill tunnel after DD-WRT boots.",
+                "Start automatically after router boot",
+                "Connect the native Astrill tunnel when DD-WRT starts.",
             ),
         ):
             control = QCheckBox("Enabled")

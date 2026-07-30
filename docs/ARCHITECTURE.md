@@ -145,6 +145,14 @@ native-only mode, the desktop stops an active tunnel, writes the complete
 selection, starts it again, and restores both the prior values and active
 session if startup fails.
 
+`astrill_favlist` is the sole favorite source for the router page, Ubuntu, and
+Windows. A desktop favorite edit first reads the current native list, merges
+one server record derived from the selected applet endpoint, validates the
+complete list, commits once, and renders the readback. `astrill_autocycle` and
+`astrill_autostart` remain independent one-key native writes. Dirty connection
+or native-settings forms block these endpoint shortcuts, preventing a
+page-level edit from silently replacing another local draft.
+
 Startup, explicit refreshes, and completed-action readbacks obtain status and
 settings in both companion and native-only modes. There is no recurring
 desktop SSH monitor. Clean controls follow router-side applet changes. Unsaved

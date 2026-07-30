@@ -296,6 +296,18 @@ country tokens, identifies the current endpoint, and provides a quick
 confirmed reconnect using a selected Astrill protocol. The Connection view is
 the full endpoint-specific editor.
 
+Every endpoint row also mirrors the native `astrill_favlist`. A writable star
+adds or removes that server using the selected protocol. Before adding, the
+desktop reads the current router list again and merges the new record, so a
+favorite added in Astrill's router page is not lost. The committed list is
+read back before the endpoint rows and Connection page are synchronized.
+
+The Endpoints header mirrors `astrill_autocycle` as **Auto reconnect to next
+favorite server** and `astrill_autostart` as **Start automatically after router
+boot**. These are native Astrill behaviors, not companion watchdog settings.
+They can be changed beside the endpoint list or in the full Connection view.
+Quick changes are disabled while either Astrill editor has unsaved changes.
+
 The applet's encoded address map is parsed into validated IPv4 probe targets.
 Ubuntu's **Ping** action measures the currently visible endpoints only when
 clicked, using at most 12 desktop threads and a 1.5-second TCP-connect timeout.
@@ -360,10 +372,11 @@ The Astrill view reads the native applet's settings directly from DD-WRT and
 maps include/exclude choices to effective Direct/Astrill defaults and
 per-entry routes. It synchronizes website and device lists, Wi-Fi and VLAN
 filters, DNS, and advanced filter fields. Endpoint and transport controls live
-in the Connection view. Opening or refreshing either view is read-only. Only
-changed controls are written, every value is validated, and the complete
-result is read back before success is reported. Account and router credentials
-are outside the allowed key set.
+in the Connection view, with favorite and resilience shortcuts also available
+in Endpoints. Opening or refreshing either view is read-only. Only changed
+controls are written, every value is validated, and the complete result is
+read back before success is reported. Account and router credentials are
+outside the allowed key set.
 
 ### Extensions
 

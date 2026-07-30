@@ -18,7 +18,7 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-172 tests passed, 2 skipped
+182 tests passed, 2 skipped
 Ruff: all checks passed
 Catalog: 261 profiles, 650/650 unique seed hosts resolved to IPv4
 ShellCheck: no findings
@@ -131,6 +131,19 @@ The following checks were performed against the Linksys E4200:
   with observed values from 172.3 ms to 487.2 ms at inspection time.
 - Endpoints Country/Ping header and row rendering at both `1180x760` and
   `880x600` without control, row-label, or result overlap.
+- `0.2.9` Endpoints and full Connection rendering at both `1180x760` and
+  `880x600`, including nine native favorites, next-favorite reconnect enabled,
+  and router-boot connection disabled.
+- a reversible GUI favorite add/remove for Singapore server `1498`, with the
+  committed `astrill_favlist` read back after each action and the original
+  nine-record string restored exactly;
+- the reverse path, where the same favorite was written as a router-origin
+  applet change, appeared after the explicit GUI sync, and disappeared after
+  the original router value was restored and synchronized again;
+- unchanged post-test native state on server `1109` with RouterPro UDP,
+  `astrill_autocycle=1`, `astrill_autostart=0`, and the tunnel up;
+- post-test HTTPS responses from Google (`204`), YouTube (`200`), and Instagram
+  (`200`), with the UU Remote bridge and GameViewer server processes active.
 
 ### 2026-07-29 UU And Endpoint Check
 
