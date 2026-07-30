@@ -8,5 +8,6 @@
 helpers/astrill-lazy-netns text eol=lf
 router/alapi text eol=lf
 router/alctl text eol=lf
+router/alhybrid text eol=lf
 router/alpage text eol=lf
 router/VERSION text eol=lf

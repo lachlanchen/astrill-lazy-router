@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +23,14 @@ from .detector import MINIMUM_BYPASS_SERVICES
 from .installer import EnsureResult, InstallResult, RouterInstaller
 from .models import Compilation, MatchKind, RouteTarget, Rule
 from .native_settings import NativeAstrillSettings
-from .router import AstrillConnectionResult, RouterClient
+from .router import AstrillConnectionResult, RouterClient, RouterError
 from .service_policy import ServiceRouteMode, service_policy_route
 from .ssh_setup import identity_path
-from .store import ConfigStore
+from .store import (
+    ConfigStore,
+    PolicyDeploymentManifest,
+    normalize_overlay_source,
+)
 from .windows_ssh_setup import (
     WindowsHostKey,
     WindowsKeyAuthorization,
@@ -39,6 +44,9 @@ COMPILED_CAPACITY_RE = re.compile(
     r"compiled policy is ([\d,]+) bytes; the router limit is ([\d,]+)",
     re.IGNORECASE,
 )
+MAX_OVERLAY_BYTES = 32_768
+MAX_OVERLAY_ROWS = 320
+MAC_ADDRESS_RE = re.compile(r"^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$")
 
 
 class ControllerError(RuntimeError):
@@ -66,7 +74,7 @@ class PolicyCompilationSummary:
     enabled_count: int
     compiled_rows: int
     compiled_bytes: int | None
-    limit_bytes: int = MAX_COMPILED_BYTES
+    limit_bytes: int | None = MAX_COMPILED_BYTES
     warnings: tuple[str, ...] = ()
     error: str | None = None
     compilation: Compilation | None = field(default=None, repr=False, compare=False)
@@ -77,9 +85,22 @@ class PolicyCompilationSummary:
 
     @property
     def remaining_bytes(self) -> int | None:
-        if self.compiled_bytes is None:
+        if self.compiled_bytes is None or self.limit_bytes is None:
             return None
         return self.limit_bytes - self.compiled_bytes
+
+
+@dataclass(frozen=True)
+class HybridPolicyComparison:
+    """UI-neutral comparison of a local manifest with layered router state."""
+
+    manifest: PolicyDeploymentManifest | None
+    status: dict[str, Any]
+    runtime_epoch: str | None
+    core_matches: bool | None
+    overlay_present: bool
+    overlay_matches: bool | None
+    restore_needed: bool
 
 
 @dataclass(frozen=True)
@@ -226,6 +247,139 @@ def _enabled_origins_from_status(
     return frozenset(enabled_origins)
 
 
+def _policy_layers(status: dict[str, Any]) -> dict[str, Any] | None:
+    """Accept top-level fields plus defensive nested companion envelopes."""
+
+    for key in ("policy_layers", "layered_policy"):
+        nested = status.get(key)
+        if isinstance(nested, dict) and isinstance(nested.get("core"), dict):
+            return nested
+    if (
+        isinstance(status.get("core"), dict)
+        and isinstance(status.get("overlays"), list)
+        and isinstance(status.get("effective"), dict)
+    ):
+        return status
+    return None
+
+
+def _layer_hash(layer: dict[str, Any] | None) -> str | None:
+    if not isinstance(layer, dict):
+        return None
+    value = layer.get("hash", layer.get("sha256"))
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().casefold()
+    if re.fullmatch(r"[0-9a-f]{32}", normalized):
+        return f"md5:{normalized}"
+    if re.fullmatch(r"[0-9a-f]{64}", normalized):
+        return f"sha256:{normalized}"
+    return normalized
+
+
+def _payload_hash(payload: str) -> str:
+    digest = hashlib.md5(payload.encode("ascii"), usedforsecurity=False).hexdigest()
+    return f"md5:{digest}"
+
+
+def _runtime_epoch_from_layers(layers: dict[str, Any]) -> str | None:
+    value = layers.get("runtime_epoch")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _owner_overlay(
+    layers: dict[str, Any],
+    owner: str,
+) -> dict[str, Any] | None:
+    overlays = layers.get("overlays")
+    if not isinstance(overlays, list):
+        return None
+    for item in overlays:
+        if (
+            isinstance(item, dict)
+            and str(item.get("owner", "")).strip().casefold() == owner.casefold()
+        ):
+            return item
+    return None
+
+
+def _layer_generation(layer: dict[str, Any] | None) -> int:
+    if not isinstance(layer, dict):
+        return 0
+    value = _optional_int(layer.get("generation"))
+    return value if value is not None and value >= 0 else 0
+
+
+def _layer_source(layer: dict[str, Any] | None) -> str | None:
+    if not isinstance(layer, dict):
+        return None
+    for key in ("source", "source_cidr", "resolved_source"):
+        value = layer.get(key)
+        if isinstance(value, str) and value.strip():
+            try:
+                normalized = normalize_overlay_source(value)
+            except ValueError:
+                continue
+            if normalized != "auto":
+                return normalized
+    return None
+
+
+def _layer_source_mac(layer: dict[str, Any] | None) -> str | None:
+    if not isinstance(layer, dict):
+        return None
+    for key in ("source_mac", "mac"):
+        value = layer.get(key)
+        if isinstance(value, str) and value.strip():
+            normalized = value.strip().casefold().replace("-", ":")
+            if MAC_ADDRESS_RE.fullmatch(normalized):
+                return normalized
+    return None
+
+
+def _layer_origin_ids(layer: dict[str, Any] | None) -> tuple[str, ...] | None:
+    if not isinstance(layer, dict):
+        return None
+    for key in ("origin_ids", "origins"):
+        value = layer.get(key)
+        if isinstance(value, list) and all(
+            isinstance(item, str) and item.strip() for item in value
+        ):
+            return tuple(dict.fromkeys(item.strip() for item in value))
+    return None
+
+
+def _expected_overlay_source(
+    manifest: PolicyDeploymentManifest,
+) -> str | None:
+    if manifest.resolved_source is not None:
+        return manifest.resolved_source
+    if manifest.source != "auto":
+        return manifest.source
+    return None
+
+
+def _overlay_binding_matches(
+    manifest: PolicyDeploymentManifest,
+    layer: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(layer, dict):
+        return False
+    actual_source = _layer_source(layer)
+    expected_source = _expected_overlay_source(manifest)
+    if expected_source is not None and actual_source != expected_source:
+        return False
+    actual_mac = _layer_source_mac(layer)
+    if manifest.source_mac is not None:
+        return actual_mac == manifest.source_mac
+    # Auto is the strongest binding: the router must resolve the authenticated
+    # SSH peer to a LAN /32 and an ARP MAC. Never call a hash-only auto layer a
+    # match merely because its destination document is unchanged.
+    if manifest.source == "auto":
+        return actual_source is not None and actual_mac is not None
+    return actual_source is not None
+
+
 @dataclass(frozen=True)
 class WindowsConnectionState:
     settings: NativeAstrillSettings
@@ -248,6 +402,9 @@ class WindowsController:
         self.router = router or self._router_client_from_store()
         self.server_catalog = ServerCatalog((), {})
         self.recovery_notice: str | None = None
+        # Reconciliation is event-driven by the frontend. Never turn it into a
+        # recurring router poll or repeatedly mutate one runtime epoch.
+        self._overlay_restore_attempted_epochs: set[str] = set()
 
     def configure_router(
         self,
@@ -314,6 +471,7 @@ class WindowsController:
         self.store.save()
         self.router = self._router_client_from_store()
         self.server_catalog = ServerCatalog((), {})
+        self._overlay_restore_attempted_epochs.clear()
         if normalized_use_ssh_config:
             return original_target
         return f"{normalized_user}@{normalized}"
@@ -367,6 +525,349 @@ class WindowsController:
             user=self.store.router_user,
             identity_file=self.store.router_identity,
         )
+
+    def configure_policy_deployment(
+        self,
+        *,
+        core_rule_ids: Iterable[str] = (),
+        overlay_rule_ids: Iterable[str] = (),
+        source: str = "auto",
+        restore_overlay_after_reboot: bool = False,
+        status: dict[str, Any] | None = None,
+        host_key: WindowsHostKey | None = None,
+    ) -> PolicyDeploymentManifest:
+        """Bind selected layers to one trusted router runtime without mutating it."""
+
+        self._require_companion_write("configuring hybrid policy storage")
+        current, layers = self._read_layered_status(status)
+        version = self._require_expected_companion_version(current, layers)
+        package_md5 = RouterInstaller(self.router).expected_package_md5
+        fingerprint = self._verified_host_fingerprint(host_key)
+        normalized_source = normalize_overlay_source(source)
+        core_ids = self._normalize_rule_ids(core_rule_ids)
+        overlay_ids = self._normalize_rule_ids(overlay_rule_ids)
+        overlap = set(core_ids) & set(overlay_ids)
+        if overlap:
+            raise ControllerError(
+                "persistent core and RAM overlay cannot contain the same policy IDs: "
+                + ", ".join(sorted(overlap))
+            )
+        core_payload = self._compile_layer_payload(core_ids, layer="core")
+        overlay_payload = self._compile_layer_payload(
+            overlay_ids,
+            layer="overlay",
+        )
+        owner_layer = _owner_overlay(layers, self.store.controller_id)
+        existing = self.store.deployment_for(
+            router_host=self.store.router_host,
+            router_port=self.store.router_port,
+            companion_version=version,
+        )
+        preserve_overlay = (
+            existing is not None
+            and existing.router_host_key_fingerprint == fingerprint
+            and existing.overlay_rule_ids == overlay_ids
+            and existing.source == normalized_source
+        )
+        if preserve_overlay:
+            # Rebinding the reviewed persistent-core base is not approval to
+            # adopt or weaken a RAM-overlay binding. Keep its last trusted
+            # generation/hash/source/MAC and restore-attempt bookkeeping.
+            resolved_source = existing.resolved_source
+            source_mac = existing.source_mac
+            if resolved_source is None and _overlay_binding_matches(
+                existing,
+                owner_layer,
+            ):
+                resolved_source = _layer_source(owner_layer)
+            if source_mac is None and _overlay_binding_matches(existing, owner_layer):
+                source_mac = _layer_source_mac(owner_layer)
+            overlay_hash = existing.overlay_hash
+            overlay_generation = existing.overlay_generation
+            overlay_runtime_epoch = existing.last_runtime_epoch
+            last_restore_attempt_epoch = existing.last_restore_attempt_epoch
+            last_restore_error = existing.last_restore_error
+        else:
+            resolved_source = (
+                _layer_source(owner_layer)
+                if normalized_source == "auto"
+                else normalized_source
+            )
+            source_mac = _layer_source_mac(owner_layer)
+            overlay_hash = _payload_hash(overlay_payload) if overlay_ids else None
+            overlay_generation = _layer_generation(owner_layer)
+            overlay_runtime_epoch = None
+            last_restore_attempt_epoch = None
+            last_restore_error = None
+        manifest = PolicyDeploymentManifest(
+            router_host=self.store.router_host,
+            router_port=self.store.router_port,
+            router_host_key_fingerprint=fingerprint,
+            companion_version=version,
+            controller_id=self.store.controller_id,
+            companion_package_md5=package_md5,
+            source=normalized_source,
+            resolved_source=resolved_source,
+            source_mac=source_mac,
+            core_rule_ids=core_ids,
+            overlay_rule_ids=overlay_ids,
+            core_hash=_payload_hash(core_payload) if core_ids else None,
+            core_observed_hash=_layer_hash(layers.get("core")),
+            overlay_hash=overlay_hash,
+            core_generation=_layer_generation(layers.get("core")),
+            overlay_generation=overlay_generation,
+            restore_overlay_after_reboot=bool(restore_overlay_after_reboot),
+            core_runtime_epoch=_runtime_epoch_from_layers(layers),
+            last_runtime_epoch=overlay_runtime_epoch,
+            last_restore_attempt_epoch=last_restore_attempt_epoch,
+            last_restore_error=last_restore_error,
+        )
+        self.store.upsert_deployment(manifest)
+        return manifest
+
+    def hybrid_policy_status(
+        self,
+        status: dict[str, Any] | None = None,
+    ) -> HybridPolicyComparison:
+        """Compare this installation's manifest with layered router status."""
+
+        current, layers = self._read_layered_status(status)
+        version = self._companion_version(current, layers)
+        manifest = self.store.deployment_for(
+            router_host=self.store.router_host,
+            router_port=self.store.router_port,
+            companion_version=version,
+        )
+        epoch = _runtime_epoch_from_layers(layers)
+        if manifest is None:
+            return HybridPolicyComparison(
+                manifest=None,
+                status=current,
+                runtime_epoch=epoch,
+                core_matches=None,
+                overlay_present=False,
+                overlay_matches=None,
+                restore_needed=False,
+            )
+        core_hash = _layer_hash(layers.get("core"))
+        core_matches = (
+            None
+            if manifest.core_hash is None or core_hash is None
+            else core_hash == manifest.core_hash.casefold()
+        )
+        owner_layer = _owner_overlay(layers, manifest.controller_id)
+        overlay_hash = _layer_hash(owner_layer)
+        overlay_matches = (
+            None
+            if manifest.overlay_hash is None
+            else (
+                owner_layer is not None
+                and overlay_hash is not None
+                and overlay_hash == manifest.overlay_hash.casefold()
+                and _overlay_binding_matches(manifest, owner_layer)
+            )
+        )
+        return HybridPolicyComparison(
+            manifest=manifest,
+            status=current,
+            runtime_epoch=epoch,
+            core_matches=core_matches,
+            overlay_present=owner_layer is not None,
+            overlay_matches=overlay_matches,
+            restore_needed=(
+                bool(manifest.overlay_rule_ids) and overlay_matches is not True
+            ),
+        )
+
+    def set_overlay_restore_enabled(
+        self,
+        enabled: bool,
+        source: str | None = None,
+        *,
+        status: dict[str, Any] | None = None,
+        host_key: WindowsHostKey | None = None,
+    ) -> PolicyDeploymentManifest:
+        """Persist the explicit opt-in used by one-shot startup reconciliation."""
+
+        if not isinstance(enabled, bool):
+            raise TypeError("overlay restore preference must be a boolean")
+        current, layers = self._read_layered_status(status)
+        manifest = self._require_deployment(current, layers)
+        if enabled:
+            self._require_companion_write("enabling automatic RAM overlay restore")
+            self._verified_host_fingerprint(
+                host_key,
+                expected=manifest.router_host_key_fingerprint,
+            )
+            if not manifest.overlay_rule_ids or manifest.overlay_hash is None:
+                raise ControllerError(
+                    "select and save at least one RAM overlay policy before "
+                    "enabling automatic restore"
+                )
+            if source is not None:
+                manifest.source = normalize_overlay_source(source)
+                if manifest.source != "auto":
+                    manifest.resolved_source = manifest.source
+        manifest.restore_overlay_after_reboot = enabled
+        if not enabled:
+            epoch = _runtime_epoch_from_layers(layers)
+            manifest.last_runtime_epoch = epoch
+            manifest.last_restore_attempt_epoch = epoch
+            manifest.last_restore_error = None
+        self.store.upsert_deployment(manifest)
+        return manifest
+
+    def apply_persistent_core(
+        self,
+        rule_ids: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
+        """Persist selected core rules while retaining the router's RAM overlays."""
+
+        self._require_companion_write("pinning policies to the persistent core")
+        requested = None if rule_ids is None else self._normalize_rule_ids(rule_ids)
+        local_manifest = self._local_deployment_for_endpoint()
+        if local_manifest is not None:
+            candidate_ids = (
+                local_manifest.core_rule_ids if requested is None else requested
+            )
+            self._reject_layer_overlap(
+                candidate_ids,
+                local_manifest.overlay_rule_ids,
+            )
+        status, layers = self._read_layered_status()
+        manifest = self._require_deployment(status, layers)
+        self._verified_host_fingerprint(
+            expected=manifest.router_host_key_fingerprint,
+        )
+        helper_action = self._ensure_hybrid_helper()
+        if helper_action == "installed":
+            status, layers = self._read_layered_status()
+            manifest = self._require_deployment(status, layers)
+        expected_generation = self._verify_core_manifest_base(
+            manifest,
+            layers,
+        )
+        selected = manifest.core_rule_ids if requested is None else requested
+        self._reject_layer_overlap(selected, manifest.overlay_rule_ids)
+        payload = self._compile_layer_payload(selected, layer="core")
+        result = self.router.core_apply(expected_generation, payload)
+        result_layers = self._require_layered_document(result)
+        expected_hash = _payload_hash(payload)
+        self._verify_applied_hash(
+            expected_hash,
+            _layer_hash(result_layers.get("core")),
+            "persistent core",
+        )
+        manifest.core_rule_ids = selected
+        manifest.core_hash = expected_hash
+        manifest.core_observed_hash = expected_hash
+        manifest.core_generation = _layer_generation(result_layers.get("core"))
+        manifest.core_runtime_epoch = (
+            _runtime_epoch_from_layers(result_layers) or manifest.core_runtime_epoch
+        )
+        self.store.upsert_deployment(manifest)
+        return result
+
+    def rollback_persistent_core(self) -> dict[str, Any]:
+        """Roll back only the persistent core on a hybrid-capable companion."""
+
+        self._require_companion_write("rolling back the persistent policy core")
+        status, layers = self._read_layered_status()
+        manifest = self._require_deployment(status, layers)
+        self._verified_host_fingerprint(
+            expected=manifest.router_host_key_fingerprint,
+        )
+        if self._ensure_hybrid_helper() == "installed":
+            status, layers = self._read_layered_status()
+            manifest = self._require_deployment(status, layers)
+        expected_generation = self._verify_core_manifest_base(
+            manifest,
+            layers,
+        )
+        result = self.router.core_rollback(expected_generation)
+        result_layers = self._require_layered_document(result)
+        core_layer = result_layers.get("core")
+        manifest.core_rule_ids = _layer_origin_ids(core_layer) or ()
+        manifest.core_hash = _layer_hash(core_layer)
+        manifest.core_observed_hash = manifest.core_hash
+        manifest.core_generation = _layer_generation(core_layer)
+        manifest.core_runtime_epoch = (
+            _runtime_epoch_from_layers(result_layers) or manifest.core_runtime_epoch
+        )
+        self.store.upsert_deployment(manifest)
+        return result
+
+    def load_ram_overlay(
+        self,
+        rule_ids: Iterable[str],
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly replace this controller's volatile, source-scoped overlay."""
+
+        selected = self._normalize_rule_ids(rule_ids)
+        local_manifest = self._local_deployment_for_endpoint()
+        if local_manifest is not None:
+            self._reject_layer_overlap(
+                local_manifest.core_rule_ids,
+                selected,
+            )
+        return self._put_ram_overlay(
+            selected,
+            source=source,
+            require_saved_hash=False,
+        )
+
+    def restore_ram_overlay_now(
+        self,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly restore the exact overlay recorded in the local manifest."""
+
+        return self._put_ram_overlay(
+            None,
+            source=source,
+            require_saved_hash=True,
+        )
+
+    def remove_ram_overlay(self) -> dict[str, Any]:
+        """Remove only this controller's RAM layer, leaving core/peers untouched."""
+
+        self._require_companion_write("removing this computer's RAM overlay")
+        status, layers = self._read_layered_status()
+        manifest = self._require_deployment(status, layers)
+        self._verified_host_fingerprint(
+            expected=manifest.router_host_key_fingerprint,
+        )
+        if self._ensure_hybrid_helper() == "installed":
+            status, layers = self._read_layered_status()
+            manifest = self._require_deployment(status, layers)
+        owner_layer = _owner_overlay(layers, manifest.controller_id)
+        if owner_layer is None:
+            manifest.overlay_generation = 0
+            manifest.restore_overlay_after_reboot = False
+            epoch = _runtime_epoch_from_layers(layers)
+            manifest.last_runtime_epoch = epoch
+            manifest.last_restore_attempt_epoch = epoch
+            manifest.last_restore_error = None
+            self.store.upsert_deployment(manifest)
+            return status
+        result = self.router.overlay_remove(
+            manifest.controller_id,
+            self._verify_overlay_manifest_base(manifest, layers),
+        )
+        result_layers = self._require_layered_document(result)
+        if _owner_overlay(result_layers, manifest.controller_id) is not None:
+            raise ControllerError(
+                "router reported success but this computer's overlay remains active"
+            )
+        manifest.overlay_generation = 0
+        manifest.restore_overlay_after_reboot = False
+        epoch = _runtime_epoch_from_layers(result_layers)
+        manifest.last_runtime_epoch = epoch
+        manifest.last_restore_attempt_epoch = epoch
+        manifest.last_restore_error = None
+        self.store.upsert_deployment(manifest)
+        return result
 
     def refresh_status(self) -> dict[str, Any]:
         if self.store.companion_enabled:
@@ -439,7 +940,7 @@ class WindowsController:
                 raise ControllerError(
                     "the router companion passed inspection without returning status"
                 )
-            return check.status
+            return self._finish_policy_reconciliation(check.status)
         if check.action == "repair":
             result = installer.ensure(allow_install=False)
             if result.action == "degraded":
@@ -461,7 +962,7 @@ class WindowsController:
                     "The companion runtime became healthy during recovery; no "
                     "rewrite was needed."
                 )
-            return result.status
+            return self._finish_policy_reconciliation(result.status)
 
         installed = check.installed_version or "unknown"
         raise ControllerError(
@@ -786,6 +1287,63 @@ class WindowsController:
     ) -> PolicyCompilationSummary:
         """Compile a policy scope without raising for validation or capacity errors."""
 
+        return self._policy_preflight(
+            rule_ids,
+            max_bytes=MAX_COMPILED_BYTES,
+            capacity_name="router",
+        )
+
+    def policy_layer_preflight(
+        self,
+        rule_ids: Iterable[str],
+        *,
+        layer: str,
+    ) -> PolicyCompilationSummary:
+        """Preview a persistent core or RAM overlay with the right byte contract."""
+
+        normalized_layer = layer.strip().casefold()
+        if normalized_layer == "core":
+            max_bytes: int | None = MAX_COMPILED_BYTES
+        elif normalized_layer == "overlay":
+            # Router admission additionally protects generated matches and RAM.
+            # Do not incorrectly apply the NVRAM limit to a volatile document.
+            max_bytes = MAX_OVERLAY_BYTES
+        else:
+            raise ValueError("policy layer must be 'core' or 'overlay'")
+        summary = self._policy_preflight(
+            rule_ids,
+            max_bytes=max_bytes,
+            capacity_name=normalized_layer,
+        )
+        if normalized_layer != "overlay" or summary.compilation is None:
+            return summary
+        device_origins = sorted(
+            {
+                compiled.origin
+                for compiled in summary.compilation.rules
+                if compiled.kind == MatchKind.DEVICE.value
+            }
+        )
+        if not device_origins:
+            return summary
+        return replace(
+            summary,
+            error=(
+                "RAM overlays are already scoped to this computer and cannot "
+                "contain Device or process-network-identity rows. Move these "
+                "policies to the persistent core or select destination-based "
+                "service, domain, or network policies: " + ", ".join(device_origins)
+            ),
+            compilation=None,
+        )
+
+    def _policy_preflight(
+        self,
+        rule_ids: Iterable[str] | None,
+        *,
+        max_bytes: int | None,
+        capacity_name: str,
+    ) -> PolicyCompilationSummary:
         if rule_ids is None:
             selected = list(self.store.rules)
         else:
@@ -797,6 +1355,7 @@ class WindowsController:
                     enabled_count=0,
                     compiled_rows=0,
                     compiled_bytes=None,
+                    limit_bytes=max_bytes,
                     error=(
                         "Select at least one policy for Apply selected. Use the "
                         "full Apply policies action to intentionally install an "
@@ -813,6 +1372,7 @@ class WindowsController:
                     enabled_count=0,
                     compiled_rows=0,
                     compiled_bytes=None,
+                    limit_bytes=max_bytes,
                     error=f"Selected policy no longer exists: {names}.",
                 )
             selected = [by_id[rule_id] for rule_id in requested]
@@ -820,22 +1380,32 @@ class WindowsController:
         selected_ids = tuple(rule.id for rule in selected)
         compiled_rows = self._compiled_row_count(selected)
         try:
-            compilation = compile_rules(selected, self.catalog)
+            compilation = compile_rules(
+                selected,
+                self.catalog,
+                max_bytes=max_bytes,
+            )
         except ValueError as exc:
             original = str(exc).strip() or "Policy compilation failed."
             match = COMPILED_CAPACITY_RE.search(original)
             if match is not None:
                 compiled_bytes = int(match.group(1).replace(",", ""))
                 limit_bytes = int(match.group(2).replace(",", ""))
-                error = (
-                    f"Compiled policy needs {compiled_bytes:,} bytes, but this "
-                    f"router accepts at most {limit_bytes:,}. Select a smaller "
-                    "set in the policy table and use Apply selected; all other "
-                    "policies will remain saved locally."
-                )
+                if capacity_name == "router":
+                    error = (
+                        f"Compiled policy needs {compiled_bytes:,} bytes, but this "
+                        f"router accepts at most {limit_bytes:,}. Select a smaller "
+                        "set in the policy table and use Apply selected; all other "
+                        "policies will remain saved locally."
+                    )
+                else:
+                    error = (
+                        f"Compiled {capacity_name} needs {compiled_bytes:,} bytes, "
+                        f"but it accepts at most {limit_bytes:,}."
+                    )
             else:
                 compiled_bytes = None
-                limit_bytes = MAX_COMPILED_BYTES
+                limit_bytes = max_bytes
                 error = f"Policies cannot be compiled: {original}"
             return PolicyCompilationSummary(
                 rule_ids=selected_ids,
@@ -848,12 +1418,27 @@ class WindowsController:
             )
 
         payload = compilation.to_tsv()
+        if capacity_name == "overlay" and len(compilation.rules) > MAX_OVERLAY_ROWS:
+            return PolicyCompilationSummary(
+                rule_ids=selected_ids,
+                rule_count=len(selected),
+                enabled_count=sum(rule.enabled for rule in selected),
+                compiled_rows=len(compilation.rules),
+                compiled_bytes=len(payload.encode("ascii")),
+                limit_bytes=max_bytes,
+                warnings=compilation.warnings,
+                error=(
+                    f"Compiled RAM overlay has {len(compilation.rules):,} rows, "
+                    f"but one owner accepts at most {MAX_OVERLAY_ROWS:,}."
+                ),
+            )
         return PolicyCompilationSummary(
             rule_ids=selected_ids,
             rule_count=len(selected),
             enabled_count=sum(rule.enabled for rule in selected),
             compiled_rows=len(compilation.rules),
             compiled_bytes=len(payload.encode("ascii")),
+            limit_bytes=max_bytes,
             warnings=compilation.warnings,
             compilation=compilation,
         )
@@ -882,6 +1467,536 @@ class WindowsController:
             ):
                 rows += 1
         return rows
+
+    def _normalize_rule_ids(self, rule_ids: Iterable[str]) -> tuple[str, ...]:
+        values = tuple(str(rule_id).strip() for rule_id in rule_ids)
+        if any(not value for value in values):
+            raise ValueError("policy IDs cannot be empty")
+        if len(values) != len(set(values)):
+            raise ValueError("policy selection contains duplicate IDs")
+        missing = set(values) - {rule.id for rule in self.store.rules}
+        if missing:
+            raise ControllerError(
+                "selected policy no longer exists: " + ", ".join(sorted(missing))
+            )
+        return values
+
+    def _local_deployment_for_endpoint(self) -> PolicyDeploymentManifest | None:
+        matches = [
+            deployment
+            for deployment in self.store.policy_deployments
+            if deployment.router_host == self.store.router_host
+            and deployment.router_port == self.store.router_port
+            and deployment.controller_id == self.store.controller_id
+        ]
+        return matches[-1] if matches else None
+
+    @staticmethod
+    def _reject_layer_overlap(
+        core_rule_ids: Iterable[str],
+        overlay_rule_ids: Iterable[str],
+    ) -> None:
+        overlap = set(core_rule_ids) & set(overlay_rule_ids)
+        if overlap:
+            raise ControllerError(
+                "persistent core and RAM overlay cannot contain the same policy IDs: "
+                + ", ".join(sorted(overlap))
+                + ". Move the policies out of the other layer first."
+            )
+
+    def _verify_core_manifest_base(
+        self,
+        manifest: PolicyDeploymentManifest,
+        layers: dict[str, Any],
+    ) -> int:
+        core_layer = layers.get("core")
+        live_generation = _layer_generation(core_layer)
+        live_hash = _layer_hash(core_layer)
+        live_epoch = _runtime_epoch_from_layers(layers)
+        expected_hash = manifest.core_observed_hash or manifest.core_hash
+        if expected_hash is None:
+            raise ControllerError(
+                "the saved deployment has no trusted observation of the current "
+                "persistent core; refresh the Policies page and use its reviewed "
+                "whole-core replacement action to bind the current base"
+            )
+        if live_hash != expected_hash.casefold():
+            raise ControllerError(
+                "the persistent core changed since this deployment observed it "
+                "(the trusted document hash no longer matches); refresh and review "
+                "the whole-core replacement diff before rebinding, or retry rollback "
+                "only after adopting the current base"
+            )
+        if (
+            manifest.core_runtime_epoch is not None
+            and live_epoch is not None
+            and live_epoch != manifest.core_runtime_epoch
+        ):
+            # Core generations are runtime-scoped and may reset at reboot. A new
+            # epoch plus the exact trusted persistent hash is sufficient to
+            # adopt the live generation without weakening the document CAS.
+            manifest.core_generation = live_generation
+            manifest.core_observed_hash = live_hash
+            manifest.core_runtime_epoch = live_epoch
+            self.store.upsert_deployment(manifest)
+            return live_generation
+        if live_generation != manifest.core_generation:
+            raise ControllerError(
+                "the persistent core changed since this deployment observed it "
+                f"(saved generation {manifest.core_generation}, router generation "
+                f"{live_generation} in the same or an unverifiable runtime); "
+                "refresh and review the whole-core replacement diff before "
+                "rebinding"
+            )
+        if manifest.core_runtime_epoch is None and live_epoch is not None:
+            # Safe migration for manifests created before core epochs were
+            # recorded: only attach the epoch after both hash and generation
+            # already match.
+            manifest.core_runtime_epoch = live_epoch
+            self.store.upsert_deployment(manifest)
+        return live_generation
+
+    @staticmethod
+    def _verify_overlay_manifest_base(
+        manifest: PolicyDeploymentManifest,
+        layers: dict[str, Any],
+    ) -> int:
+        live_epoch = _runtime_epoch_from_layers(layers)
+        owner_layer = _owner_overlay(layers, manifest.controller_id)
+        same_epoch = (
+            live_epoch is not None
+            and manifest.last_runtime_epoch is not None
+            and live_epoch == manifest.last_runtime_epoch
+        )
+        if same_epoch:
+            if owner_layer is None:
+                if manifest.overlay_generation == 0:
+                    return 0
+            elif (
+                manifest.overlay_generation > 0
+                and _layer_generation(owner_layer) == manifest.overlay_generation
+                and manifest.overlay_hash is not None
+                and _layer_hash(owner_layer) == manifest.overlay_hash.casefold()
+                and _overlay_binding_matches(manifest, owner_layer)
+            ):
+                return manifest.overlay_generation
+            raise ControllerError(
+                "this controller's live RAM overlay changed during the current "
+                "router runtime; no replacement was written. Remove or explicitly "
+                "rebind the changed owner before loading it again"
+            )
+
+        # RAM generations reset with the runtime. On a new (or previously
+        # unrecorded) epoch, absence is the only safe zero-generation base. An
+        # existing owner may be adopted only when its document and source/MAC
+        # binding are exactly the last trusted overlay.
+        if owner_layer is None:
+            return 0
+        if (
+            manifest.overlay_hash is not None
+            and _layer_hash(owner_layer) == manifest.overlay_hash.casefold()
+            and _overlay_binding_matches(manifest, owner_layer)
+        ):
+            return _layer_generation(owner_layer)
+        raise ControllerError(
+            "this controller's live RAM overlay differs from the saved document "
+            "or source/MAC binding in a new router runtime; automatic restore "
+            "refused to overwrite it. Remove or explicitly rebind the changed "
+            "owner first"
+        )
+
+    def _compile_layer_payload(
+        self,
+        rule_ids: tuple[str, ...],
+        *,
+        layer: str,
+    ) -> str:
+        by_id = {rule.id: rule for rule in self.store.rules}
+        selected = [by_id[rule_id] for rule_id in rule_ids]
+        max_bytes = MAX_COMPILED_BYTES if layer == "core" else MAX_OVERLAY_BYTES
+        try:
+            compilation = compile_rules(
+                selected,
+                self.catalog,
+                max_bytes=max_bytes,
+            )
+            if layer == "overlay":
+                device_origins = sorted(
+                    {
+                        compiled.origin
+                        for compiled in compilation.rules
+                        if compiled.kind == MatchKind.DEVICE.value
+                    }
+                )
+                if device_origins:
+                    raise ControllerError(
+                        "RAM overlays cannot contain Device or "
+                        "process-network-identity rows: " + ", ".join(device_origins)
+                    )
+            if layer == "overlay" and len(compilation.rules) > MAX_OVERLAY_ROWS:
+                raise ControllerError(
+                    f"RAM overlay has {len(compilation.rules):,} rows, but one "
+                    f"controller accepts at most {MAX_OVERLAY_ROWS:,}."
+                )
+            return compilation.to_tsv()
+        except ValueError as exc:
+            original = str(exc).strip() or "policy compilation failed"
+            if layer == "core":
+                match = COMPILED_CAPACITY_RE.search(original)
+                if match is not None:
+                    needed = int(match.group(1).replace(",", ""))
+                    limit = int(match.group(2).replace(",", ""))
+                    raise ControllerError(
+                        f"Persistent core needs {needed:,} bytes, but the NVRAM "
+                        f"contract allows at most {limit:,}."
+                    ) from exc
+            raise ControllerError(
+                f"{layer.capitalize()} cannot be compiled: {original}"
+            ) from exc
+
+    def _read_layered_status(
+        self,
+        status: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        current = status if status is not None else self.router.status()
+        layers = _policy_layers(current)
+        if layers is not None:
+            return current, layers
+        try:
+            effective = self.router.effective_status()
+        except (AttributeError, RouterError) as exc:
+            raise ControllerError(
+                "the installed router companion does not support hybrid core/RAM "
+                "policy storage; legacy Apply policies remains available"
+            ) from exc
+        layers = _policy_layers(effective)
+        if layers is None:
+            raise ControllerError(
+                "the router returned status without the hybrid policy fields"
+            )
+        return effective, layers
+
+    def _require_layered_document(
+        self,
+        status: dict[str, Any],
+    ) -> dict[str, Any]:
+        layers = _policy_layers(status)
+        if layers is None:
+            raise ControllerError(
+                "the router mutation succeeded without verifiable layered status"
+            )
+        return layers
+
+    @staticmethod
+    def _companion_version(
+        status: dict[str, Any],
+        layers: dict[str, Any],
+    ) -> str:
+        value = status.get("version", layers.get("version"))
+        if not isinstance(value, str) or not value.strip():
+            raise ControllerError("router status omitted the companion version")
+        return value.strip()
+
+    def _require_expected_companion_version(
+        self,
+        status: dict[str, Any],
+        layers: dict[str, Any],
+    ) -> str:
+        version = self._companion_version(status, layers)
+        installer = RouterInstaller(self.router)
+        expected_version = installer.expected_version
+        if version != expected_version:
+            raise ControllerError(
+                f"hybrid policy storage requires companion {expected_version}, but the "
+                f"router reports {version}; use the separately confirmed Install / "
+                "upgrade action before binding or writing layered policy state"
+            )
+        package_md5 = status.get("package_md5", layers.get("package_md5"))
+        normalized_md5 = (
+            package_md5.strip().casefold() if isinstance(package_md5, str) else ""
+        )
+        if normalized_md5 != installer.expected_package_md5:
+            raise ControllerError(
+                "the router companion version matches, but its stored package MD5 "
+                "does not match this desktop build; use the separately confirmed "
+                "Install / upgrade action before binding or writing layered policy "
+                "state"
+            )
+        return version
+
+    def _require_deployment(
+        self,
+        status: dict[str, Any],
+        layers: dict[str, Any],
+    ) -> PolicyDeploymentManifest:
+        version = self._require_expected_companion_version(status, layers)
+        manifest = self.store.deployment_for(
+            router_host=self.store.router_host,
+            router_port=self.store.router_port,
+            companion_version=version,
+        )
+        if manifest is None:
+            raise ControllerError(
+                "configure a version-bound hybrid deployment for this router first"
+            )
+        expected_package_md5 = RouterInstaller(self.router).expected_package_md5
+        if manifest.companion_package_md5 is None:
+            # Safe schema migration: the fresh status above already proved the
+            # router is running this desktop's exact stored package.
+            manifest.companion_package_md5 = expected_package_md5
+            self.store.upsert_deployment(manifest)
+        elif manifest.companion_package_md5 != expected_package_md5:
+            raise ControllerError(
+                "the saved hybrid deployment belongs to a different companion "
+                "package; reconfigure it only after reviewing the router upgrade"
+            )
+        return manifest
+
+    def _verified_host_fingerprint(
+        self,
+        host_key: WindowsHostKey | None = None,
+        *,
+        expected: str | None = None,
+    ) -> str:
+        if self.store.router_use_ssh_config:
+            raise ControllerError(
+                "hybrid deployment binding requires explicit router host, port, "
+                "identity, and known_hosts settings"
+            )
+        current = host_key or self.inspect_router_host_key()
+        if (
+            current.host != self.store.router_host
+            or current.port != self.store.router_port
+            or current.known_hosts_path != self.known_hosts_path
+        ):
+            raise ControllerError(
+                "the inspected SSH host key does not match the configured router"
+            )
+        if current.trust_state != "trusted":
+            raise ControllerError(
+                "the router SSH host key must be trusted before binding policy state"
+            )
+        if expected is not None and current.fingerprint != expected:
+            raise ControllerError(
+                "the router SSH host-key fingerprint differs from the saved "
+                "deployment; no policy was written"
+            )
+        return current.fingerprint
+
+    def _put_ram_overlay(
+        self,
+        rule_ids: tuple[str, ...] | None,
+        *,
+        source: str | None,
+        require_saved_hash: bool,
+        status: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._require_companion_write("loading this computer's RAM overlay")
+        current, layers = self._read_layered_status(status)
+        manifest = self._require_deployment(current, layers)
+        self._verified_host_fingerprint(
+            expected=manifest.router_host_key_fingerprint,
+        )
+        if self._ensure_hybrid_helper() == "installed":
+            current, layers = self._read_layered_status()
+            manifest = self._require_deployment(current, layers)
+        selected = manifest.overlay_rule_ids if rule_ids is None else rule_ids
+        if not selected:
+            raise ControllerError(
+                "select at least one RAM overlay policy; use Remove RAM overlay "
+                "to clear this controller's layer"
+            )
+        self._reject_layer_overlap(manifest.core_rule_ids, selected)
+        payload = self._compile_layer_payload(selected, layer="overlay")
+        expected_hash = _payload_hash(payload)
+        if (
+            require_saved_hash
+            and manifest.overlay_hash is not None
+            and expected_hash != manifest.overlay_hash.casefold()
+        ):
+            raise ControllerError(
+                "the saved RAM overlay policies changed locally; explicitly load "
+                "the new selection before enabling or retrying automatic restore"
+            )
+        requested_source = normalize_overlay_source(source or manifest.source)
+        expected_generation = self._verify_overlay_manifest_base(manifest, layers)
+        result = self.router.overlay_put(
+            manifest.controller_id,
+            expected_generation,
+            requested_source,
+            payload,
+            expected_source=(
+                _expected_overlay_source(manifest) if require_saved_hash else None
+            ),
+            expected_mac=manifest.source_mac if require_saved_hash else None,
+        )
+        result_layers = self._require_layered_document(result)
+        applied_owner = _owner_overlay(result_layers, manifest.controller_id)
+        if applied_owner is None:
+            raise ControllerError(
+                "router reported success without this computer's RAM overlay"
+            )
+        self._verify_applied_hash(
+            expected_hash,
+            _layer_hash(applied_owner),
+            "RAM overlay",
+        )
+        applied_source = _layer_source(applied_owner)
+        applied_mac = _layer_source_mac(applied_owner)
+        if applied_source is None:
+            raise ControllerError(
+                "router omitted the applied RAM overlay source binding"
+            )
+        if requested_source == "auto" and applied_mac is None:
+            raise ControllerError(
+                "router did not bind the automatic RAM overlay to a validated "
+                "LAN MAC address"
+            )
+        if require_saved_hash:
+            expected_source = _expected_overlay_source(manifest)
+            if expected_source is not None and applied_source != expected_source:
+                raise ControllerError(
+                    "router resolved the restored RAM overlay to a different "
+                    "source; use Load selected into RAM to approve a new binding"
+                )
+            if manifest.source_mac is not None and applied_mac != manifest.source_mac:
+                raise ControllerError(
+                    "router resolved the restored RAM overlay to a different or "
+                    "missing MAC address; use Load selected into RAM to approve a "
+                    "new binding"
+                )
+        elif (
+            manifest.source_mac is not None
+            and applied_mac is None
+            and requested_source == manifest.source
+        ):
+            raise ControllerError(
+                "router omitted the previously verified RAM overlay MAC binding"
+            )
+        previous_source = manifest.source
+        manifest.overlay_rule_ids = selected
+        manifest.overlay_hash = expected_hash
+        manifest.overlay_generation = _layer_generation(applied_owner)
+        manifest.source = requested_source
+        manifest.resolved_source = applied_source
+        if applied_mac is not None:
+            manifest.source_mac = applied_mac
+        elif requested_source != previous_source:
+            # A deliberate switch to an advanced multi-host CIDR may not have a
+            # single MAC. Never clear a verified MAC during an automatic or
+            # same-binding restore.
+            manifest.source_mac = None
+        epoch = _runtime_epoch_from_layers(result_layers)
+        manifest.last_runtime_epoch = epoch
+        manifest.last_restore_attempt_epoch = epoch
+        manifest.last_restore_error = None
+        self.store.upsert_deployment(manifest)
+        return result
+
+    @staticmethod
+    def _verify_applied_hash(
+        expected: str,
+        actual: str | None,
+        label: str,
+    ) -> None:
+        if actual is None:
+            raise ControllerError(f"router omitted the applied {label} hash")
+        if actual != expected.casefold():
+            raise ControllerError(
+                f"router {label} readback hash differs from the uploaded document"
+            )
+
+    def _ensure_hybrid_helper(self) -> str:
+        return RouterInstaller(self.router).ensure_hybrid_helper().action
+
+    def _finish_policy_reconciliation(
+        self,
+        status: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Perform at most one opted-in overlay restore for one runtime epoch."""
+
+        layers = _policy_layers(status)
+        if layers is None or summarize_policy_runtime(status).state != "ready":
+            return status
+        try:
+            version = self._companion_version(status, layers)
+        except ControllerError:
+            return status
+        manifest = self.store.deployment_for(
+            router_host=self.store.router_host,
+            router_port=self.store.router_port,
+            companion_version=version,
+        )
+        if (
+            manifest is None
+            or not manifest.restore_overlay_after_reboot
+            or not manifest.overlay_rule_ids
+            or manifest.overlay_hash is None
+        ):
+            return status
+        epoch = _runtime_epoch_from_layers(layers)
+        if (
+            epoch is None
+            or epoch == manifest.last_runtime_epoch
+            or epoch == manifest.last_restore_attempt_epoch
+            or epoch in self._overlay_restore_attempted_epochs
+        ):
+            return status
+
+        owner_layer = _owner_overlay(layers, manifest.controller_id)
+        if _layer_hash(
+            owner_layer
+        ) == manifest.overlay_hash.casefold() and _overlay_binding_matches(
+            manifest, owner_layer
+        ):
+            manifest.overlay_generation = _layer_generation(owner_layer)
+            resolved_source = _layer_source(owner_layer)
+            resolved_mac = _layer_source_mac(owner_layer)
+            if resolved_source is not None:
+                manifest.resolved_source = resolved_source
+            if resolved_mac is not None:
+                manifest.source_mac = resolved_mac
+            manifest.last_runtime_epoch = epoch
+            manifest.last_restore_attempt_epoch = epoch
+            manifest.last_restore_error = None
+            self.store.upsert_deployment(manifest)
+            return status
+
+        self._overlay_restore_attempted_epochs.add(epoch)
+        manifest.last_restore_attempt_epoch = epoch
+        manifest.last_restore_error = None
+        self.store.upsert_deployment(manifest)
+        try:
+            restored = self._put_ram_overlay(
+                None,
+                source=None,
+                require_saved_hash=True,
+                status=status,
+            )
+        except (ControllerError, RouterError, ValueError) as exc:
+            notice = (
+                "The persistent core is healthy, but this computer's opted-in RAM "
+                f"overlay could not be restored once for this router boot: {exc}. "
+                "Use Restore RAM overlay now to retry."
+            )
+            current_manifest = self.store.deployment_for(
+                router_host=self.store.router_host,
+                router_port=self.store.router_port,
+                companion_version=version,
+            )
+            if current_manifest is not None:
+                current_manifest.last_restore_attempt_epoch = epoch
+                current_manifest.last_restore_error = str(exc)
+                self.store.upsert_deployment(current_manifest)
+            self.recovery_notice = (
+                f"{self.recovery_notice} {notice}" if self.recovery_notice else notice
+            )
+            return status
+        notice = "This computer's RAM overlay was restored after the router reboot."
+        self.recovery_notice = (
+            f"{self.recovery_notice} {notice}" if self.recovery_notice else notice
+        )
+        return restored
 
     def install_companion(self) -> InstallResult:
         self._require_write("installing the router companion")

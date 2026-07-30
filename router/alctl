@@ -1,20 +1,27 @@
 #!/bin/sh
 
-# Astrill Lazy Router controller for DD-WRT/BusyBox.
-
 set -u
 
 BASE=${ASTRILL_LAZY_BASE:-/tmp/astrill-lazy}
 CURRENT=$BASE/rules.tsv
 PREVIOUS=$BASE/rules.previous.tsv
+EFFECTIVE=$BASE/effective.tsv
+EFFECTIVE_PREVIOUS=$BASE/effective.previous.tsv
+OVERLAY_DIR=$BASE/overlays
+RUNTIME_EPOCH_FILE=$BASE/runtime-epoch
+CORE_GENERATION_FILE=$BASE/core-generation
+CORE_RECOVERY_FILE=$BASE/core-recovery
+HYBRID_HELPER=${ASTRILL_LAZY_HYBRID_HELPER:-$BASE/alhybrid}
 RESOLVED=$BASE/resolved.tsv
 UNRESOLVED=$BASE/unresolved.txt
 ACTIVE_FILE=$BASE/active-chain
+POLICY_TRANSACTION_FILE=$BASE/policy-transaction
 APP_FLOWS=$BASE/app-flows.tsv
 WATCHDOG_PID=$BASE/watchdog.pid
 LOCK_DIR=$BASE/controller.lock
 LOG_FILE=$BASE/controller.log
 VERSION_FILE=$BASE/VERSION
+PACKAGE_MD5_FILE=$BASE/PACKAGE_MD5
 RPDB_PREFS_FILE=$BASE/rpdb-prefs
 REBASE_REQUIRED_FILE=$BASE/rpdb-rebase-required
 RECONCILE_ERROR_FILE=$BASE/last-reconcile-error
@@ -49,8 +56,16 @@ CURRENT_RULES_GZ_KEY=astrill_lazy_rules_gz
 PREVIOUS_RULES_GZ_KEY=astrill_lazy_rules_previous_gz
 TAB="$(printf '\t')"
 policy_routes_changed=false
+hybrid_loaded=false
 
-mkdir -p "$BASE"
+mkdir -p "$BASE" "$OVERLAY_DIR"
+
+load_hybrid_helper() {
+    [ "$hybrid_loaded" = true ] && return 0
+    [ -r "$HYBRID_HELPER" ] || return 1
+    . "$HYBRID_HELPER" || return 1
+    hybrid_loaded=true
+}
 
 log_message() {
     level=$1
@@ -176,7 +191,6 @@ validate_rules() {
         printf 'every rule must contain exactly 10 tab-separated fields\n' >&2
         return 1
     }
-
     line_number=0
     while IFS="$TAB" read -r id enabled priority kind selector target protocol ports label origin; do
         line_number=$((line_number + 1))
@@ -206,6 +220,19 @@ validate_rules() {
         case $label in *[!A-Za-z0-9%._~-]*) return 1 ;; esac
     done < "$file"
     return 0
+}
+
+rule_row_count() {
+    awk -F '\t' '
+        $0 !~ /^#/ && NF == 10 { count++ }
+        END { print count + 0 }
+    ' "$1"
+}
+
+document_hash() {
+    document_md5=$(md5sum "$1" 2>/dev/null | awk '{ print $1 }')
+    [ -n "$document_md5" ] || return 1
+    printf 'md5:%s\n' "$document_md5"
 }
 
 validate_app_flows() {
@@ -240,6 +267,10 @@ acquire_lock() {
     while ! mkdir "$LOCK_DIR" 2>/dev/null; do
         lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || printf 0)
         if ! is_live_pid "$lock_pid"; then
+            sleep 1
+            lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || printf 0)
+        fi
+        if ! is_live_pid "$lock_pid"; then
             rm -f "$LOCK_DIR/pid"
             rmdir "$LOCK_DIR" 2>/dev/null || true
             continue
@@ -248,32 +279,94 @@ acquire_lock() {
         [ "$attempts" -lt 20 ] || fail "controller is busy (pid $lock_pid)"
         sleep 1
     done
-    printf '%s\n' "$$" > "$LOCK_DIR/pid"
-    trap release_lock EXIT INT TERM
+    printf '%s\n' "$$" > "$LOCK_DIR/pid" || {
+        rm -f "$LOCK_DIR/pid"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        fail "could not publish controller lock ownership"
+    }
+    trap controller_exit_cleanup EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 }
 
 release_lock() {
     rm -f "$LOCK_DIR/pid"
     rmdir "$LOCK_DIR" 2>/dev/null || true
-    trap - EXIT INT TERM
+    trap - EXIT HUP INT TERM
 }
 
-encode_rule_document() {
-    source_file=$1
-    archive_file=$BASE/rules.encode.$$.gz
-    wrapper_file=$BASE/rules.encode.$$.txt
-    gzip -9 -c "$source_file" > "$archive_file" || {
-        rm -f "$archive_file" "$wrapper_file"
+cleanup_hybrid_runtime() {
+    cleanup_hybrid_error=$1
+    if command -v hybrid_cancel_dns_jobs >/dev/null 2>&1; then
+        hybrid_cancel_dns_jobs
+    fi
+    if command -v restore_runtime_metadata >/dev/null 2>&1 &&
+       [ "${runtime_metadata_snapshot_active:-false}" = true ] &&
+       ! restore_runtime_metadata; then
+        set_reconcile_error "$cleanup_hybrid_error"
+        return 1
+    fi
+    if command -v clear_runtime_metadata_snapshot >/dev/null 2>&1; then
+        clear_runtime_metadata_snapshot >/dev/null 2>&1 || true
+    fi
+}
+
+controller_exit_cleanup() {
+    controller_exit_status=$?
+    trap - EXIT HUP INT TERM
+    if ! cleanup_hybrid_runtime \
+        "interrupted runtime metadata could not be restored"; then
+        [ "$controller_exit_status" -ne 0 ] || controller_exit_status=1
+    fi
+    if [ -f "$POLICY_TRANSACTION_FILE" ]; then
+        if ! load_hybrid_helper ||
+           ! hybrid_recover_interrupted_transaction; then
+            set_reconcile_error \
+                "interrupted policy transaction could not be rolled back"
+            [ "$controller_exit_status" -ne 0 ] ||
+                controller_exit_status=1
+            release_lock
+            exit "$controller_exit_status"
+        fi
+    fi
+    rm -f "$BASE/"*".$$"* "$OVERLAY_DIR/"*".$$"*
+    release_lock
+    exit "$controller_exit_status"
+}
+
+require_package_identity() {
+    expected_version=$1
+    expected_md5=$(printf '%s' "$2" | tr 'A-F' 'a-f')
+    case $expected_md5 in
+        *[!0-9a-f]*|'') return 1 ;;
+    esac
+    [ "${#expected_md5}" -eq 32 ] &&
+        [ "$(cat "$VERSION_FILE" 2>/dev/null)" = "$expected_version" ] &&
+        [ "$(cat "$PACKAGE_MD5_FILE" 2>/dev/null)" = "$expected_md5" ] &&
+        [ "$(nvram get astrill_lazy_installed)" = 1 ] &&
+        [ "$(nvram get astrill_lazy_version)" = "$expected_version" ] &&
+        [ "$(nvram get astrill_lazy_pkg_md5 | tr 'A-F' 'a-f')" = \
+            "$expected_md5" ] || {
+        printf 'runtime package identity does not match installed NVRAM\n' >&2
         return 1
     }
-    uuencode -m "$archive_file" rules.tsv.gz > "$wrapper_file" || {
-        rm -f "$archive_file" "$wrapper_file"
+}
+
+require_hybrid_helper_identity() {
+    expected_helper_md5=$(printf '%s' "$1" | tr 'A-F' 'a-f')
+    case $expected_helper_md5 in
+        *[!0-9a-f]*|'') return 1 ;;
+    esac
+    [ "${#expected_helper_md5}" -eq 32 ] &&
+        [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$$" ] &&
+        [ -r "$HYBRID_HELPER" ] || return 1
+    actual_helper_md5=$(md5sum "$HYBRID_HELPER" | awk '{print $1}') ||
+        return 1
+    [ "$actual_helper_md5" = "$expected_helper_md5" ] || {
+        printf 'RAM transaction helper identity does not match\n' >&2
         return 1
     }
-    sed '1d;$d' "$wrapper_file"
-    encode_status=$?
-    rm -f "$archive_file" "$wrapper_file"
-    return "$encode_status"
 }
 
 decode_rule_document() {
@@ -321,49 +414,94 @@ restore_rule_document() {
     }
 }
 
-persistent_rule_bytes() {
-    source_file=$1
-    plain_value=$(cat "$source_file") || return 1
-    plain_bytes=$(printf '%s' "$plain_value" | wc -c)
-    compressed_value=$(encode_rule_document "$source_file") || {
-        printf '%s\n' "$plain_bytes"
-        return 0
-    }
-    compressed_bytes=$(printf '%s' "$compressed_value" | wc -c)
-    if [ "$compressed_bytes" -lt "$plain_bytes" ]; then
-        printf '%s\n' "$compressed_bytes"
-    else
-        printf '%s\n' "$plain_bytes"
-    fi
-}
-
-persist_rule_document() {
-    source_file=$1
-    plain_key=$2
-    compressed_key=$3
-    plain_value=$(cat "$source_file") || return 1
-    plain_bytes=$(printf '%s' "$plain_value" | wc -c)
-    compressed_value=$(encode_rule_document "$source_file") || compressed_value=
-    compressed_bytes=$(printf '%s' "$compressed_value" | wc -c)
-    if [ -n "$compressed_value" ] &&
-       [ "$compressed_bytes" -lt "$plain_bytes" ]; then
-        nvram set "$compressed_key=$compressed_value" || return 1
-        nvram unset "$plain_key" || return 1
-    else
-        nvram set "$plain_key=$plain_value" || return 1
-        nvram unset "$compressed_key" || return 1
-    fi
+ensure_runtime_epoch() {
+    [ -s "$RUNTIME_EPOCH_FILE" ] && return 0
+    {
+        cat /proc/sys/kernel/random/uuid 2>/dev/null ||
+            printf '%s-%s\n' "$(date +%s)" "$$"
+    } | md5sum | awk '{ print $1 }' > "$RUNTIME_EPOCH_FILE.new" ||
+        return 1
+    mv "$RUNTIME_EPOCH_FILE.new" "$RUNTIME_EPOCH_FILE"
 }
 
 initialize_rules() {
-    [ -f "$CURRENT" ] && return 0
-    if ! restore_rule_document \
+    ensure_runtime_epoch || return 1
+    [ -s "$CORE_GENERATION_FILE" ] || printf '1\n' > "$CORE_GENERATION_FILE"
+    if [ -f "$CURRENT" ]; then
+        validate_rules "$CURRENT" && return 0
+        rm -f "$CURRENT"
+    fi
+    current_record_present=false
+    if [ -n "$(nvram get "$CURRENT_RULES_GZ_KEY")" ] ||
+       [ -n "$(nvram get "$CURRENT_RULES_KEY")" ]; then
+        current_record_present=true
+    fi
+    previous_record_present=false
+    if [ -n "$(nvram get "$PREVIOUS_RULES_GZ_KEY")" ] ||
+       [ -n "$(nvram get "$PREVIOUS_RULES_KEY")" ]; then
+        previous_record_present=true
+    fi
+    if restore_rule_document \
         "$CURRENT" "$CURRENT_RULES_GZ_KEY" "$CURRENT_RULES_KEY"; then
-        printf '# astrill-lazy-rules-v1\n' > "$CURRENT"
+        rm -f "$CORE_RECOVERY_FILE"
+    elif [ "$current_record_present" = true ] ||
+         [ "$previous_record_present" = true ]; then
+        if restore_rule_document \
+            "$CURRENT.recovered" \
+            "$PREVIOUS_RULES_GZ_KEY" "$PREVIOUS_RULES_KEY"; then
+            mv "$CURRENT.recovered" "$CURRENT" || return 1
+            printf '%s\n' \
+                "persistent current core was invalid; running verified previous core" \
+                > "$CORE_RECOVERY_FILE"
+            log_message ERROR \
+                "persistent current core was invalid; recovered verified previous core"
+        else
+            rm -f "$CURRENT.recovered"
+            printf '# astrill-lazy-rules-v1\n' > "$CURRENT" || return 1
+            printf '%s\n' \
+                "persistent core was invalid and no verified recovery core was available" \
+                > "$CORE_RECOVERY_FILE"
+            log_message ERROR \
+                "persistent core was invalid; quarantined to an empty degraded runtime"
+        fi
+    else
+        printf '# astrill-lazy-rules-v1\n' > "$CURRENT" || return 1
+        rm -f "$CORE_RECOVERY_FILE"
     fi
     restore_rule_document \
         "$PREVIOUS" "$PREVIOUS_RULES_GZ_KEY" "$PREVIOUS_RULES_KEY" ||
         rm -f "$PREVIOUS"
+}
+
+validate_persisted_core() {
+    pc_base=$BASE/validate.$$
+    rm -rf "$pc_base"
+    mkdir -p "$pc_base"
+    ASTRILL_LAZY_BASE=$pc_base "$0" rules > "$pc_base/selected.tsv"
+    pc_ok=$?
+    pc_recovery=$(cat "$pc_base/core-recovery" 2>/dev/null || true)
+    pc_selected=current
+    if [ -n "$pc_recovery" ]; then
+        pc_ok=1
+        case $pc_recovery in
+            *previous*) pc_selected=previous ;;
+            *) pc_selected=quarantine-empty ;;
+        esac
+    elif [ -z "$(nvram get "$CURRENT_RULES_GZ_KEY")$(nvram get "$CURRENT_RULES_KEY")" ]; then
+        pc_selected=empty
+    fi
+    pc_hash=$(document_hash "$pc_base/selected.tsv" 2>/dev/null || true)
+    pc_rows=$(rule_row_count "$pc_base/selected.tsv")
+    if [ "$1" = true ]; then
+        [ "$pc_ok" -eq 0 ] && pc_ok_json=true || pc_ok_json=false
+        printf '{"ok":%s,"selected":"%s","hash":"%s","rows":%s}\n' \
+            "$pc_ok_json" "$pc_selected" "$pc_hash" "$pc_rows"
+    else
+        printf 'selected=%s hash=%s rows=%s\n' \
+            "$pc_selected" "$pc_hash" "$pc_rows"
+    fi
+    rm -rf "$pc_base"
+    [ "$pc_ok" -eq 0 ]
 }
 
 initialize_app_flows() {
@@ -473,7 +611,8 @@ append_compiled_rule() {
     set +f
     IFS=$old_ifs
     for port in "$@"; do
-        append_rule_pair "$chain" "$kind" "$selector" "$target" "$protocol" "$port" || return 1
+        append_rule_pair "$chain" "$kind" "$selector" "$target" "$protocol" \
+            "$port" || return 1
     done
 }
 
@@ -529,35 +668,41 @@ build_chain() {
     chain=$1
     file=$2
     refresh_mode=${3:-0}
-    new_resolved=$BASE/resolved.new.tsv
+    new_resolved=$BASE/resolved.new.$$.tsv
+    new_unresolved=$BASE/unresolved.new.$$.txt
     : > "$new_resolved"
-    : > "$UNRESOLVED"
+    : > "$new_unresolved"
     ensure_chain_shell "$chain" || return 1
 
-    while IFS="$TAB" read -r id enabled priority kind selector target protocol ports label origin; do
+    while IFS="$TAB" read -r id enabled priority kind selector target \
+        protocol ports label origin; do
         case $id in ''|\#*) continue ;; esac
         [ "$enabled" = 1 ] || continue
         case $kind in
             domain)
                 addresses=$(domain_addresses "$selector" "$new_resolved" "$refresh_mode")
                 if [ -z "$addresses" ]; then
-                    printf '%s\n' "$selector" >> "$UNRESOLVED"
+                    printf '%s\n' "$selector" >> "$new_unresolved"
                     continue
                 fi
                 for address in $addresses; do
-                    append_compiled_rule "$chain" destination "$address/32" "$target" "$protocol" "$ports" || return 1
+                    append_compiled_rule "$chain" destination "$address/32" \
+                        "$target" "$protocol" "$ports" || return 1
                 done
                 ;;
             cidr)
-                append_compiled_rule "$chain" destination "$selector" "$target" "$protocol" "$ports" || return 1
+                append_compiled_rule "$chain" destination "$selector" \
+                    "$target" "$protocol" "$ports" || return 1
                 ;;
             device)
-                append_compiled_rule "$chain" source "$selector" "$target" "$protocol" "$ports" || return 1
+                append_compiled_rule "$chain" source "$selector" "$target" \
+                    "$protocol" "$ports" || return 1
                 ;;
         esac
     done < "$file"
     iptables -w 10 -t mangle -A "$chain" -j RETURN || return 1
-    mv "$new_resolved" "$RESOLVED"
+    runtime_resolved_candidate=$new_resolved
+    runtime_unresolved_candidate=$new_unresolved
 }
 
 active_chain() {
@@ -574,24 +719,80 @@ inactive_chain() {
     fi
 }
 
+chain_document_hash_file() {
+    case $1 in
+        "$CHAIN_A") printf '%s/chain-a.document-hash\n' "$BASE" ;;
+        "$CHAIN_B") printf '%s/chain-b.document-hash\n' "$BASE" ;;
+        *) return 1 ;;
+    esac
+}
+
+prerouting_rules() {
+    iptables -w 10 -t mangle -S PREROUTING 2>/dev/null
+}
+
+prerouting_jump_count() {
+    jump_count_rules=$(prerouting_rules) || return 1
+    printf '%s\n' "$jump_count_rules" |
+        awk -v rule="-A PREROUTING -j $1" '$0 == rule { n++ } END { print n+0 }'
+}
+
+first_prerouting_rule() {
+    prerouting_rules | sed -n '2p'
+}
+
 remove_prerouting_jump() {
     chain=$1
-    while iptables -w 10 -t mangle -C PREROUTING -j "$chain" >/dev/null 2>&1; do
-        iptables -w 10 -t mangle -D PREROUTING -j "$chain" || break
+    remove_count=$(prerouting_jump_count "$chain") || return 1
+    while [ "$remove_count" -gt 0 ]; do
+        iptables -w 10 -t mangle -D PREROUTING -j "$chain" || return 1
+        remove_next_count=$(prerouting_jump_count "$chain") || return 1
+        [ "$remove_next_count" -lt "$remove_count" ] || return 1
+        remove_count=$remove_next_count
     done
+    [ "$(prerouting_jump_count "$chain")" -eq 0 ]
 }
 
 activate_chain() {
     activation_target=$1
+    case $activation_target in "$CHAIN_A"|"$CHAIN_B") ;; *) return 1 ;; esac
     activation_other=$CHAIN_A
     [ "$activation_target" = "$CHAIN_A" ] && activation_other=$CHAIN_B
 
     iptables -w 10 -t mangle -I PREROUTING 1 -j "$activation_target" || return 1
-    remove_prerouting_jump "$activation_other"
-    while [ "$(iptables -w 10 -t mangle -S PREROUTING 2>/dev/null | grep -c -- "-A PREROUTING -j $activation_target")" -gt 1 ]; do
-        iptables -w 10 -t mangle -D PREROUTING -j "$activation_target" || break
+    remove_prerouting_jump "$activation_other" || return 1
+    activation_count=$(prerouting_jump_count "$activation_target") || return 1
+    while [ "$activation_count" -gt 1 ]; do
+        iptables -w 10 -t mangle -D PREROUTING -j "$activation_target" ||
+            return 1
+        activation_next_count=$(
+            prerouting_jump_count "$activation_target"
+        ) || return 1
+        [ "$activation_next_count" -lt "$activation_count" ] || return 1
+        activation_count=$activation_next_count
     done
-    printf '%s\n' "$activation_target" > "$ACTIVE_FILE"
+    if [ "$(first_prerouting_rule)" != \
+        "-A PREROUTING -j $activation_target" ]; then
+        remove_prerouting_jump "$activation_target" || return 1
+        iptables -w 10 -t mangle -I PREROUTING 1 \
+            -j "$activation_target" || return 1
+    fi
+    activation_count=$(prerouting_jump_count "$activation_target") ||
+        return 1
+    [ "$activation_count" -eq 1 ] || return 1
+    [ "$(prerouting_jump_count "$activation_other")" -eq 0 ] || return 1
+    [ "$(first_prerouting_rule)" = \
+        "-A PREROUTING -j $activation_target" ] || return 1
+    activation_target_references=$(
+        policy_chain_reference_count "$activation_target"
+    ) || return 1
+    activation_other_references=$(
+        policy_chain_reference_count "$activation_other"
+    ) || return 1
+    [ "$activation_target_references" -eq 1 ] &&
+        [ "$activation_other_references" -eq 0 ] || return 1
+    printf '%s\n' "$activation_target" > "$ACTIVE_FILE.new.$$" || return 1
+    mv "$ACTIVE_FILE.new.$$" "$ACTIVE_FILE"
 }
 
 cleanup_app_chain() {
@@ -1272,95 +1473,169 @@ ensure_routes() {
     return 1
 }
 
+runtime_policy_validate() {
+    if [ "$(sed -n '1p' "$1")" = "# astrill-lazy-rules-v1" ]; then
+        validate_rules "$1"
+    else
+        load_hybrid_helper && hybrid_validate_effective "$1"
+    fi
+}
+
+compose_runtime_policy() {
+    if load_hybrid_helper && [ "$(hybrid_overlay_count)" -gt 0 ]; then
+        hybrid_compose_effective "$1" "$2"
+    else
+        cp "$1" "$2"
+    fi
+}
+
+current_runtime_document() {
+    initialize_rules || return 1
+    if load_hybrid_helper && [ "$(hybrid_overlay_count)" -gt 0 ]; then
+        runtime_effective=$BASE/effective.recompose.$$.tsv
+        rm -f "$runtime_effective"
+        hybrid_compose_effective "$CURRENT" "$runtime_effective" || {
+            rm -f "$runtime_effective"
+            return 1
+        }
+        runtime_hash=$(document_hash "$runtime_effective") || {
+            rm -f "$runtime_effective"
+            return 1
+        }
+        effective_hash=
+        if [ -f "$EFFECTIVE" ] &&
+           hybrid_validate_effective "$EFFECTIVE"; then
+            effective_hash=$(document_hash "$EFFECTIVE") || effective_hash=
+        fi
+        if [ "$runtime_hash" = "$effective_hash" ]; then
+            rm -f "$runtime_effective"
+        else
+            mv "$runtime_effective" "$EFFECTIVE" || {
+                rm -f "$runtime_effective"
+                return 1
+            }
+        fi
+        printf '%s\n' "$EFFECTIVE"
+    else
+        printf '%s\n' "$CURRENT"
+    fi
+}
+
+policy_chain_reference_count() {
+    reference_chain=$1
+    reference_rules=$(iptables -w 10 -t mangle -S 2>/dev/null) || return 1
+    printf '%s\n' "$reference_rules" | awk -v chain="$reference_chain" '
+        {
+            for (field = 1; field < NF; field++) {
+                if (($field == "-j" || $field == "-g") &&
+                    $(field + 1) == chain) references++
+            }
+        }
+        END { print references + 0 }
+    '
+}
+
+discard_policy_chain() {
+    discard_chain=$1
+    discard_references=$(policy_chain_reference_count "$discard_chain") ||
+        return 1
+    [ "$discard_references" -eq 0 ] || return 1
+    discard_hash_file=$(chain_document_hash_file "$discard_chain") ||
+        discard_hash_file=
+    [ -z "$discard_hash_file" ] || rm -f "$discard_hash_file"
+}
+
 apply_runtime() {
     file=$1
     refresh_mode=${2:-0}
+    runtime_resolved_candidate=
+    runtime_unresolved_candidate=
+    previous_runtime_chain=$(active_chain)
     next_chain=$(inactive_chain)
+    next_hash_file=$(chain_document_hash_file "$next_chain") || return 1
+    next_document_hash=$(document_hash "$file") || return 1
+    rm -f "$next_hash_file" "$next_hash_file.new.$$"
     build_chain "$next_chain" "$file" "$refresh_mode" || {
+        discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
         log_message ERROR "could not build policy chain $next_chain"
         return 1
     }
-    ensure_routes || return 1
-    activate_chain "$next_chain" || return 1
+    printf '%s\n' "$next_document_hash" > "$next_hash_file.new.$$" || {
+        rm -f "$runtime_resolved_candidate" "$runtime_unresolved_candidate"
+        discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        return 1
+    }
+    mv "$next_hash_file.new.$$" "$next_hash_file" || {
+        rm -f "$runtime_resolved_candidate" "$runtime_unresolved_candidate"
+        discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        return 1
+    }
+    ensure_routes || {
+        rm -f "$runtime_resolved_candidate" "$runtime_unresolved_candidate"
+        discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        return 1
+    }
+    if ! activate_chain "$next_chain"; then
+        rm -f "$runtime_resolved_candidate" "$runtime_unresolved_candidate"
+        if activate_chain "$previous_runtime_chain"; then
+            discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        else
+            set_reconcile_error \
+                "policy activation failed and the previous chain could not be restored"
+        fi
+        return 1
+    fi
+    if [ -n "$runtime_resolved_candidate" ] &&
+       { ! mv "$runtime_unresolved_candidate" "$UNRESOLVED" ||
+         ! mv "$runtime_resolved_candidate" "$RESOLVED"; }; then
+        rm -f "$runtime_resolved_candidate" "$runtime_unresolved_candidate"
+        activate_chain "$previous_runtime_chain" >/dev/null 2>&1 ||
+            set_reconcile_error \
+                "resolved-domain publication failed and the previous chain could not be restored"
+        return 1
+    fi
     date +%s > "$BASE/last-apply"
     return 0
 }
 
-persist_rules() {
-    persist_rule_document \
-        "$CURRENT" "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY" || return 1
-    if [ "$PERSIST_PREVIOUS" -eq 1 ] && [ -f "$PREVIOUS" ]; then
-        persist_rule_document \
-            "$PREVIOUS" "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY" ||
-            return 1
-    else
-        nvram unset "$PREVIOUS_RULES_KEY"
-        nvram unset "$PREVIOUS_RULES_GZ_KEY"
-    fi
-    nvram commit >/dev/null
-}
-
-check_persistence_capacity() {
-    candidate=$1
-    candidate_bytes=$(persistent_rule_bytes "$candidate") || return 1
-    current_bytes=$(persistent_rule_bytes "$CURRENT") || return 1
-    stored_bytes=0
-    for stored_key in \
-        "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY" \
-        "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY"; do
-        stored_value=$(nvram get "$stored_key")
-        stored_bytes=$((stored_bytes + $(printf '%s' "$stored_value" | wc -c)))
-    done
-    desired_bytes=$((candidate_bytes + current_bytes))
-    growth=$((desired_bytes - stored_bytes))
-
-    size_line=$(nvram show 2>&1 >/dev/null)
-    free_bytes=$(printf '%s\n' "$size_line" | sed -n 's/.*(\([0-9][0-9]*\) left).*/\1/p')
-    if ! is_uint "$free_bytes"; then
-        log_message WARN "could not determine NVRAM headroom"
-        PERSIST_PREVIOUS=1
-        return 0
-    fi
-    if [ $((free_bytes - growth)) -ge "$MIN_NVRAM_FREE_BYTES" ]; then
-        PERSIST_PREVIOUS=1
-        return 0
-    fi
-
-    current_only_growth=$((candidate_bytes - stored_bytes))
-    if [ $((free_bytes - current_only_growth)) -lt "$MIN_NVRAM_FREE_BYTES" ]; then
-        printf 'insufficient NVRAM headroom for the active rule document\n' >&2
-        return 1
-    fi
-    PERSIST_PREVIOUS=0
-    log_message WARN \
-        "NVRAM headroom permits active rules only; rollback remains available until reboot"
-}
-
 apply_file() {
     candidate=$1
-    validate_rules "$candidate" || return 1
-    check_persistence_capacity "$candidate" || return 1
-    apply_runtime "$candidate" || return 1
-    [ ! -f "$CURRENT" ] || cp "$CURRENT" "$PREVIOUS"
-    cp "$candidate" "$CURRENT"
-    persist_rules || return 1
-    unresolved_count=$(wc -l < "$UNRESOLVED" 2>/dev/null || printf 0)
-    log_message INFO "applied policy document; unresolved domains: $unresolved_count"
+    generation=$(cat "$CORE_GENERATION_FILE" 2>/dev/null || printf 1)
+    is_uint "$generation" || generation=1
+    load_hybrid_helper || {
+        printf 'RAM transaction helper is required for a safe core write\n' >&2
+        return 1
+    }
+    hybrid_apply_core_file "$candidate" "$generation"
 }
 
 ensure_runtime() {
+    if [ -f "$POLICY_TRANSACTION_FILE" ]; then
+        load_hybrid_helper &&
+            hybrid_recover_interrupted_transaction || return 1
+    fi
     initialize_rules
-    validate_rules "$CURRENT" || return 1
+    runtime_document=$(current_runtime_document) || return 1
+    runtime_policy_validate "$runtime_document" || return 1
+    runtime_document_hash=$(document_hash "$runtime_document") || return 1
     ensure_routes || return 1
     active=$(active_chain)
-    if ! chain_exists "$active"; then
-        apply_runtime "$CURRENT" || return 1
+    active_hash_file=$(chain_document_hash_file "$active") || return 1
+    active_document_hash=$(cat "$active_hash_file" 2>/dev/null || true)
+    active_other=$CHAIN_A
+    [ "$active" = "$CHAIN_A" ] && active_other=$CHAIN_B
+    active_jump_count=$(prerouting_jump_count "$active") ||
+        active_jump_count=-1
+    other_jump_count=$(prerouting_jump_count "$active_other") ||
+        other_jump_count=-1
+    first_jump=$(first_prerouting_rule) || first_jump=
+    if ! chain_exists "$active" ||
+       [ "$active_document_hash" != "$runtime_document_hash" ] ||
+       [ "$active_jump_count" -ne 1 ] ||
+       [ "$other_jump_count" -ne 0 ] ||
+       [ "$first_jump" != "-A PREROUTING -j $active" ]; then
+        apply_runtime "$runtime_document" || return 1
         active=$(active_chain)
-    fi
-    first_jump=$(iptables -w 10 -t mangle -S PREROUTING 2>/dev/null | sed -n '2p')
-    if [ "$first_jump" != "-A PREROUTING -j $active" ]; then
-        remove_prerouting_jump "$active"
-        iptables -w 10 -t mangle -I PREROUTING 1 -j "$active" || return 1
     fi
     ensure_app_runtime || return 1
 }
@@ -1489,6 +1764,8 @@ cleanup_watchdog() {
     if is_live_pid "${watchdog_sleep_pid:-0}"; then
         kill "$watchdog_sleep_pid" 2>/dev/null || true
     fi
+    cleanup_hybrid_runtime \
+        "interrupted watchdog runtime metadata could not be restored" || true
     release_watchdog_lock
     cleanup_watchdog_pid
 }
@@ -1502,8 +1779,6 @@ try_watchdog_lock() {
     watchdog_lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || printf 0)
     is_live_pid "$watchdog_lock_pid" && return 1
 
-    # A live owner writes its pid immediately after mkdir. Recheck once before
-    # reclaiming a missing or dead owner so the watchdog cannot steal that gap.
     sleep 1
     watchdog_lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || printf 0)
     is_live_pid "$watchdog_lock_pid" && return 1
@@ -1523,27 +1798,34 @@ release_watchdog_lock() {
 
 watchdog_loop() {
     watchdog_sleep_pid=0
-    trap 'cleanup_watchdog; trap - INT TERM EXIT; exit 0' INT TERM EXIT
+    trap 'cleanup_watchdog; trap - HUP INT TERM EXIT; exit 0' \
+        HUP INT TERM EXIT
     cycles=0
     while :; do
         if try_watchdog_lock; then
             ensure_runtime >/dev/null 2>&1 || true
             cycles=$((cycles + 1))
             if [ "$cycles" -ge "$WATCHDOG_REFRESH_CYCLES" ]; then
-                initialize_rules
-                if validate_rules "$CURRENT" &&
-                   apply_runtime "$CURRENT" 1; then
-                    log_message INFO \
-                        "watchdog refreshed resolved domains and policy routes"
+                if load_hybrid_helper &&
+                   [ "$(hybrid_overlay_count)" -gt 0 ]; then
+                    cycles=0
                 else
-                    if rebase_is_required; then
-                        set_reconcile_error "$REBASE_ERROR_MESSAGE"
+                    refresh_document=$(current_runtime_document)
+                    if [ -n "$refresh_document" ] &&
+                       runtime_policy_validate "$refresh_document" &&
+                       apply_runtime "$refresh_document" 1; then
+                        log_message INFO \
+                            "watchdog refreshed resolved domains and policy routes"
                     else
-                        set_reconcile_error \
-                            "watchdog could not refresh resolved domains and policy routes"
+                        if rebase_is_required; then
+                            set_reconcile_error "$REBASE_ERROR_MESSAGE"
+                        else
+                            set_reconcile_error \
+                                "watchdog could not refresh resolved domains and policy routes"
+                        fi
                     fi
+                    cycles=0
                 fi
-                cycles=0
             fi
             release_watchdog_lock
         fi
@@ -1556,6 +1838,24 @@ watchdog_loop() {
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]/?/g'
+}
+
+print_layered_status() {
+    if load_hybrid_helper; then
+        hybrid_print_layered_status
+        return
+    fi
+    core_hash=$(document_hash "$CURRENT") || return 1
+    core_bytes=$(wc -c < "$CURRENT")
+    printf ',"runtime_epoch":"%s"' "$(cat "$RUNTIME_EPOCH_FILE")"
+    printf ',"core":{"generation":%s,"hash":"%s"' \
+        "$(cat "$CORE_GENERATION_FILE" 2>/dev/null || printf 1)" "$core_hash"
+    printf ',"origins":%s,"rows":%s,"bytes":%s}' \
+        "$origin_count" "$compiled_count" "$core_bytes"
+    printf ',"overlays":[]'
+    printf ',"effective":{"hash":"%s","rows":%s,"bytes":%s' \
+        "$core_hash" "$compiled_count" "$core_bytes"
+    printf ',"generated_matches":null}'
 }
 
 app_flows_json() {
@@ -1579,6 +1879,48 @@ status_json() {
     initialize_app_flows
     active=$(active_chain)
     version=$(cat "$VERSION_FILE" 2>/dev/null || printf unknown)
+    package_md5=$(cat "$PACKAGE_MD5_FILE" 2>/dev/null || true)
+    stored_package_md5=$(nvram get astrill_lazy_pkg_md5)
+    helper_md5=$(md5sum "$HYBRID_HELPER" 2>/dev/null | awk '{print $1}')
+    case $package_md5 in
+        ''|*[!0-9a-fA-F]*) package_md5_json=null ;;
+        *)
+            if [ "${#package_md5}" -eq 32 ]; then
+                package_md5_json="\"$(printf '%s' "$package_md5" | tr 'A-F' 'a-f')\""
+            else
+                package_md5_json=null
+            fi
+            ;;
+    esac
+    case $stored_package_md5 in
+        ''|*[!0-9a-fA-F]*) stored_package_md5_json=null ;;
+        *)
+            if [ "${#stored_package_md5}" -eq 32 ]; then
+                stored_package_md5_json="\"$(printf '%s' \
+                    "$stored_package_md5" | tr 'A-F' 'a-f')\""
+            else
+                stored_package_md5_json=null
+            fi
+            ;;
+    esac
+    case $helper_md5 in
+        ''|*[!0-9a-fA-F]*) helper_md5_json=null ;;
+        *)
+            if [ "${#helper_md5}" -eq 32 ]; then
+                helper_md5_json="\"$(printf '%s' "$helper_md5" |
+                    tr 'A-F' 'a-f')\""
+            else
+                helper_md5_json=null
+            fi
+            ;;
+    esac
+    package_identity_ok=false
+    if [ "$package_md5_json" != null ] &&
+       [ "$package_md5_json" = "$stored_package_md5_json" ] &&
+       [ "$(nvram get astrill_lazy_installed)" = 1 ] &&
+       [ "$(nvram get astrill_lazy_version)" = "$version" ]; then
+        package_identity_ok=true
+    fi
     compiled_count=$(awk -F '\t' '$0 !~ /^#/ && NF == 10 { count++ } END { print count + 0 }' "$CURRENT")
     origin_count=$(awk -F '\t' '$0 !~ /^#/ && NF == 10 && !seen[$10]++ { count++ } END { print count + 0 }' "$CURRENT")
     enabled_origin_count=$(awk -F '\t' '$0 !~ /^#/ && NF == 10 && $2 == 1 && !seen[$10]++ { count++ } END { print count + 0 }' "$CURRENT")
@@ -1637,11 +1979,16 @@ status_json() {
         precedence_ok=true
     fi
     last_reconcile_error=$(cat "$RECONCILE_ERROR_FILE" 2>/dev/null || true)
+    core_recovery=$(cat "$CORE_RECOVERY_FILE" 2>/dev/null || true)
+    if [ -n "$core_recovery" ] && [ -z "$last_reconcile_error" ]; then
+        last_reconcile_error=$core_recovery
+    fi
     policy_health=ready
     [ "$jump" = true ] || policy_health=degraded
     [ "$direct_table_ready" = true ] || policy_health=degraded
     [ "$vpn_table_ready" = true ] || policy_health=degraded
     [ "$precedence_ok" = true ] || policy_health=degraded
+    [ "$package_identity_ok" = true ] || policy_health=degraded
     if [ "$vpn_state" = up ]; then
         [ "$native_table_ready" = true ] || policy_health=degraded
     fi
@@ -1664,6 +2011,10 @@ status_json() {
     printf '{'
     printf '"schema_version":1,"ok":true'
     printf ',"version":"%s","health":"%s"' "$(json_escape "$version")" "$health"
+    printf ',"package_md5":%s,"stored_package_md5":%s' \
+        "$package_md5_json" "$stored_package_md5_json"
+    printf ',"helper_md5":%s' "$helper_md5_json"
+    printf ',"package_identity_ok":%s' "$package_identity_ok"
     printf ',"vpn_state":"%s","astrill_status":%s' "$vpn_state" "${astrill_status:-0}"
     printf ',"astrill_server_id":%s,"astrill_protocol":%s' "${astrill_server:-0}" "${astrill_protocol:-0}"
     printf ',"wan_interface":"%s","active_chain":"%s"' "$(json_escape "$wan_iface")" "$active"
@@ -1680,6 +2031,11 @@ status_json() {
         "$direct_table_ready" "$vpn_table_ready" "$native_table_ready"
     printf ',"vpn_fail_closed":%s' "$vpn_fail_closed"
     printf ',"rebase_required":%s' "$rebase_required"
+    if [ -n "$core_recovery" ]; then
+        printf ',"core_recovery":"%s"' "$(json_escape "$core_recovery")"
+    else
+        printf ',"core_recovery":null'
+    fi
     if [ -n "$last_reconcile_error" ]; then
         printf ',"last_reconcile_error":"%s"' \
             "$(json_escape "$last_reconcile_error")"
@@ -1691,6 +2047,7 @@ status_json() {
     printf ',"direct_rules":%s,"vpn_rules":%s' "$direct_count" "$vpn_count"
     printf ',"resolved_addresses":%s,"unresolved_domains":%s' "$resolved_count" "$unresolved_count"
     printf ',"last_apply":%s' "$last_apply"
+    print_layered_status || fail "status failed"
     printf ',"rules":['
     first=true
     while IFS="$TAB" read -r id enabled priority kind selector target protocol ports label origin; do
@@ -1899,9 +2256,6 @@ switch_astrill() {
     done < "$rollback_file"
     nvram commit >/dev/null
 
-    # Stop any late or partially established requested tunnel before restoring
-    # the original connection state. In particular, a failed switch that began
-    # while disconnected must never start the previous endpoint.
     if ! prepare_for_astrill_stop; then
         rm -f "$rollback_file"
         fail "could not enable VPN-policy fail-closed; Astrill was not stopped after the failed switch"
@@ -1910,7 +2264,6 @@ switch_astrill() {
     attempts=0
     rollback_stopped=false
     while [ "$attempts" -lt 65 ]; do
-        # pgrep -f is not reliable across the supported BusyBox builds.
         # shellcheck disable=SC2009
         if ! ip route show table main | grep -q ' dev tun0' &&
            ! ps w | grep astrill/openvpn.conf | grep -vq grep; then
@@ -2047,7 +2400,6 @@ set_astrill_connection() {
             /dev/astrill/astrillvpn stop > "$BASE/astrill-connection.log" 2>&1 || true
             attempts=0
             while [ "$attempts" -lt 65 ]; do
-                # pgrep -f is not reliable across the supported BusyBox builds.
                 # shellcheck disable=SC2009
                 if ! ip route show table main | grep -q ' dev tun0' &&
                    ! ps w | grep astrill/openvpn.conf | grep -vq grep; then
@@ -2074,13 +2426,30 @@ usage() {
     cat <<'EOF'
 Usage: alctl COMMAND
 
-  status [--json]       Show controller, policy, and tunnel status
-  rules                 Print the active compiled rule document
-  apply FILE|-          Validate and atomically apply a rule document
+  status [--json]
+  rules
+  validate-persisted-core [--json]
+                        Independently validate the next boot's stored core
+  apply VERSION PACKAGE_MD5 HELPER_MD5 FILE|-
+                        Administrative core apply without generation CAS
+  core-apply VERSION PACKAGE_MD5 HELPER_MD5 GENERATION FILE|-
+                        Apply persistent core if its generation still matches
   refresh [--json]      Re-resolve domains and rebuild the active policy
-  rollback [--json]     Restore the previous rule document
-  toggle-origin ID      Enable or disable all compiled rules for an origin
-  route-origin ID ROUTE Set an origin to direct or vpn
+  rollback VERSION PACKAGE_MD5 HELPER_MD5 [--json]
+                        Administrative rollback without generation CAS
+  core-rollback VERSION PACKAGE_MD5 HELPER_MD5 GENERATION [--json]
+                        Restore previous core if its generation still matches
+  overlay-put VERSION PACKAGE_MD5 HELPER_MD5 OWNER GENERATION SOURCE EXPECTED_SOURCE EXPECTED_MAC FILE|-
+                        Replace one RAM overlay; use - for no binding precondition
+  overlay-remove VERSION PACKAGE_MD5 HELPER_MD5 OWNER GENERATION
+                        Remove one owner overlay if its generation still matches
+  overlay-list [--json] Show RAM overlays and effective layered status
+  effective-status [--json]
+                        Show persistent core, overlays, and effective status
+  toggle-origin VERSION PACKAGE_MD5 HELPER_MD5 ID
+                        Enable or disable all compiled rules for an origin
+  route-origin VERSION PACKAGE_MD5 HELPER_MD5 ID ROUTE
+                        Set an origin to direct or vpn
   app-flow list         Show transient application source-port routes
   app-flow set ID SOURCE PROTOCOL PORTS ROUTE
                         Set one transient application source-port route
@@ -2106,9 +2475,22 @@ case $command in
         initialize_rules
         cat "$CURRENT"
         ;;
+    validate-persisted-core)
+        case ${2:-} in
+            '') persisted_json=false ;;
+            --json) persisted_json=true ;;
+            *) fail "validate-persisted-core accepts only --json" ;;
+        esac
+        acquire_lock
+        validate_persisted_core "$persisted_json" ||
+            exit 1
+        ;;
     apply)
-        source=${2:--}
-        candidate=$BASE/rules.candidate.tsv
+        expected_version=${2:-}
+        expected_md5=${3:-}
+        expected_helper_md5=${4:-}
+        source=${5:--}
+        candidate=$BASE/core.candidate.$$.tsv
         if [ "$source" = "-" ]; then
             cat > "$candidate"
         else
@@ -2116,21 +2498,61 @@ case $command in
             cp "$source" "$candidate"
         fi
         acquire_lock
+        require_package_identity "$expected_version" "$expected_md5" ||
+            fail "package identity precondition failed"
+        require_hybrid_helper_identity "$expected_helper_md5" ||
+            fail "helper identity precondition failed"
         initialize_rules
         apply_file "$candidate" || fail "rule validation or policy activation failed"
         rm -f "$candidate"
         status_json
         ;;
+    core-apply)
+        expected_version=${2:-}
+        expected_md5=${3:-}
+        expected_helper_md5=${4:-}
+        expected=${5:-}
+        is_uint "$expected" ||
+            fail "core-apply requires the expected core generation"
+        source=${6:--}
+        candidate=$BASE/core.candidate.$$.tsv
+        if [ "$source" = "-" ]; then
+            cat > "$candidate"
+        else
+            [ -f "$source" ] || fail "rule file was not found: $source"
+            cp "$source" "$candidate"
+        fi
+        acquire_lock
+        require_package_identity "$expected_version" "$expected_md5" ||
+            fail "package identity precondition failed"
+        require_hybrid_helper_identity "$expected_helper_md5" ||
+            fail "helper identity precondition failed"
+        initialize_rules
+        load_hybrid_helper || fail "helper missing"
+        hybrid_apply_core_file "$candidate" "$expected" ||
+            fail "core generation, validation, persistence, or activation failed"
+        rm -f "$candidate"
+        status_json
+        ;;
     refresh)
         acquire_lock
-        initialize_rules
-        validate_rules "$CURRENT" || fail "stored rules are invalid"
-        apply_runtime "$CURRENT" 1 || fail "could not refresh policy"
+        refresh_document=$(current_runtime_document) ||
+            fail "invalid policy"
+        runtime_policy_validate "$refresh_document" ||
+            fail "invalid effective policy"
+        apply_runtime "$refresh_document" 1 || fail "could not refresh policy"
         log_message INFO "refreshed resolved domains and policy routes"
         status_json
         ;;
     rollback)
+        expected_version=${2:-}
+        expected_md5=${3:-}
+        expected_helper_md5=${4:-}
         acquire_lock
+        require_package_identity "$expected_version" "$expected_md5" ||
+            fail "package identity precondition failed"
+        require_hybrid_helper_identity "$expected_helper_md5" ||
+            fail "helper identity precondition failed"
         initialize_rules
         [ -f "$PREVIOUS" ] || fail "no previous rule document is available"
         candidate=$BASE/rules.rollback.tsv
@@ -2139,14 +2561,102 @@ case $command in
         rm -f "$candidate"
         status_json
         ;;
-    toggle-origin)
+    core-rollback)
+        expected_version=${2:-}
+        expected_md5=${3:-}
+        expected_helper_md5=${4:-}
+        expected=${5:-}
+        is_uint "$expected" ||
+            fail "core-rollback requires the expected core generation"
         acquire_lock
-        transform_origin toggle "${2:-}"
+        require_package_identity "$expected_version" "$expected_md5" ||
+            fail "package identity precondition failed"
+        require_hybrid_helper_identity "$expected_helper_md5" ||
+            fail "helper identity precondition failed"
+        initialize_rules
+        [ -f "$PREVIOUS" ] || fail "no previous rule document is available"
+        candidate=$BASE/rules.rollback.$$.tsv
+        cp "$PREVIOUS" "$candidate"
+        load_hybrid_helper || fail "helper missing"
+        hybrid_apply_core_file "$candidate" "$expected" ||
+            fail "core generation changed or rollback failed"
+        rm -f "$candidate"
+        status_json
+        ;;
+    overlay-put)
+        expected_version=${2:-}
+        expected_md5=${3:-}
+        expected_helper_md5=${4:-}
+        owner=${5:-}
+        expected=${6:-}
+        source_scope=${7:-auto}
+        expected_source=${8:--}
+        expected_mac=${9:--}
+        overlay_source=${10:--}
+        overlay_candidate=$BASE/overlay.candidate.$$.tsv
+        if [ "$overlay_source" = "-" ]; then
+            cat > "$overlay_candidate"
+        else
+            [ -f "$overlay_source" ] ||
+                fail "overlay file was not found: $overlay_source"
+            cp "$overlay_source" "$overlay_candidate"
+        fi
+        acquire_lock
+        require_package_identity "$expected_version" "$expected_md5" ||
+            fail "package identity precondition failed"
+        require_hybrid_helper_identity "$expected_helper_md5" ||
+            fail "helper identity precondition failed"
+        initialize_rules
+        load_hybrid_helper ||
+            fail "helper missing"
+        hybrid_put_overlay \
+            "$owner" "$expected" "$source_scope" "$overlay_candidate" \
+            "$expected_source" "$expected_mac" ||
+            fail "overlay apply failed"
+        rm -f "$overlay_candidate"
+        status_json
+        ;;
+    overlay-remove)
+        expected_version=${2:-}
+        expected_md5=${3:-}
+        expected_helper_md5=${4:-}
+        acquire_lock
+        require_package_identity "$expected_version" "$expected_md5" ||
+            fail "package identity precondition failed"
+        require_hybrid_helper_identity "$expected_helper_md5" ||
+            fail "helper identity precondition failed"
+        initialize_rules
+        load_hybrid_helper ||
+            fail "helper missing"
+        hybrid_remove_overlay "${5:-}" "${6:-}" ||
+            fail "overlay remove failed"
+        status_json
+        ;;
+    overlay-list|effective-status)
+        status_json
+        ;;
+    toggle-origin)
+        expected_version=${2:-}
+        expected_md5=${3:-}
+        expected_helper_md5=${4:-}
+        acquire_lock
+        require_package_identity "$expected_version" "$expected_md5" ||
+            fail "package identity precondition failed"
+        require_hybrid_helper_identity "$expected_helper_md5" ||
+            fail "helper identity precondition failed"
+        transform_origin toggle "${5:-}"
         status_json
         ;;
     route-origin)
+        expected_version=${2:-}
+        expected_md5=${3:-}
+        expected_helper_md5=${4:-}
         acquire_lock
-        transform_origin route "${2:-}" "${3:-}"
+        require_package_identity "$expected_version" "$expected_md5" ||
+            fail "package identity precondition failed"
+        require_hybrid_helper_identity "$expected_helper_md5" ||
+            fail "helper identity precondition failed"
+        transform_origin route "${5:-}" "${6:-}"
         status_json
         ;;
     app-flow)

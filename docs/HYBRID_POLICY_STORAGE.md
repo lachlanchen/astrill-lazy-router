@@ -2,403 +2,441 @@
 
 ## Status
 
-This document is a staged design. Companion `0.2.10` implements the first
-storage prerequisite: policy documents use gzip/base64 in NVRAM when that is
-smaller, legacy plain records remain readable, upgrades migrate before package
-growth, and the 2 KiB reserve still controls persistent rollback.
+Companion `0.2.11` and Windows app `0.2.13` implement the hybrid policy model.
+It separates the editable local library from two router layers:
 
-The current companion does **not** yet separate persistent core policy from
-RAM overlays. Apply still persists the complete active document.
+- a small global core stored in NVRAM and activated immediately after reboot;
+- controller-owned, source-scoped overlays stored only in router RAM; and
+- a deterministic effective document composed from the core and every valid
+  overlay.
 
-Today, the companion package and active files run from the RAM-backed
-`/tmp/astrill-lazy` directory, but every successful policy Apply stores the
-complete current and previous compiled documents in NVRAM. The current
-6,144-byte compiled-document limit therefore protects both persistence
-headroom and router runtime.
+This solves the original 6,144-byte storage conflict without pretending the
+E4200 can safely enforce an unlimited catalog. The persistent core keeps its
+strict NVRAM limit. RAM overlays have separate document, generated-firewall,
+memory, and duration admission limits.
 
-The proposed design separates those concerns:
+The feature does not create multiple Astrill tunnels and does not identify a
+Windows process. All VPN policies still share the router's one active Astrill
+endpoint. Each overlay applies to one LAN source identity, not one executable.
 
-- a small persistent core remains available immediately after a router reboot;
-- larger, computer-owned overlays live only in router RAM;
-- each GUI restores only its own overlay after observing a new router runtime;
-- the companion transactionally composes the core and all valid overlays into
-  one effective policy; and
-- no RAM-overlay operation performs `nvram commit`.
+## Why Two Router Layers
 
-This is a bridge between the current router-owned destination policy and the
-longer-term [device-local routing](DEVICE_ROUTING.md) design. It reduces NVRAM
-pressure and multi-controller conflicts, but it does not make destination
-catalogs process-aware.
+The Windows library on the verified workstation currently expands as follows:
 
-## Why The Design Is Feasible
+| Scope | Origins | Compiled rows | ASCII bytes |
+| --- | ---: | ---: | ---: |
+| Complete enabled library | 88 | 316 | 28,686 |
+| UU Remote + Nutstore/Jianguoyun + WeChat core | 3 | 41 | 4,135 |
+| Remaining computer overlay | 85 | 275 | 24,551 |
 
-A read-only snapshot of the validated E4200 showed:
+The complete document cannot fit the persistent 6,144-byte contract. The
+three high-value Direct policies do fit and remain useful while every computer
+is offline. The rest can be restored into RAM for only the computer that owns
+them. Adding the overlay source/MAC scope fields produces a 316-row,
+38,455-byte effective runtime document.
 
-| Resource | Observed value |
-| --- | ---: |
-| `/proc/meminfo` `MemTotal` | 58,708 KiB |
-| `MemFree` | about 31-32 MiB |
-| `/tmp/astrill-lazy` package and runtime files | about 124 KiB |
-| Current UU Remote plus Nutstore document | 2,688 bytes |
-| Current rollback document | 1,655 bytes |
-| NVRAM free | about 6.3 KiB |
-| Complete Windows library | 313 compiled rows / 28,373 bytes |
+A read-only E4200 snapshot showed 58,708 KiB total RAM and roughly 6.3 KiB of
+free NVRAM after the earlier companion was installed. Those figures motivated
+the split but are not capacity promises. DNS fan-out and generated iptables
+matches, rather than TSV bytes alone, are the important runtime cost.
 
-These figures are one runtime snapshot, not a guaranteed capacity. The
-28,373-byte source document is small relative to available RAM. Its generated
-iptables matches, DNS results, connection tracking, and linear rule traversal
-can cost substantially more memory and CPU than the document itself.
+## Storage Model
 
-The currently saved UU Remote, Nutstore/Jianguoyun, and WeChat rules compile
-to 38 rows and 3,846 ASCII bytes. That candidate fits the existing 6,144-byte
-core contract. A deterministic gzip representation measured 534 bytes, or 712
-bytes after base64 encoding. Compression is therefore useful for the small
-persistent core, although every real save must still pass live NVRAM-headroom
-checks and verified readback.
+| Layer | Authority | Location | Reboot |
+| --- | --- | --- | --- |
+| Local library | Windows user | App configuration | Survives |
+| Base companion package | Router installer | Base64 NVRAM chunks | Survives |
+| Bootstrap payload | Router installer | Deterministic gzip/base64 NVRAM value | Survives |
+| Persistent core | Router administrator | Compressed or plain NVRAM rule record | Survives |
+| RAM transaction helper | Trusted desktop | `/tmp/astrill-lazy/alhybrid` | Cleared |
+| Owner overlay | One paired controller | `/tmp/astrill-lazy/overlays` | Cleared |
+| Effective document | Companion | `/tmp/astrill-lazy/effective.tsv` | Rebuilt |
+| Runtime epoch and generations | Companion | `/tmp/astrill-lazy` | Renewed |
 
-Two uncompressed 3,846-byte core generations would leave only about 2.9 KiB
-free in the observed NVRAM state. That is too close to the current 2 KiB
-reserve for comfortable package or settings growth. A compressed current and
-rollback core, or a compressed current core plus a smaller known-good recovery
-baseline, provides better margin.
+The persistent footprint is deliberately limited to the base package, the
+compressed bootstrap payload, and the small core. The normalized bootstrap is
+6,502 bytes; deterministic gzip plus base64 reduces its stored NVRAM value to
+2,560 bytes. The deployed base package is 19,960 bytes, exactly 26,616 base64
+bytes in 15 chunks, with MD5 `3552747bcb9a06a8f6b64dcbb1ce0675`
+and SHA-256
+`2f0dbbda03af55a54ebf75fa6a06d2f47ffcd071310082544202edac4422a4be`.
+The locked E4200 preflight started with 3,115 bytes free, projected 608 bytes of
+growth and 2,507 bytes free—459 bytes above the 2,048-byte reserve. The
+physical-reboot readback was 2,494 bytes free, a 446-byte margin. Every install
+recomputes the projection from the router's current snapshot.
 
-The compression path was verified on the E4200 with its exact BusyBox
-`gzip`, `gunzip`, `uuencode`, and `uudecode` utilities. The `0.2.10` upgrade
-migrated a 5,118-byte plain policy to a 924-byte compressed record before
-expanding the package from 11 to 14 NVRAM chunks. After adding Jianguoyun, the
-5,959-byte active document occupied 1,077 encoded bytes.
+The package stored in NVRAM contains the base `alctl` runtime. The larger
+`alhybrid` extension is shipped by the desktop, atomically uploaded to
+`/tmp/astrill-lazy/alhybrid`, and verified by MD5 before use. The upload takes
+the same controller lock as package and policy transactions, rechecks the
+running and stored base-package identities under that lock, and publishes the
+helper with an atomic rename. Excluding the extension keeps the encoded
+package inside the router's persistent headroom.
 
-Compressing the complete library is not the final answer. The current complete
-document compresses close to the NVRAM limit by itself, leaving no comfortable
-space for rollback or growth, and compression does not reduce the expanded
-firewall workload.
+After a reboot, base `alctl` does not need that extension to decode, validate,
+and activate the core. Overlay commands become available after a trusted
+desktop supplies the matching extension. Persistent-core mutations also use
+the helper because it owns the transaction journal and cross-layer rollback;
+the desktop stages it before either the guarded or administrator core path.
+The helper, overlays, effective document, runtime epoch, and layer generations
+are all RAM-only and consume no persistent NVRAM.
 
-## Storage And Ownership
+The core reuses the companion's proven current/previous rule records. Each is
+stored as deterministic gzip plus base64 when that representation is smaller,
+or as legacy-compatible plain TSV otherwise. A second persistent generation
+is retained only when doing so leaves the enforced 2 KiB NVRAM reserve.
 
-| Layer | Owner | Location | Survives reboot | Purpose |
-| --- | --- | --- | --- | --- |
-| Local library | One computer | Desktop configuration | Yes | Authoritative editable catalog and rules |
-| Persistent core | Router administrator | Compressed, chunked NVRAM record | Yes | Small policies that must work while every computer is offline |
-| RAM overlay | One paired controller | `/tmp/astrill-lazy/overlays/` | No | Larger or computer-specific policy restored on demand |
-| Effective policy | Companion | `/tmp/astrill-lazy/effective.tsv` | No | Deterministic composition currently enforced by A/B chains |
-| Previous effective policy | Companion | RAM only | No | Fast rollback for the most recent runtime transaction |
+## Packet Order And Ownership
 
-The persistent core should contain only deliberate, high-value rules. On this
-router, reasonable candidates are:
+The effective chain is ordered as:
 
-- UU Remote to Direct;
-- Nutstore/Jianguoyun to Direct; and
-- WeChat to Direct.
+1. return for private, local, multicast, and broadcast destinations;
+2. evaluate the global persistent core;
+3. enter an owner's overlay only for its source address and optional MAC;
+4. return unmatched traffic to native Astrill behavior.
 
-Those catalog profiles are destination-based. UU Remote and WeChat can also
-use dynamic peer, relay, CDN, or encrypted-discovery paths that a seed-domain
-list cannot guarantee to identify. A source-device rule or future
-process-aware local backend remains the broader fallback.
+The core therefore has deliberate global authority. An overlay cannot shadow
+a core origin, and duplicate origin IDs across layers are rejected.
 
-## Proposed RAM Layout
+Each overlay has:
 
-```text
-/tmp/astrill-lazy/
-  core.tsv
-  overlays/
-    <controller-id>.tsv
-    <controller-id>.meta
-  effective.tsv
-  effective.previous.tsv
-  resolved.tsv
-  unresolved.txt
-  runtime-epoch
-```
+- a stable random controller ID;
+- a runtime-scoped generation;
+- an MD5 document hash;
+- a LAN IPv4 host or subnet;
+- an observed bridge-neighbor MAC for a host binding when available; and
+- origin, row, and byte metadata.
 
-The startup bootstrap reconstructs and verifies the companion package exactly
-as it does now. It then decodes the current persistent core, validates it, and
-creates a core-only effective policy. Overlay files begin empty after every
-boot.
+`auto` is the recommended binding. The router takes the SSH peer address,
+requires it to be inside the configured LAN, resolves its MAC from the LAN
+bridge ARP table, and stores the address as `/32`. An explicitly entered host
+is also upgraded with its observed MAC when available. A subnet can be used
+only without a MAC.
 
-The NVRAM core record should be versioned, deterministically compressed,
-base64 encoded, divided into bounded chunks, and protected by a digest. Current
-and previous core records retain persistent rollback without storing two raw
-TSV documents. A corrupt core must not be partially decoded or activated.
+MAC binding protects against accidental address reuse on a trusted home LAN;
+it is not authentication against a hostile LAN. Key-only SSH and the pinned
+router host key remain the controller authentication boundary.
 
-## Boot And Restore Lifecycle
+## Boot And One-Shot Restore
 
-1. DD-WRT reconstructs the companion package from NVRAM.
-2. The companion reconstructs and validates the persistent core.
-3. It builds and activates a core-only policy using the existing inactive/active
-   chain transaction.
-4. It creates a new non-secret `runtime_epoch` value in `/tmp`.
-5. Status exposes that epoch plus the core, overlay, and effective hashes.
-6. Each GUI checks status once at application startup, after a relevant Windows
-   network-change event, before an explicit router action, or when the user
-   selects **Refresh router**.
-7. If that GUI's expected overlay hash is absent, it uploads only its own
-   overlay and verifies the resulting effective hash.
-8. If the GUI is offline, the router continues safely with the persistent core
-   and any overlays already restored by other computers.
+1. DD-WRT reconstructs the verified base package from NVRAM.
+2. `alctl` decodes and validates the current core.
+3. It builds and activates a core-only A/B chain.
+4. It creates a fresh opaque runtime epoch and runtime generations.
+5. The Windows app checks once at startup, on a relevant Windows network
+   change, before an explicit router write, or on **Refresh router**.
+6. If automatic restore was explicitly enabled and this controller's expected
+   overlay is missing in a new epoch, the app uploads it once.
+7. The app verifies owner, source, MAC, generation, hash, and effective status.
 
-This does not require frequent SSH polling. If Windows starts before DD-WRT is
-ready, the implementation may use a short, bounded backoff sequence with
-jitter and then stop. A manual **Restore RAM overlay now** action remains
-available. Restoring before Windows sign-in would require a separate,
-explicitly installed background service; the current Startup shortcut runs
-only after sign-in.
+The last attempted epoch and error are persisted locally. Relaunching the app
+does not repeatedly attack a router that rejected the same restore. Manual
+**Restore RAM overlay now** remains available.
 
-Automatic overlay restoration is a router write and must be an explicit saved
-opt-in such as **Restore this computer's RAM overlay after router reboot**.
-Without that opt-in, startup reports the missing overlay and leaves restoration
-manual.
+There is no recurring desktop SSH poll. The router's existing local watchdog
+still ensures its own runtime and routes every 60 seconds. It may refresh a
+core-only document about every 30 minutes when no overlay is loaded. Once any
+RAM overlay is active, it does not periodically rebuild that effective policy.
+Overlay construction occurs only for an explicit load, one-shot
+startup/network restoration, or a manual restore/reload.
 
 ## Transactional Commands
 
-The current `alctl apply` path both activates and persists one complete
-document. The hybrid design needs separate operations:
+Normal desktop core writes use generation compare-and-swap:
 
 ```text
-alctl core-apply FILE
-alctl core-rollback
-alctl overlay-put CONTROLLER_ID EXPECTED_GENERATION FILE
-alctl overlay-remove CONTROLLER_ID EXPECTED_GENERATION
+alctl core-apply EXPECTED_VERSION EXPECTED_PACKAGE_MD5 EXPECTED_HELPER_MD5 \
+  EXPECTED_GENERATION FILE|-
+alctl core-rollback EXPECTED_VERSION EXPECTED_PACKAGE_MD5 EXPECTED_HELPER_MD5 \
+  EXPECTED_GENERATION
+```
+
+The administrator compatibility commands `apply` and `rollback` remain
+available without a generation guard. The GUI does not use them for normal
+hybrid changes. They are still identity-bound and use the same helper:
+
+```text
+alctl apply EXPECTED_VERSION EXPECTED_PACKAGE_MD5 EXPECTED_HELPER_MD5 FILE|-
+alctl rollback EXPECTED_VERSION EXPECTED_PACKAGE_MD5 EXPECTED_HELPER_MD5 [--json]
+alctl toggle-origin EXPECTED_VERSION EXPECTED_PACKAGE_MD5 EXPECTED_HELPER_MD5 ID
+alctl route-origin EXPECTED_VERSION EXPECTED_PACKAGE_MD5 EXPECTED_HELPER_MD5 \
+  ID direct|vpn
+```
+
+Owner overlay operations are:
+
+```text
+alctl overlay-put EXPECTED_VERSION EXPECTED_PACKAGE_MD5 EXPECTED_HELPER_MD5 \
+  OWNER EXPECTED_GENERATION SOURCE_OR_AUTO \
+  EXPECTED_SOURCE_OR_DASH EXPECTED_MAC_OR_DASH FILE|-
+alctl overlay-remove EXPECTED_VERSION EXPECTED_PACKAGE_MD5 EXPECTED_HELPER_MD5 \
+  OWNER EXPECTED_GENERATION
 alctl overlay-list --json
 alctl effective-status --json
 ```
 
-The current router MyPage origin actions transform the one active document and
-then call the persistent Apply path. They must become layer-aware. Until that
-exists, toggle/route controls for volatile origins must be disabled rather
-than accidentally copying an overlay into NVRAM.
+Every candidate is copied into a private temporary file and validated before
+activation. A reboot restore supplies the manifest's previously trusted source
+and MAC as preconditions; the router compares them with the newly resolved
+binding before it builds or activates a candidate chain. `-` permits an
+explicit first load or reviewed rebind. The companion then composes a fresh
+effective document, builds the inactive chain, verifies it, changes the active
+jump, and only then commits the new runtime metadata. A failed file move or
+verification switches back to the previous chain and restores the prior
+document.
 
-### Core Apply
+### Bounded DNS and atomic inactive-chain loading
 
-`core-apply` must:
+Before planning a candidate, the helper extracts the unique enabled domain
+selectors. It runs at most eight resolver jobs at once and gives each
+`nslookup` five seconds before terminating it. A refresh prefers a fresh
+validated answer but falls back to the prior validated cache when the fresh
+lookup fails; an unresolved domain with no prior answer is reported and
+omitted. The resulting addresses are then compiled in deterministic policy
+order, with no more than 16 addresses retained for one domain.
 
-1. validate the complete candidate before mutation;
-2. enforce the persistent-core byte and NVRAM-headroom limits;
-3. reject origin-ID or layer-namespace collisions with installed overlays;
-4. compose the candidate core with the current valid overlays;
-5. build and verify the inactive chain;
-6. switch the active jump;
-7. encode and verify current and previous core records in NVRAM;
-8. commit NVRAM once; and
-9. return the core and effective readback hashes.
+The supported E4200 path serializes the complete candidate into one bounded
+`mangle` restore document. That document declares only the inactive A/B user
+chain; it contains no `PREROUTING` mutation. Before both the dry run and commit,
+the helper requires the inactive chain to be the exact unreferenced A/B peer,
+the active chain to have exactly one reference and the first/only owned
+`PREROUTING` jump, sufficient reclaimable memory, and remaining transaction
+time. It runs `iptables-restore --noflush --test` first, then commits the same
+document once with `iptables-restore --noflush`.
 
-An activation, encode, commit, or readback failure must retain the previous
-persistent core. If a persistence failure occurs after the new chain was
-activated, the transaction must explicitly switch the old A/B jump back before
-returning failure.
+After commit, the helper reads back the exact expected rule count and verifies
+that the reference topology did not change. Only then may the normal A/B jump
+swap publish the candidate. A resolver timeout, guard failure, restore error,
+deadline, or readback mismatch discards the inactive candidate and leaves the
+previous active policy in place.
 
-### Overlay Upsert
+The expected version, package MD5, and helper MD5 are checked after acquiring
+the controller lock. The base identity must match the verified running
+`VERSION` and `PACKAGE_MD5` markers and the installed NVRAM metadata; the
+helper digest must match the executable that will be sourced for the
+transaction. A same-version package replacement or helper replacement
+therefore cannot race a mutation onto different code.
 
-`overlay-put` must:
+Overlay put/remove never invokes `nvram set` or `nvram commit`.
 
-1. authenticate the controller and validate its stable ID;
-2. read a bounded candidate into a private temporary file;
-3. validate every field, source scope, row count, and generated-match estimate;
-4. require an expected generation to prevent lost updates;
-5. compose the core and all owner overlays deterministically;
-6. build and verify the inactive chain;
-7. switch the active jump;
-8. atomically rename the candidate into that owner's overlay slot; and
-9. return owner, overlay, and effective hashes.
+## Core Transaction And Recovery
 
-It must never call `nvram set` or `nvram commit`. An interrupted or invalid
-upload leaves the previous effective chain active. Immediately after reboot,
-failure to restore an overlay leaves the verified core-only chain active.
+A core replacement:
 
-## Multiple Computers
+1. requires the expected runtime generation;
+2. rejects core/overlay origin collisions;
+3. validates the complete core and projected persistent capacity;
+4. composes it with all current valid overlays;
+5. builds and activates an inactive chain;
+6. encodes, writes, commits, decodes, and byte-verifies the NVRAM record;
+7. advances the generation only after successful persistence; and
+8. returns layered readback status.
 
-Separate overlay files prevent last-writer-wins storage, but storage ownership
-alone does not provide independent routing. A destination-only rule affects
-every LAN device.
+Before mutation, the companion saves the current/previous NVRAM values,
+runtime documents, generation, and active chain. If persistence or final file
+activation fails, it restores and commits those exact NVRAM values and
+reactivates the previous chain in the same operation.
 
-For independent per-computer choices, every owner overlay must be scoped to a
-stable source identity:
+At boot, a corrupt current record is never partially activated. A separately
+verified previous record is used in a visibly degraded recovery state. If
+neither record validates, the companion activates an empty core and reports a
+degraded recovery error rather than treating corruption as an intentional
+empty policy.
 
-- a reserved DHCP address plus validated MAC address on the local bridge;
-- a dedicated source subnet or application namespace address; or
-- a future authenticated route-intent carrier.
+## Admission Limits
 
-The current ten-field `astrill-lazy-rules-v1` document cannot express a source
-and destination conjunction in one row. A hybrid implementation therefore
-needs either a versioned source-scope field or one owner subchain reached only
-after matching the paired source identity.
+Companion `0.2.11` starts with these E4200 bounds:
 
-A safe chain order is:
+| Limit | Value |
+| --- | ---: |
+| Persistent core TSV | 6,144 bytes |
+| NVRAM reserve after core/package write | 2,048 bytes |
+| One overlay | 32,768 bytes / 320 rows |
+| Overlay owners | 8 |
+| Effective document | 131,072 bytes / 512 rows |
+| Generated iptables matches | 1,536 |
+| Minimum reclaimable policy memory | 8,192 KiB |
+| Whole policy transaction | 240 seconds |
+| Parallel DNS lookups | 8 |
+| Per-domain DNS lookup | 5 seconds |
+| Resolved addresses per domain | 16 |
 
-1. return for local and non-routable destinations;
-2. explicitly global persistent-core rules;
-3. jump to the matching source owner's overlay chain;
-4. optional shared RAM rules; and
-5. return to native Astrill behavior.
+The helper uses the larger of `MemAvailable` and
+`MemFree + Buffers + Cached`, because the validated DD-WRT kernel reports an
+unusually low `MemAvailable` despite substantial reclaimable memory. It checks
+memory before the build and again after the candidate chain exists.
 
-Core and overlay origin IDs must occupy separate namespaces. An overlay cannot
-shadow or disable a persistent-core origin implicitly. Changing that contract
-requires an explicit core edit and its stronger confirmation.
+Generated matches are counted while the plan is built, not only after an
+oversized chain has consumed resources. Duration is checked during DNS
+prefetch, planning, restore testing, and commit; memory is checked before
+planning and again around candidate publication. A rejection discards the
+inactive candidate chain and retains the previous active policy.
 
-Each paired controller should have:
+Device-selector rows are rejected from owner overlays. The overlay chain
+already provides the source condition; silently combining it with another
+device selector would be ambiguous.
 
-- a stable random `controller_id`;
-- a dedicated Ed25519 SSH identity;
-- an allowed source IP/MAC binding;
-- an owner-specific byte, row, and generated-match quota; and
-- permission to upsert or remove only its own overlay.
+## Windows Policy Workspace
 
-Root SSH remains an administrator path. A production multi-controller design
-should use a forced, allowlisted companion command rather than giving every
-computer unrestricted root commands. MAC identity is sufficient for accidental
-cross-device protection on a trusted home LAN, but it is not authentication
-against a hostile LAN.
+The Policies view follows the Ubuntu app's local-versus-applied hierarchy but
+shows the new storage boundary explicitly:
 
-## Capacity And Admission Control
-
-The implementation must expose separate limits instead of treating NVRAM and
-RAM as one 6,144-byte budget:
-
-| Limit | Protects |
+| Card | Meaning |
 | --- | --- |
-| Persistent core raw and encoded bytes | NVRAM headroom and reboot recovery |
-| Overlay bytes per owner | One controller consuming all RAM policy capacity |
-| Total effective rows | Validation and composition time |
-| Resolved addresses per domain | DNS fan-out |
-| Total generated iptables matches | Kernel memory and packet traversal cost |
-| Minimum free/reclaimable RAM | Router and radio stability |
-| Maximum apply duration | Management availability |
+| Local library | All saved policies, including intentionally undeployed rows |
+| Persistent core | Global policy available immediately after reboot |
+| This computer's RAM overlay | Expected and currently active owner state |
+| Other overlays | Read-only summaries for other controllers |
+| Effective router | The composed policy and generated-match result |
 
-The companion already limits one domain to 16 resolved IPv4 addresses. A RAM
-overlay design must additionally count the final generated matches before
-activation and reject the candidate while retaining the old chain if any
-tested limit would be exceeded.
+The main actions are:
 
-The watchdog must reconcile and refresh the composed effective document, not
-the persistent core or one owner's overlay in isolation.
+- **Replace persistent core** — global NVRAM replacement with a whole-core
+  summary and generation/hash drift refusal;
+- **Load selected into router RAM** — owner-only volatile upload, with `auto`
+  source binding recommended;
+- **Restore RAM overlay now** — explicit reconciliation of this owner;
+- **Remove this computer's RAM overlay** — leaves core and other owners intact;
+- **Refresh router** — event-driven readback, not a polling toggle.
 
-Initial limits must be selected from an E4200 benchmark, not from document
-bytes alone. Acceptance testing should measure free memory, load, apply time,
-DNS refresh time, packet latency, and both radios at increasing rule counts.
-The complete 313-row library should be treated as a benchmark candidate, not
-automatically declared safe because its text fits in RAM.
+The local manifest adopts observed router state before the first change. It is
+bound to the confirmed host fingerprint, expected companion version, and exact
+stored-package MD5. A different same-version package is therefore not trusted
+for a hybrid write. The helper MD5 is derived from the same desktop bundle and
+is supplied as a per-mutation precondition rather than persisted as overlay
+state. Core and overlay hash or generation drift is presented for review
+rather than silently overwritten.
 
-## Status And GUI Model
+## Layered Status
 
-The Policies page should show five distinct states:
-
-| UI item | Meaning |
-| --- | --- |
-| Local library | Everything saved on this computer |
-| Persistent core | Small router policy available immediately after reboot |
-| This computer's RAM overlay | Owner-scoped policy expected from this GUI |
-| Other RAM overlays | Counts and owners restored by other paired controllers |
-| Effective router policy | Core plus every currently active overlay |
-
-Suggested status fields are:
+`effective-status --json` adds fields shaped like:
 
 ```json
 {
-  "runtime_epoch": "opaque-value",
+  "runtime_epoch": "c838dc8397a57cd936a1f9e7e3649caa",
+  "package_md5": "3552747bcb9a06a8f6b64dcbb1ce0675",
+  "stored_package_md5": "3552747bcb9a06a8f6b64dcbb1ce0675",
+  "helper_md5": "ram-helper-md5",
   "core": {
-    "generation": 4,
-    "hash": "sha256:...",
+    "generation": 1,
+    "hash": "md5:b9651667705f05dbd97019aa529bc256",
+    "storage": "compressed-nvram",
     "origins": 3,
-    "rows": 38,
-    "bytes": 3846
+    "rows": 41,
+    "bytes": 4135,
+    "origin_ids": ["..."]
   },
   "overlays": [
     {
       "owner": "controller-id",
-      "generation": 7,
-      "hash": "sha256:...",
-      "source": "192.168.1.100",
+      "generation": 1,
+      "hash": "md5:6d6fe09c400bb103e0af5a168236f1d6",
+      "source": "192.168.1.166/32",
+      "mac": "54:bf:64:80:aa:23",
       "origins": 85,
       "rows": 275,
-      "bytes": 24527
+      "bytes": 24551,
+      "origin_ids": ["..."]
     }
   ],
   "effective": {
-    "hash": "sha256:...",
-    "rows": 313,
-    "generated_matches": null
+    "hash": "md5:383499271b38e263b709040abbed1da8",
+    "rows": 316,
+    "bytes": 38455,
+    "generated_matches": 693
   }
 }
 ```
 
-Hashes are examples; status must never expose private keys or credentials.
-`generated_matches` is populated after DNS resolution and chain generation.
+The numeric measurements and policy hashes reflect the final post-reboot
+observation; the owner and helper values remain schema placeholders. DNS
+results determine the generated match count and can vary without changing the
+document hash. Status never exposes passwords, private keys, or Astrill
+credentials.
 
-The warning hierarchy should be:
+## Live E4200 Deployment Result
 
-- green: persistent core and this computer's overlay match their expected
-  hashes;
-- amber: core is active, but this computer's volatile overlay has not yet been
-  restored after reboot;
-- neutral: additional local policies are deliberately outside this router
-  profile;
-- red: the expected core is missing, an overlay restore failed, or policy
-  fail-closed health is degraded.
+The persistent core installed at generation 1 with three origins, 41 rows,
+4,135 bytes, and hash `md5:b9651667705f05dbd97019aa529bc256`.
+The Windows controller loaded 85 remaining origins as a generation-1,
+275-row/24,551-byte overlay with hash
+`md5:6d6fe09c400bb103e0af5a168236f1d6`, source
+`192.168.1.166/32`, and MAC `54:bf:64:80:aa:23`. The resulting 316-row,
+38,455-byte effective document had hash
+`md5:383499271b38e263b709040abbed1da8`.
 
-Actions should be explicit:
+The first live attempt used the original 120-second helper limit and timed out
+safely: the previous active chain stayed selected and no transaction residue
+remained. With a 240-second helper deadline and 330-second desktop allowance,
+the complete manual operation succeeded in 277.82 seconds including client
+work. Its DNS snapshot produced 694 generated matches and 1,394 chain rules
+(`2 * 694 + 6`), with one active reference and no inactive reference.
+Single-process validation and committed-effective readback subsequently reduced
+ordinary status retrieval from more than 90 seconds to about seven seconds.
 
-- **Pin selected to persistent core** warns that it writes NVRAM;
-- **Load selected into router RAM** reports that it is volatile and performs no
-  NVRAM commit;
-- **Restore this computer's RAM overlay now** reconciles one owner;
-- **Remove this computer's RAM overlay** leaves other owners untouched; and
-- **Clear all RAM overlays** is administrator-only.
+A physical reboot created epoch
+`c838dc8397a57cd936a1f9e7e3649caa`. Before Windows restoration, the persistent
+core was already active while the helper and overlay were absent as designed.
+The opted-in Windows one-shot path then staged the helper and restored the
+overlay once in about 200 seconds; the GUI remained responsive, and the saved
+epoch, attempt epoch, source, MAC, generation, and hashes all matched with no
+recorded error. Fresh DNS produced 693 generated matches and 1,392 chain rules,
+one rule pair fewer than the pre-reboot snapshot without changing the policy
+document hash. Final readback showed one active reference, no inactive
+reference, no transaction journal, 2,494 free NVRAM bytes, and Astrill
+disconnected.
 
-## Failure And Reboot Matrix
+## Failure Matrix
 
-| Event | Required result |
+| Event | Result |
 | --- | --- |
-| Router boots while all PCs are off | Verified core-only policy becomes active |
-| GUI starts after router boot | Its missing or stale overlay is restored once |
-| GUI starts before router is ready | Bounded retry stops safely; manual restore remains available |
-| One overlay upload is interrupted | Previous effective chain remains active |
-| One PC is asleep | Its existing RAM overlay remains source-scoped until reboot or removal |
-| Router reboots | All overlays disappear; core remains; each PC can independently restore |
-| One controller changes policy | Other controller files and generations are unchanged |
-| Astrill disconnects | VPN-targeted traffic retains the existing fail-closed behavior |
-| RAM admission check fails | Candidate is rejected; active policy and NVRAM remain unchanged |
-| Core record is corrupt | Companion reports degraded state and never activates a partial core |
+| Router boots while every PC is off | Verified core-only policy is active |
+| GUI observes a new epoch | Its opted-in overlay is restored at most once |
+| GUI starts before DD-WRT is ready | No tight loop; manual refresh remains |
+| Overlay upload is invalid or interrupted | Previous effective chain remains |
+| Core/overlay generation is stale | Write is rejected without replacement |
+| Source or MAC differs | Automatic restore is blocked for review |
+| One controller updates its overlay | Other owner files and generations remain |
+| Overlay exceeds memory/time/match limits | Candidate chain is flushed |
+| Fresh DNS lookup times out | Prior validated addresses are reused when available |
+| Restore topology or readback differs | Candidate is discarded; active jump remains |
+| Core current record is corrupt | Verified previous core or degraded empty core |
+| Astrill disconnects | VPN-target traffic keeps the existing fail-closed path |
 
-## Relationship To Route Intent
+## Remaining Boundary
 
-RAM overlays scale persistence better than NVRAM documents, but DD-WRT still
-performs destination classification. Very large catalogs still consume router
-CPU, DNS work, and firewall rules.
+RAM storage removes NVRAM pressure and source scoping prevents one computer's
+overlay from changing another computer's traffic. It does not make
+destination catalogs process-aware. UU Remote, WeChat, and similar software
+can still use dynamic peers, relays, or CDNs outside maintained domains.
 
-The longer-term scalable boundary remains:
+The long-term scalable design remains device-local route intent:
 
 ```text
-computer classifies application/domain
-             |
-             v
-      inherit / Direct / VPN
-             |
-             v
-router executes a constant-size path decision
+application/domain classification on the computer
+                    |
+              inherit/direct/VPN
+                    |
+           constant-size router action
 ```
 
-On hardware with a safe packet-intent matcher, a local classifier can carry
-that decision directly. This E4200 build does not expose a suitable DSCP/TOS
-matcher, so source identities or a small LAN path broker are the practical
-fallbacks for true per-application independence. The hybrid RAM overlay is
-still valuable for shared devices and as a migration step, but it should not
-replace the device-local architecture with another unbounded router catalog.
+The E4200 build lacks a validated packet-intent matcher for that design.
+Source-scoped overlays are the practical decoupled implementation today, with
+device-local backends remaining the correct future path for true per-process
+independence.
 
-## Implementation And Acceptance Order
+## Acceptance Checklist
 
-1. Correct the GUI distinction between local library and selected router
-   profile.
-2. Add compressed, hashed persistent-core storage while preserving current
-   Apply compatibility.
-3. Add core-only boot and status hashes.
-4. Add one owner-scoped RAM overlay and prove that its restore performs zero
-   NVRAM writes.
-5. Add source binding and multi-owner conditional updates.
-6. Benchmark increasing rows and generated matches on the E4200.
-7. Add bounded startup/network-change restoration on Windows.
-8. Add the local route-intent backend separately.
-
-Required tests include core-only physical reboot, GUI-before-router startup,
-two independent computers, interrupted uploads, stale generations, conflicting
-priorities, low-memory rejection, DNS refresh, rollback, Astrill disconnect,
-VPN fail-closed behavior, and an NVRAM before/after comparison for every
-overlay operation.
+- full automated tests and lint pass;
+- deterministic base package remains within its archive limit;
+- installer preflight predicts at least the 2 KiB post-write NVRAM reserve;
+- same-version/different-MD5 upgrade is not skipped;
+- failed upgrade restores the exact previous package and runtime;
+- physical reboot activates the core before the desktop starts;
+- opted-in GUI restores one owner overlay once for the new epoch;
+- overlay source and MAC match the intended Windows computer;
+- NVRAM digest is identical before and after every overlay operation;
+- rejected candidates leave the previous effective chain active;
+- management ping, 2.4 GHz radio, watchdog, and fail-closed state remain
+  healthy; and
+- final Astrill connection state matches the operator's requested state.

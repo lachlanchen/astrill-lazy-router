@@ -14,9 +14,12 @@ from astrill_lazy.astrill import (
 )
 from astrill_lazy.catalog import load_catalog
 from astrill_lazy.installer import (
+    PAGE_COMMANDS,
+    STARTUP_LINE,
     CompanionCheck,
     EnsureResult,
     InstallResult,
+    RouterInstaller,
     find_router_root,
 )
 from astrill_lazy.models import MatchKind, RouteTarget, Rule
@@ -47,10 +50,17 @@ class FakeRouter:
             "installed": True,
             "version": ROUTER_VERSION,
             "runtime": True,
+            "package_md5": RouterInstaller(self).expected_package_md5,
+            "bootstrap_md5": RouterInstaller(self).expected_bootstrap_md5,
+            "rc_startup": STARTUP_LINE,
+            "mypage_scripts": " ".join(PAGE_COMMANDS),
+            "package_integrity": True,
+            "bootstrap_integrity": True,
         }
         self.monitor_companion_status: dict[str, Any] | None = {
             "health": "healthy",
             "version": ROUTER_VERSION,
+            "package_md5": RouterInstaller(self).expected_package_md5,
             "jump_installed": True,
             "watchdog": True,
             "policy_health": "ready",

@@ -36,7 +36,7 @@ deployment are deliberately enabled.
 | Catalog | 261 maintained profiles with search and provider-country, category, and profile-type filters |
 | Batch workflow | Durable checkbox/Ctrl/Command/Shift selection, Select visible, and explicit Suggested, Direct, or Astrill policy creation |
 | Native sync | Bidirectional routing, DNS, endpoint, protocol, port, transport, favorite, and resilience settings |
-| Windows 0.2.12 | Verified post-connect policy precedence, compiled-capacity preflight, and explicit local-versus-applied state |
+| Windows 0.2.13 | Reboot-persistent core, source-scoped RAM overlays, layered status, and one-shot recovery without polling |
 | Native-only audit | Read-only status, settings, endpoints, and LAN clients with no companion or router writes |
 | Router safety | Validated input, separate marks/tables, transactional A/B activation, rollback, and watchdog recovery |
 | Recovery | One action removes every companion-owned object and restores native Astrill-only operation |
@@ -112,22 +112,28 @@ behavior:
 Rows with an existing policy show its actual route. Other rows show the
 catalog suggestion, so the list retains its intended mixed Direct/Astrill
 view. **Add to Policies** saves the selected rules locally; only a separately
-confirmed **Apply policies** or **Apply selected** operation changes the router.
-With companion `0.2.10`, the Policies view compares the exact enabled local and
-applied origin-ID sets; count-only comparison remains a compatibility fallback
-for older companions. These are deliberately different states: an Apply
-rejection leaves the router's complete previous policy active and never
-installs a partial subset.
+confirmed core-replacement or RAM-overlay action changes the router.
+With companion `0.2.11`, the Policies view separates five states: the complete
+local library, the small reboot-persistent router core, this computer's
+source-scoped RAM overlay, other controllers' overlays, and the composed
+effective policy. Exact origin IDs, generations, and content hashes expose
+drift without replacing another controller's work.
 
-The compiled router document is limited to 6,144 bytes. Service rules expand
-to their seed domains and literal endpoint networks, so the compiled row and
-byte estimate—not the number of local service rows—is the deployment capacity.
-**Apply policies** preflights and replaces the router document with every saved
-local policy, including disabled records. When that full document is too large,
-select a smaller explicit set in the Policies table and use **Apply selected**.
-The selected set becomes the complete router document; unselected policies
-remain saved locally. Neither action silently truncates or partially installs
-its chosen scope.
+The persistent core retains the conservative 6,144-byte compiled-document and
+live NVRAM-headroom limits. **Replace persistent core** is an explicit global
+administrator action. Larger selected sets can instead be loaded into this
+computer's volatile RAM overlay after row, byte, generated-match, memory, and
+build-duration admission checks. The overlay is bound to the controller's
+source address and observed bridge MAC, performs no NVRAM commit, and can be
+restored once after a router reboot when the user has opted in. Neither path
+silently truncates or partially installs its chosen scope.
+
+The verified E4200 deployment uses a 3-origin/41-row persistent core and an
+85-origin/275-row Windows overlay. Its 316-row effective document restored once
+after physical reboot into source `192.168.1.166/32` and MAC
+`54:bf:64:80:aa:23`; fresh DNS produced 693 generated matches and 1,392 chain
+rules. The GUI remained responsive during the roughly 200-second one-shot
+restore, NVRAM remained at 2,494 free bytes, and Astrill was left disconnected.
 
 For example, search for **UU Remote**, select it, choose **Direct**, and select
 **Add to Policies**. That creates a local Direct policy which can then be
@@ -235,7 +241,7 @@ per-application WFP backend; see the
 ## Safety model
 
 - The companion never edits Astrill applet files.
-- Companion `0.2.10` removes its recorded lookups before a managed Astrill
+- Companion `0.2.11` removes its recorded lookups before a managed Astrill
   start, waits for the native rules to settle, then allocates and verifies two
   free adjacent preferences immediately ahead of the native minimum. It
   uses recorded preferences when available; if that record is missing, cleanup
@@ -244,9 +250,13 @@ per-application WFP backend; see the
 - Transient application socket rules are limited to 16 validated rows in a
   separate chain, are restored by a change-driven client reporter, and are
   never committed to router NVRAM.
-- The active policy remains reboot-persistent. Rule documents use gzip/base64
-  storage when smaller. Rollback is retained only until reboot when persisting
-  a second document would leave less than 2 KiB of NVRAM free.
+- The small core remains reboot-persistent and uses gzip/base64 storage when
+  smaller. Owner-scoped overlays and the composed effective document stay in
+  RAM, and overlay changes perform no NVRAM commit.
+- Persistent NVRAM contains only the base companion package, a deterministic
+  gzip/base64 bootstrap payload, and the small core. The 6,502-byte normalized
+  bootstrap occupies 2,560 stored bytes; `alhybrid`, workstation overlays,
+  effective policy, epochs, and layer generations remain RAM-only.
 - Direct and Astrill policies use separate high mark bits and tables.
 - VPN table `212` retains a lower-priority blackhole fallback while `tun0` is
   active and uses the blackhole as its only default while disconnected, so
@@ -254,11 +264,21 @@ per-application WFP backend; see the
 - An unmanaged native undercut remains visibly degraded and rebase-required;
   the watchdog does not ratchet companion preferences downward.
 - A/B activation leaves the previous ruleset active until the replacement is
-  complete.
-- The 6,144-byte compiled-policy limit is checked for the complete Apply-all or
-  Apply-selected scope before router mutation; a failed preflight leaves the
-  previously applied document unchanged.
-- Domain refresh retains prior addresses when a transient lookup fails.
+  complete. Large overlay loads prefetch each unique enabled domain with at
+  most eight resolver jobs and a five-second limit per lookup, then dry-run and
+  commit one `iptables-restore --noflush` document into the unreferenced
+  inactive chain.
+- Core and overlay writes stage the desktop-shipped RAM transaction helper,
+  then verify expected version, running/stored package MD5, and helper MD5
+  under the shared controller lock before changing policy state.
+- Install, upgrade, and Restore Astrill Only use that same lock with
+  exact-byte NVRAM compare-and-swap and verified rollback/removal readback.
+- Core updates retain the 6,144-byte compiled-policy and 2 KiB live NVRAM
+  reserve checks. RAM overlays have separate byte, row, generated-match,
+  reclaimable-memory, and transaction-duration admission limits.
+- A fresh domain refresh retains the prior validated addresses when a transient
+  lookup fails. Topology, reclaimable memory, transaction deadline, and exact
+  chain readback are checked around the batched inactive-chain commit.
 - Automatic reconciliation does not rewrite healthy or fingerprint-identical
   router packages.
 - Connection writes are allowlisted and read back exactly; a failed native
@@ -270,8 +290,11 @@ per-application WFP backend; see the
 - Windows favorite changes use a fresh read plus compare-before-write
   batch replacement, at most one NVRAM commit, and exact readback without
   reconnecting the tunnel.
-- Router-local maintenance ensures runtime every 60 seconds and performs the
-  domain refresh every 30 minutes; the Windows desktop does not poll over SSH.
+- Router-local maintenance ensures runtime every 60 seconds. A core-only policy
+  can still refresh domains every 30 minutes, but an active RAM overlay is
+  rebuilt only by an explicit load, one-shot startup/network restoration, or a
+  manual restore/reload; neither the watchdog nor the Windows desktop polls and
+  rebuilds overlays.
 - After changing policy, reconnect only the affected applications so their
   new connections receive the new route; do not clear router-wide connection
   tracking.
@@ -426,7 +449,7 @@ firewall behavior, and Astrill integration must be verified independently.
 | [Router installation](docs/ROUTER_INSTALL.md) | Prerequisites, installation, persistence, operations, and rollback |
 | [Native-only operation](docs/NATIVE_ONLY.md) | Safe inspection, write guard, second-router evidence, and DD-WRT SSH lessons |
 | [Rule model](docs/RULE_MODEL.md) | Selectors, priorities, compilation, and native composition |
-| [Hybrid policy storage](docs/HYBRID_POLICY_STORAGE.md) | Proposed persistent core, owner-scoped RAM overlays, reboot restoration, and route-intent migration |
+| [Hybrid policy storage](docs/HYBRID_POLICY_STORAGE.md) | Persistent core, owner-scoped RAM overlays, reboot restoration, capacity limits, and recovery |
 | [Device-local routing](docs/DEVICE_ROUTING.md) | Validated non-enforcing multi-endpoint policy model |
 | [Extensions](docs/EXTENSIONS.md) | Data-only service, country, and region catalogs |
 | [Backup and restore](docs/BACKUP_RESTORE.md) | Encrypted backup boundaries and recovery |

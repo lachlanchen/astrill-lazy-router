@@ -112,6 +112,7 @@ $RuntimeRoots = @(
 )
 foreach ($RelativePath in @(
     "extensions\core-catalog\manifest.json",
+    "router\alhybrid",
     "router\VERSION",
     "schemas\device-policy-v1.schema.json"
 )) {

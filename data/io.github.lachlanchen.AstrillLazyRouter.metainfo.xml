@@ -25,6 +25,13 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.13" date="2026-07-30">
+      <description>
+        <p>Adds a reboot-persistent compressed policy core, independent
+        source-scoped RAM overlays, one-shot Windows restoration, layered
+        policy status, and transactional generation and NVRAM safety checks.</p>
+      </description>
+    </release>
     <release version="0.2.12" date="2026-07-30">
       <description>
         <p>Adds verified dynamic router-policy precedence, explicit Apply-all

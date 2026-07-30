@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.2.13 - 2026-07-30
+
+- Split router policy storage into a reboot-persistent compressed core and
+  owner-scoped RAM overlays. The router activates the verified core at boot,
+  while each paired Windows controller can restore only its own volatile
+  source-and-MAC-bound overlay.
+- Add strict generation checks, deterministic core-plus-overlay composition,
+  generated-match, memory, and duration admission limits, transactional chain
+  activation, verified persistent readback, and rollback that leaves the
+  previous effective policy active on failure.
+- Add a five-part Windows Policies workspace modeled on the Ubuntu app's
+  local-versus-router hierarchy: Local library, Persistent core, This
+  computer's RAM overlay, Other overlays, and Effective router.
+- Expand the seven human-readable Astrill tabs across the available Windows
+  width, and hold a crash-recoverable per-user GUI lock so a second launch
+  cannot create another window or race startup overlay restoration.
+- Add explicit **Replace persistent core**, **Load into router RAM**,
+  one-shot restore, and owner-only remove actions. Volatile restoration is an
+  opt-in response to startup or network-change events and never uses recurring
+  router polling.
+- Bind the Windows deployment manifest to the trusted router, companion
+  version, controller identity, source address, MAC address, layer
+  generations, and content hashes so drift is surfaced instead of silently
+  overwritten.
+- Harden same-version upgrades with package-digest comparison, conservative
+  NVRAM-headroom preflight, verified bootstrap/status checks, and validated
+  captured-package restoration through the current serialized recovery path
+  after a failed install.
+- Store the normalized 6,502-byte bootstrap as a deterministic 2,560-byte
+  gzip/base64 payload. Hash the canonical encoded payload, decode and execute
+  the script derived from that same captured value. The deployed 19,960-byte
+  package encodes to 26,616 base64 bytes in 15 NVRAM chunks, with MD5
+  `3552747bcb9a06a8f6b64dcbb1ce0675` and SHA-256
+  `2f0dbbda03af55a54ebf75fa6a06d2f47ffcd071310082544202edac4422a4be`.
+  Live preflight started with 3,115 bytes free, projected 2,507 after 608 bytes
+  of growth, and observed 2,494 after reboot—446 bytes above the enforced
+  2,048-byte reserve.
+- Bind every core and overlay mutation to the expected running/stored package
+  and RAM-helper digests under one controller lock. Stage package replacement
+  away from the live runtime and serialize install/removal with policy writes.
+- Load large explicit overlays with bounded parallel DNS resolution and one
+  tested `iptables-restore --noflush` transaction on the inactive chain.
+  Reject unsafe chain references, restore runtime metadata on interruption,
+  reject empty layered documents, and skip periodic overlay rebuilds while
+  retaining core-only maintenance.
+- Verify the live E4200 split with a 3-origin/41-row/4,135-byte persistent core
+  and an 85-origin/275-row/24,551-byte source/MAC-scoped overlay. The composed
+  316-row/38,455-byte document produced 694 generated matches before reboot and
+  693 after fresh post-reboot DNS resolution, with exactly one active chain
+  reference, no inactive reference, and 1,392 final chain rules.
+- Raise the helper policy deadline from the safely rejected 120-second trial to
+  240 seconds and the desktop client allowance to 330 seconds. The full manual
+  load completed in 277.82 seconds, while committed-effective readback and
+  single-process validation reduced ordinary status from over 90 seconds to
+  about seven seconds.
+- Reconstruct the persistent core after physical reboot into epoch
+  `c838dc8397a57cd936a1f9e7e3649caa`, then restore the opted-in Windows overlay
+  once in about 200 seconds while the GUI remained responsive. Final state
+  retained the exact source/MAC binding, generation 1, no transaction residue,
+  2,494 free NVRAM bytes, and Astrill disconnected.
+
 ## 0.2.12 - 2026-07-30
 
 - Upgrade the router companion to `0.2.10` and replace the unsafe fixed

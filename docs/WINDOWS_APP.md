@@ -15,7 +15,8 @@ The native Windows application provides:
 
 - native-only status, Astrill settings, endpoint, and LAN-client inspection;
 - local Direct/Astrill policies for services, domains, IPv4 networks, and LAN
-  devices, with explicit Apply-all and multi-select Apply-selected scopes;
+  devices, with a small reboot-persistent router core and independent
+  source-scoped RAM overlays;
 - the 261-profile service catalog with category, profile-type, and
   provider-country filters, durable checkbox/Ctrl/Command/Shift selection,
   **Select visible**, and Suggested, Direct, or Astrill batch policy actions;
@@ -31,10 +32,10 @@ The native Windows application provides:
   optional DD-WRT companion;
 - a local read-only guard that is enabled for every fresh configuration.
 
-Version `0.2.12` has nine views: Policies, Services, Countries, Devices,
+Version `0.2.13` has nine views: Policies, Services, Countries, Devices,
 Connection, Endpoints, Astrill, Router, and Settings. Local policy edits are
-saved immediately, but they do not affect traffic until the companion is
-installed and either **Apply policies** or **Apply selected** succeeds.
+saved immediately, but they do not affect traffic until companion `0.2.11` is
+installed and an explicit core or RAM-overlay action succeeds.
 
 ## Requirements
 
@@ -133,6 +134,11 @@ location is:
 %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Astrill Lazy Router.lnk
 ```
 
+The GUI holds a crash-recoverable per-user lock for its full lifetime. A
+second launch exits successfully before constructing another window or
+starting another reboot-reconciliation task. This prevents a double-click or
+duplicate launcher from racing the one-shot RAM-overlay restore.
+
 To install a bundle built in another directory:
 
 ```powershell
@@ -226,6 +232,20 @@ background. After that startup check, router status is read only when the
 operator selects **Refresh router**, a page first needs router data, or a
 completed action returns status or verified readback.
 
+Version `0.2.13` also listens for a Windows network-change notification. If
+the operator explicitly enabled volatile-overlay restoration, the first
+eligible startup or network event after a new router runtime can restore this
+controller's missing RAM overlay once. The runtime epoch and attempted result
+are saved locally, so a failed epoch is not hammered on every page visit or
+application restart. Manual **Restore RAM overlay now** remains available.
+
+The physical-reboot check verified this path for epoch
+`c838dc8397a57cd936a1f9e7e3649caa`. Core-only service was available before the
+GUI started; Windows then restored its missing 85-origin overlay once in about
+200 seconds while the window remained responsive. The saved runtime and
+attempt epochs, source `192.168.1.166/32`, MAC `54:bf:64:80:aa:23`,
+generation 1, and policy hashes matched, with no restore error.
+
 Successful page reads are cached for the life of the window, including a valid
 empty device result. Moving between pages therefore does not turn an empty
 inventory into repeated router requests. Use the page's explicit Load or
@@ -233,7 +253,7 @@ Refresh action when fresh data is required.
 
 This removes desktop SSH polling only. An installed companion still performs
 the router-local maintenance described below; those cycles do not open desktop
-SSH sessions.
+SSH sessions or periodically rebuild a workstation overlay.
 
 When the local configuration records a previously confirmed companion,
 refresh also reconciles router-reboot state:
@@ -253,9 +273,17 @@ The app never silently installs or rewrites a missing or incompatible
 companion; that still requires the separate **Install / upgrade**
 confirmation.
 
-### Companion 0.2.10 runtime boundaries
+The persistent router footprint is intentionally the base package,
+deterministic gzip/base64 bootstrap payload, and small core. The RAM transaction
+helper, this computer's overlay, other workstation overlays, effective policy,
+epoch, and generations are reconstructed in `/tmp` and are never committed to
+NVRAM.
 
-Companion `0.2.10` does not assume a fixed safe policy-priority range. Before a
+### Companion 0.2.11 runtime boundaries
+
+Companion `0.2.11` retains the dynamic precedence and fail-closed behavior
+introduced in `0.2.10`. It does not assume a fixed safe policy-priority range.
+Before a
 managed Astrill start it removes only its recorded owned Direct/Astrill pair.
 After Astrill's native rules settle, it allocates two adjacent free preferences
 immediately ahead of the current native minimum and verifies the entire RPDB
@@ -283,10 +311,12 @@ fallback beneath the preferred `tun0` default.
 Endpoint switch and explicit connect paths allow 60 seconds for both native
 connected state and a `tun0` route. A timeout is still an error and the
 transaction attempts its documented recovery. The router-local watchdog
-ensures runtime every 60 seconds and re-resolves domains every 30 minutes,
-reducing background work without relying on the Windows application.
+ensures runtime every 60 seconds. It can re-resolve a core-only policy every 30
+minutes while no overlay is active, but it does not periodically rebuild RAM
+overlays. Those load only through an explicit action, the opted-in one-shot
+startup/network reconciliation, or a manual restore/reload.
 
-### Services and local versus applied policy state
+### Services and layered policy state
 
 The Services page combines text search with exact category, profile-type, and
 provider-country filters. Provider country is service-catalog metadata; it
@@ -301,26 +331,61 @@ rows.
 Choose **Suggested**, **Direct**, or **Astrill**, then select **Add to
 Policies**. Suggested preserves each catalog profile's maintained route.
 Adding saves or updates the selected policies in the Windows configuration;
-it does not write the router. With companion `0.2.10`, the Policies page compares
-the exact enabled origin-ID sets in the Windows configuration and latest router
-status. It reports which identities exist only locally or only on the router.
-Count-only comparison is retained solely for older companion status documents
-that do not expose rule origins.
+it does not write the router. With companion `0.2.11`, Policies follows the
+same local-versus-applied hierarchy as the Ubuntu app while making the two
+router storage layers explicit:
 
-**Apply policies** is the separate confirmed Apply-all operation. It preflights
-every saved local record, including disabled rows, then replaces the complete
-router document. **Apply selected** is available for an explicit multi-row
-selection: it preflights only those chosen policies and replaces the complete
-router document with that selection. Unchosen policies remain saved in the
-Windows configuration and can be selected for a later deployment.
+| Card | Meaning |
+| --- | --- |
+| Local library | Every policy saved on this Windows account |
+| Persistent core | Global, compressed router policy activated at boot |
+| This computer's RAM overlay | Volatile policy owned and source-scoped by this controller |
+| Other overlays | Read-only owners already restored by other computers |
+| Effective router | Deterministic core plus every valid active overlay |
 
-Service policies first expand to their seed domains and literal endpoint
-networks, and every chosen compiled TSV is limited to 6,144 bytes. Capacity is
-therefore reported as compiled rows and bytes, not just the number of local
-service records. An oversized Apply-all or Apply-selected scope is rejected
-before SSH mutation; the router retains its previous complete document.
-Neither operation silently truncates its scope or installs only the portion
-that fits.
+Exact origin IDs, MD5 content hashes, generations, controller identity,
+runtime epoch, source address, and MAC binding distinguish a deliberate local
+difference from stale or conflicting router state. A core-only router after
+reboot is healthy but amber when this computer expects an overlay; missing or
+changed expected core state and degraded policy health are red.
+
+**Replace persistent core** preflights the selected complete replacement,
+shows that it is a global NVRAM write, and uses the observed core generation as
+a compare-and-swap guard. It refuses unexpected hash or generation drift
+instead of overwriting another administrator's update. The core retains the
+6,144-byte compiled-document limit plus a live encoded-NVRAM reserve check.
+
+**Load selected into router RAM** compiles the selected rows for this
+controller only. Device selectors are rejected in an owner overlay because
+the owner chain already supplies the source condition. The recommended
+**Automatic source binding** asks the router to derive the current LAN source
+and, when available, its bridge ARP MAC. Explicit source/MAC entry is an
+advanced alternative. The companion admits the candidate only after checking
+document bytes, rows, total generated matches, reclaimable memory, and build
+duration. It performs no `nvram set` or `nvram commit`.
+
+For a large overlay, the helper deduplicates enabled domains and prefetches
+them with at most eight jobs and a five-second timeout per lookup. A refresh
+uses prior validated addresses if a fresh lookup fails. It then creates one
+restore document for the unreferenced inactive chain, validates topology,
+memory, and deadline, dry-runs it with `iptables-restore --noflush --test`,
+commits that same document once with `--noflush`, and verifies the exact
+rule-count/topology readback before the A/B jump can change.
+
+Hybrid policy mutations allow up to 240 seconds on the router and 330 seconds
+in the desktop client. The final full manual load completed in 277.82 seconds
+including client-side work; the ordinary optimized status path takes about
+seven seconds instead of the earlier more-than-90-second validation path.
+
+The RAM action changes only the matching computer's traffic. It cannot shadow
+the global core or replace another controller's overlay. **Remove this
+computer's RAM overlay** is likewise owner-only. A stable deployment manifest
+binds these actions to the confirmed router fingerprint, companion version,
+and exact base-package MD5; changing router, source, MAC, version, or package
+requires explicit reconciliation. Before a write, the app stages its bundled
+RAM helper atomically, then supplies the expected version, base-package MD5,
+and helper MD5. The router verifies all three under its shared lock before
+mutation.
 
 For example, searching for **UU Remote**,
 selecting **Direct**, and choosing **Add to Policies** creates a reviewable
@@ -350,9 +415,12 @@ Recommended first-use sequence:
    **Start automatically after router boot** mirror the corresponding native
    Astrill settings. These controls change DD-WRT only; they do not connect a
    VPN or change routing on the Windows PC.
-7. Use the separately confirmed **Apply policies** for every saved record, or
-   select the intended rows and use **Apply selected** for a scoped router
-   document.
+7. Select the few policies that must survive reboot and use the separately
+   confirmed **Replace persistent core** action. Review the whole-core
+   replacement summary carefully.
+8. Select computer-specific policies and use **Load selected into router
+   RAM** with automatic source binding. Enable one-shot reboot restoration
+   only after the first upload and readback are verified.
 
 Guarded remote write operations include native Astrill setting changes,
 connection changes, companion installation, policy application, endpoint
@@ -522,7 +590,7 @@ change the router.
 ## Human-Readable Astrill Settings
 
 The **Astrill** view uses the same effective native controls as the Ubuntu
-frontend instead of presenting an editable raw NVRAM table. Version `0.2.12`
+frontend instead of presenting an editable raw NVRAM table. Version `0.2.13`
 uses seven spacious tabs: **Overview**, **Connection**, **Routing**, **Privacy
 & DNS**, **Devices**, **Resilience**, and **Advanced**. Boolean values use
 checkboxes, validated modes use named choices, MTU uses a bounded number

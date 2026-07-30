@@ -331,6 +331,8 @@ def test_status_reports_connected_degradation_and_safe_down_state(
         tmp_path,
         rf"""
 scenario_vpn_up={up_value}
+printf '0.2.test\n' > "$VERSION_FILE"
+printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$PACKAGE_MD5_FILE"
 initialize_rules() {{
     printf '# astrill-lazy-rules-v1\n' > "$CURRENT"
 }}
@@ -338,10 +340,13 @@ active_chain() {{
     printf '%s\n' "$CHAIN_A"
 }}
 nvram() {{
-    case "${{2:-}}" in
-        astrill_status) [ "$scenario_vpn_up" = true ] && printf 3 || printf 0 ;;
-        astrill_serverid|astrill_protocol) printf 1 ;;
-        wan_iface) printf vlan2 ;;
+        case "${{2:-}}" in
+            astrill_status) [ "$scenario_vpn_up" = true ] && printf 3 || printf 0 ;;
+            astrill_serverid|astrill_protocol) printf 1 ;;
+            astrill_lazy_installed) printf 1 ;;
+            astrill_lazy_version) printf '0.2.test' ;;
+            astrill_lazy_pkg_md5) printf aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+            wan_iface) printf vlan2 ;;
         wan_gateway) printf 192.168.2.1 ;;
         *) printf '' ;;
     esac

@@ -49,10 +49,16 @@ jobs:
           helpers/astrill-lazy-profile-runner
           contrib/macos/install-uuremote-route-reporter.sh
           contrib/macos/uuremote-route-reporter.sh
-          router/alctl
           router/alapi
           router/alpage
           router/bootstrap.sh
+
+      # alctl exports shared state to a digest-verified, dynamically sourced
+      # RAM module. ShellCheck cannot follow that runtime path, and its
+      # A && B || fail blocks intentionally treat any failed guard as failure.
+      - name: Check modular router controller shell
+        run: >-
+          shellcheck -e SC1090,SC2034,SC2015 -x -s sh router/alctl
 
       - name: Build wheel
         run: python -m pip wheel --no-deps --wheel-dir /tmp/wheel .

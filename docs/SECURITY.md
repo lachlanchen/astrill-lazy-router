@@ -49,6 +49,15 @@ an already-confirmed, fingerprint-matched package from router NVRAM after
 reboot, but it never silently installs or persistently rewrites a missing,
 stale, or inconsistent package.
 
+The Windows hybrid deployment manifest contains no secret. It records a
+random controller ID, confirmed router host-key fingerprint, companion
+version and exact package MD5, expected core and owner-overlay generations and
+document MD5 hashes, the allowed source address/MAC binding, the most recently
+observed runtime epoch, and the last one-shot restore attempt. A router,
+version, package, source, MAC, hash, or generation mismatch blocks silent
+replacement and requires explicit review. The SSH private key remains the
+authentication boundary.
+
 A fresh configuration is native-only and read-only. The GUI and CLI block
 policy apply/rollback/refresh, endpoint switching, connection changes, and
 native-setting writes until the local operator enables write access. The GUI's
@@ -80,8 +89,10 @@ repository test rejects token-bearing Astrill installer paths.
 
 ## Input Handling
 
-Router TSV input is limited to 6,144 bytes and exactly ten fields per rule.
-The controller validates:
+Persistent-core TSV input is limited to 6,144 bytes and exactly ten fields per
+rule. Owner-overlay input uses the same ten-field destination schema with a
+separate 32 KiB/320-row admission boundary; its source condition is supplied
+by the owner chain rather than a second TSV selector. The controller validates:
 
 - small ASCII IDs;
 - IPv4 addresses and prefixes;
@@ -90,8 +101,27 @@ The controller validates:
 - bounded destination ports and ranges;
 - URL-encoded display labels.
 
-iptables commands are constructed with positional arguments. Rule content is
+An owner overlay rejects `device` rows because combining an embedded device
+selector with the owner source chain would be ambiguous. The router also
+validates stable controller IDs, expected generations, maximum overlay count,
+total effective bytes/rows, generated firewall matches, reclaimable memory,
+and build duration. Automatic source binding resolves the SSH peer to a `/32`
+and records its current bridge-neighbor MAC. Reboot restoration sends the
+previously trusted resolved source and MAC as router-enforced preconditions, so
+a DHCP/ARP reassignment is rejected before chain construction or activation.
+
+Enabled domains are deduplicated and resolved in a bounded pool of eight jobs
+with a five-second deadline per lookup. A failed fresh lookup may use only the
+prior validated address cache. Firewall tokens are serialized only from the
+validated enums, IPv4 values, ports, source, and MAC fields; rule content is
 never passed to `eval`, `sh -c`, or command substitution as executable text.
+
+The batched restore document names only the fixed inactive A/B chain and never
+edits `PREROUTING`. The helper checks exact chain references, reclaimable
+memory, and the transaction deadline before a dry run with
+`iptables-restore --noflush --test`, repeats the guards before the single
+`--noflush` commit, and requires exact rule-count and topology readback before
+publishing the new jump.
 
 The DD-WRT page permits only fixed command names and validated IDs. Arbitrary
 website text is edited over SSH in the native app, not interpolated into
@@ -112,10 +142,40 @@ website text is edited over SSH in the native app, not interpolated into
   until observed down or explicitly reconnected; automatic repair does not
   ratchet the owned preferences downward.
 - A/B activation leaves the previous chain live until the new chain is ready.
-- The watchdog checks applet/firewall restarts every 60 seconds.
+- Persistent-core writes use generation compare-and-swap, verified encoded
+  NVRAM readback, and in-session rollback if commit or activation fails.
+- Companion installation and removal share the controller lock used by policy
+  writes. Installation compare-and-swap checks its complete exact-byte NVRAM
+  snapshot, repeats the live headroom projection, and refuses rollback over
+  any newer package, policy, startup, or MyPage state. Post-install
+  verification independently decodes the persisted current core instead of
+  trusting the already-running tmpfs copy. Failed-upgrade recovery validates
+  the captured package, restores exact NVRAM, and reconstructs the old runtime
+  with the desktop-shipped current bootstrap in identity-bound serialized
+  recovery mode. Legacy status without a package marker requires exact
+  restored-runtime file MD5s. Removal audits the stopped runtime and owned
+  hooks before reporting native-only success.
+- The normalized bootstrap is deterministic-gzip/base64 encoded before NVRAM
+  storage. The stored MD5 covers the encoded payload plus one canonical
+  trailing newline. The startup launcher hashes one captured payload, decodes
+  that same payload, and executes the derived script; bootstrap revalidates
+  the stored payload before and under the shared lock, verifies the package
+  archive, stages extraction away from the live runtime, and publishes the
+  running package marker only after replacement.
+- RAM overlays are controller-owned, source/MAC-scoped, generation guarded,
+  deterministically composed after the global core, and never committed to
+  NVRAM. One owner cannot replace another owner's file. They are rebuilt only
+  by explicit/one-shot restoration paths, not by a periodic watchdog cycle.
+- Every core or overlay mutation is bound to expected version, base-package
+  MD5, and RAM-helper MD5. `alctl` verifies the running and stored base identity
+  plus the helper executable under the controller lock before sourcing helper
+  code or changing policy state.
+- The watchdog checks applet/firewall restarts every 60 seconds. Its 30-cycle
+  DNS rebuild is core-only and runs only while no RAM overlay is active.
 - `alctl stop` removes only plugin-owned objects.
 - Automatic reconciliation checks version and runtime markers before any
-  install, and compares the deterministic package fingerprint before recovery,
+  install, verifies deterministic package/stored-bootstrap-payload
+  fingerprints, stored integrity, and exact persistent hooks before recovery,
   so a healthy or identically broken companion does not cause repeated NVRAM
   writes.
 - Route detection is read-only and requires the existing tunnel to be up.

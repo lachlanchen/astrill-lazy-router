@@ -40,35 +40,42 @@ Only `domain`, `cidr`, and `device` reach the router. Labels are URL encoded;
 identifiers and selectors are constrained to small ASCII grammars. The router
 does not use `eval` or construct a shell command from a rule.
 
-Compiled documents are limited to 6,144 bytes. The limit applies after service
-expansion, so one local service policy can consume several compiled domain and
-network rows. Disabled rules are serialized with `enabled=false` and still
-consume document capacity.
+The reboot-persistent core is limited to 6,144 compiled bytes. The limit
+applies after service expansion, so one local service policy can consume
+several domain and network rows. Disabled rules are serialized with
+`enabled=false` and still consume capacity. Before activation, the controller
+also verifies encoded NVRAM headroom and retains at least a 2 KiB reserve. That
+persistent projection includes the base package, deterministic gzip/base64
+bootstrap, and core; the hybrid helper, owner overlays, and effective policy
+remain RAM-only.
 
-**Apply policies** preflights all saved local records and replaces the complete
-router document. **Apply selected** preflights the explicit multi-row selection
-and replaces the router document with only that chosen scope; unchosen records
-remain saved locally. Both operations report compiled rows and bytes and
-neither silently selects, truncates, or partially installs a scope. Before
-activation, the controller also verifies that NVRAM can retain both the new
-document and its rollback predecessor with at least 2 KB of headroom.
+Owner RAM overlays use the same ten-field destination document with separate
+32 KiB/320-row per-owner limits. A source-address and optional MAC guard is
+added by the owner chain during deterministic composition; it is not an
+unvalidated extra TSV field. Device rows are rejected in owner overlays
+because they would introduce a second ambiguous source selector. Total
+effective bytes/rows, generated matches, reclaimable memory, and build time
+are also bounded.
 
-Local and applied are separate states. Editing or adding a policy updates the
-desktop document only. A successful explicit Apply transactionally replaces the
-complete router document with its chosen scope; a compilation, capacity,
-transport, or router validation failure leaves the previously applied document
-active.
+Local and router state are separate. Editing or adding a policy updates the
+desktop library only. **Replace persistent core** changes the complete global
+core with generation compare-and-swap. **Load selected into router RAM**
+changes only this controller's volatile overlay. Neither action silently
+selects, truncates, or partially installs a scope; any compilation, capacity,
+transport, drift, or router validation failure leaves the previous effective
+policy active.
 
-Current companion status exposes the `origin` and `enabled` value for every
-serialized rule. The desktop compares exact enabled origin-ID sets, so equal
-counts with different policies are not presented as synchronized. Count-only
-comparison is a compatibility fallback for older status documents.
+Layered status exposes exact origin IDs, runtime generations, MD5 document
+hashes, source/MAC bindings, and runtime epoch. Equal counts with different
+identities are never presented as synchronized.
 
 ## Precedence
 
-Rules are sorted by `(priority, id)`. The router sets a mark and returns on the
-first match. Put narrow domain/network rules before broad device rules when an
-exception is required.
+Core rules are sorted by `(priority, id)` and run globally before owner
+overlays. Rules inside each overlay use the same ordering after the owner
+source guard. The router sets a mark and returns on the first match. Put narrow
+domain/network rules before broad device rules when an exception is required
+inside the global core.
 
 Example:
 
@@ -82,9 +89,14 @@ first. Other laptop traffic uses Astrill.
 
 DD-WRT resolves domain seeds through its LAN DNS address:
 
+- enabled domains are deduplicated before lookup;
+- no more than eight resolver jobs run at once, with a five-second deadline for
+  each domain;
 - up to 16 unique IPv4 addresses are retained per domain;
-- refresh occurs every 30 minutes;
-- an unsuccessful refresh reuses the prior addresses when available;
+- a fresh-resolution failure reuses prior validated addresses when available;
+- a core-only policy may refresh every 30 minutes when no overlay is active;
+- RAM overlays resolve only during explicit load, one-shot startup/network
+  restoration, or manual restore/reload, never through a periodic rebuild; and
 - unresolved domains are counted and shown in both UIs.
 
 Without firmware `ipset` support, a domain policy cannot automatically learn

@@ -47,7 +47,8 @@ from astrill_lazy.windows_ui import (
     STYLE_SHEET,
     MainWindow,
 )
-from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -183,6 +184,35 @@ def _rows_by_id(window: MainWindow) -> dict[int, QTreeWidgetItem]:
         assert isinstance(server, AstrillServer)
         rows[server.id] = item
     return rows
+
+
+def _click_endpoint_cell(
+    app: QApplication,
+    window: MainWindow,
+    item: QTreeWidgetItem,
+    column: int,
+    *,
+    button: Qt.MouseButton = Qt.MouseButton.LeftButton,
+) -> None:
+    window.stack.setCurrentIndex(5)
+    window.resize(1280, 800)
+    window.show()
+    app.processEvents()
+    tree = window.endpoint_tree
+    rect = tree.visualItemRect(item)
+    assert rect.isValid()
+    header = tree.header()
+    position = QPoint(
+        header.sectionViewportPosition(column) + header.sectionSize(column) // 2,
+        rect.center().y(),
+    )
+    QTest.mouseClick(
+        tree.viewport(),
+        button,
+        Qt.KeyboardModifier.NoModifier,
+        position,
+    )
+    app.processEvents()
 
 
 def test_endpoint_sort_modes_use_saved_numeric_latency(
@@ -587,6 +617,158 @@ def test_favorite_button_click_confirms_and_dispatches_exactly_once(
     assert len(task_dispatches) == 1
     assert controller_calls == [((selected.id,), 1, True)]
     assert window._endpoint_favorite_records == {selected.id: _favorite(selected)}
+    window.close()
+
+
+def test_favorite_cell_click_toggles_only_that_endpoint_and_preserves_selection(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, servers = _window(tmp_path, monkeypatch)
+    window.controller.store.read_only = False
+    window._endpoint_favorites_loaded(_settings(_favorite(servers[1])))
+    rows = _rows_by_id(window)
+    window._set_endpoint_selected(servers[0].id, True, item=rows[servers[0].id])
+    window._set_endpoint_selected(servers[1].id, True, item=rows[servers[1].id])
+    calls: list[tuple[tuple[int, ...], int | None, bool]] = []
+    favorite_ids = {servers[1].id}
+
+    def set_favorites(
+        chosen: tuple[AstrillServer, ...],
+        protocol: int | None,
+        *,
+        enabled: bool,
+    ) -> NativeAstrillSettings:
+        calls.append((tuple(server.id for server in chosen), protocol, enabled))
+        for server in chosen:
+            if enabled:
+                favorite_ids.add(server.id)
+            else:
+                favorite_ids.discard(server.id)
+        return _settings(
+            *(_favorite(server) for server in servers if server.id in favorite_ids)
+        )
+
+    def run_now(
+        _label: str,
+        function: object,
+        success: object = None,
+        **_kwargs: object,
+    ) -> None:
+        result = function()  # type: ignore[operator]
+        if success is not None:
+            success(result)  # type: ignore[operator]
+
+    monkeypatch.setattr(window.controller, "set_endpoint_favorites", set_favorites)
+    monkeypatch.setattr(window, "_run_task", run_now)
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    _click_endpoint_cell(
+        app,
+        window,
+        rows[servers[0].id],
+        ENDPOINT_FAVORITE_COLUMN,
+        button=Qt.MouseButton.RightButton,
+    )
+    assert calls == []
+
+    _click_endpoint_cell(
+        app,
+        window,
+        rows[servers[0].id],
+        ENDPOINT_FAVORITE_COLUMN,
+    )
+
+    assert calls == [((servers[0].id,), 1, True)]
+    assert set(window._endpoint_selected_server_ids) == {
+        servers[0].id,
+        servers[1].id,
+    }
+    assert set(window._endpoint_favorite_records) == {
+        servers[0].id,
+        servers[1].id,
+    }
+
+    _click_endpoint_cell(
+        app,
+        window,
+        _rows_by_id(window)[servers[0].id],
+        ENDPOINT_FAVORITE_COLUMN,
+    )
+
+    assert calls[-1] == ((servers[0].id,), None, False)
+    assert set(window._endpoint_selected_server_ids) == {
+        servers[0].id,
+        servers[1].id,
+    }
+    assert set(window._endpoint_favorite_records) == {servers[1].id}
+    window.close()
+
+
+def test_favorite_cell_click_uses_guards_and_ignores_invalid_rows(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, servers = _window(tmp_path, monkeypatch)
+    window.controller.store.read_only = False
+    messages: list[str] = []
+    controller_calls: list[object] = []
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(window, "_select_something", messages.append)
+    monkeypatch.setattr(
+        window.controller,
+        "set_endpoint_favorites",
+        lambda *args, **kwargs: controller_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args, **_kwargs: (
+            warnings.append((title, message)) or QMessageBox.StandardButton.Cancel
+        ),
+    )
+
+    window.endpoint_tree.favoriteCellClicked.emit(object())
+    window.endpoint_tree.favoriteCellClicked.emit(QTreeWidgetItem())
+    assert messages == []
+    assert controller_calls == []
+
+    row = _rows_by_id(window)[servers[0].id]
+    window.endpoint_tree.favoriteCellClicked.emit(row)
+    assert "Sync a valid favorite list" in messages[-1]
+    assert controller_calls == []
+
+    window._endpoint_favorites_loaded(
+        NativeAstrillSettings.from_dict({"astrill_favlist": "malformed"})
+    )
+    window.endpoint_tree.favoriteCellClicked.emit(_rows_by_id(window)[servers[0].id])
+    assert "Sync a valid favorite list" in messages[-1]
+    assert controller_calls == []
+
+    window._endpoint_favorites_loaded(_settings())
+    window.controller.store.read_only = True
+    window.endpoint_tree.favoriteCellClicked.emit(_rows_by_id(window)[servers[0].id])
+    assert "read-only guard" in messages[-1]
+    assert controller_calls == []
+
+    window.controller.store.read_only = False
+    window.busy_count = 1
+    window.endpoint_tree.favoriteCellClicked.emit(_rows_by_id(window)[servers[0].id])
+    assert "Wait for the current action" in window.statusBar().currentMessage()
+    assert controller_calls == []
+
+    window.busy_count = 0
+    window.protocol.setCurrentIndex(0)
+    window.endpoint_tree.favoriteCellClicked.emit(_rows_by_id(window)[servers[0].id])
+    assert warnings
+    assert warnings[-1][0] == "Unsupported endpoint protocol"
+    assert controller_calls == []
     window.close()
 
 

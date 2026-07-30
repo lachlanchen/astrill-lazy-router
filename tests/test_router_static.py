@@ -13,8 +13,20 @@ from astrill_lazy.router import _clean_ssh_stderr
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.skipif(shutil.which("sh") is None, reason="POSIX shell is unavailable")
+def _shell() -> str | None:
+    found = shutil.which("sh")
+    if found is not None:
+        return found
+    candidate = Path(r"C:\Program Files\Git\usr\bin\sh.exe")
+    return str(candidate) if candidate.exists() else None
+
+
+SHELL = _shell()
+
+
+@pytest.mark.skipif(SHELL is None, reason="POSIX shell is unavailable")
 def test_router_and_helper_scripts_parse_with_posix_shell() -> None:
+    assert SHELL is not None
     scripts = [
         ROOT / "router" / "alctl",
         ROOT / "router" / "alapi",
@@ -31,32 +43,262 @@ def test_router_and_helper_scripts_parse_with_posix_shell() -> None:
         ROOT / "contrib" / "macos" / "uuremote-route-reporter.sh",
     ]
     for script in scripts:
-        subprocess.run(["sh", "-n", str(script)], check=True)
+        subprocess.run([SHELL, "-n", script.as_posix()], check=True)
 
 
-def test_router_bootstrap_waits_for_the_old_controller_before_replacement() -> None:
+def test_router_page_is_layered_read_only_and_refreshes_only_on_request() -> None:
+    page = (ROOT / "router" / "alpage").read_text(encoding="ascii")
+
+    assert "Persistent core" in page
+    assert "RAM overlays" in page
+    assert "Effective policy" in page
+    assert "x.owner" in page
+    assert "x.source" in page
+    assert "x.mac" in page
+    assert "x.hash" in page
+    assert "fetch('/MyPage.asp?4'" in page
+    assert "$('refresh').onclick=load;load();" in page
+    assert "Read-only. No polling." in page
+    assert "setInterval" not in page
+    assert "setTimeout" not in page
+    assert "/apply.cgi" not in page
+    assert "nvram " not in page
+
+
+def test_router_bootstrap_holds_lock_through_atomic_replacement() -> None:
     bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
     installer = (ROOT / "desktop" / "astrill_lazy" / "installer.py").read_text(
         encoding="utf-8"
     )
 
     stop_watchdog = bootstrap.index("for pid in $(watchdog_pids)")
-    wait_for_lock = bootstrap.index('while [ -d "$BASE/controller.lock" ]')
-    stop_controller = bootstrap.index('"$BASE/alctl" stop')
-    extract_package = bootstrap.index('tar -xzf "$ARCHIVE"')
-    assert stop_watchdog < wait_for_lock < stop_controller < extract_package
+    acquire_lock = bootstrap.index('while ! mkdir "$LOCK"')
+    locked_digest = bootstrap.index(
+        'ACTUAL=$(md5sum "$ARCHIVE"',
+        acquire_lock,
+    )
+    extract_package = bootstrap.index('tar -xzf "$ARCHIVE" -C "$STAGE"')
+    replace = bootstrap.index('mv "$BASE/$name.new.$$" "$BASE/$name"')
+    marker = bootstrap.index('mv "$BASE/PACKAGE_MD5.new.$$" "$BASE/PACKAGE_MD5"')
+    release = bootstrap.index('rmdir "$LOCK" || exit 1')
+    start = bootstrap.index('"$BASE/alctl" start')
+    lock_publish = bootstrap.index('printf \'%s\\n\' "$$" > "$LOCK/pid"')
+    watchdog_stops = [
+        match.start()
+        for match in re.finditer(
+            r"^stop_watchdogs \|\| exit 1$", bootstrap, re.MULTILINE
+        )
+    ]
+    assert (
+        stop_watchdog
+        < acquire_lock
+        < locked_digest
+        < extract_package
+        < replace
+        < marker
+        < release
+        < start
+    )
+    assert len(watchdog_stops) == 2
+    assert watchdog_stops[0] < acquire_lock < lock_publish < watchdog_stops[1]
     assert 'kill -0 "$lock_pid"' in bootstrap
     assert '*" $BASE/alctl refresh "*)' in bootstrap
     assert 'kill -9 "$lock_pid"' in bootstrap
-    assert 'rmdir "$BASE/controller.lock"' in bootstrap
+    assert 'printf \'%s\\n\' "$$" > "$LOCK/pid"' in bootstrap
     assert "timeout=300" in installer
 
 
+def test_router_bootstrap_gives_initializing_lock_owner_a_grace_period() -> None:
+    bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
+    lock_loop = bootstrap[
+        bootstrap.index('while ! mkdir "$LOCK"') : bootstrap.index("locked=true")
+    ]
+    pid_read = 'lock_pid=$(cat "$LOCK/pid"'
+    assert lock_loop.count(pid_read) == 2
+    first_read = lock_loop.index(pid_read)
+    grace = lock_loop.index("sleep 1", first_read)
+    second_read = lock_loop.index(pid_read, first_read + 1)
+    reclaim = lock_loop.index('rm -f "$LOCK/pid"')
+    assert first_read < grace < second_read < reclaim
+
+
+def test_router_bootstrap_uses_process_scoped_prelock_artifacts() -> None:
+    bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
+
+    assert "ARCHIVE=/tmp/astrill-lazy-router.$$.tar.gz" in bootstrap
+    assert "ENCODED=/tmp/astrill-lazy-router.$$.b64" in bootstrap
+    assert "ARCHIVE=/tmp/astrill-lazy-router.tar.gz" not in bootstrap
+    assert "ENCODED=/tmp/astrill-lazy-router.b64" not in bootstrap
+
+
+def test_router_bootstrap_refuses_to_discard_pending_policy_recovery() -> None:
+    bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
+    lock_publish = bootstrap.index('printf \'%s\\n\' "$$" > "$LOCK/pid"')
+    journal_guard = bootstrap.index(
+        '[ ! -f "$BASE/policy-transaction" ]',
+        lock_publish,
+    )
+    replacement = bootstrap.index('rm -f "$BASE/PACKAGE_MD5"')
+    assert lock_publish < journal_guard < replacement
+    assert 'rm -f "$BASE/alhybrid" "$BASE/policy-transaction"' not in bootstrap
+
+
+def test_router_bootstrap_rechecks_captured_identity_under_lock() -> None:
+    bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
+    assert "${ASTRILL_LAZY_BOOTSTRAP_MD5:-}" in bootstrap
+    assert "RECOVERY=${ASTRILL_LAZY_RECOVERY:-0}" in bootstrap
+    assert "${ASTRILL_LAZY_RECOVERY_VERSION:-}" in bootstrap
+    assert "${ASTRILL_LAZY_RECOVERY_PACKAGE_MD5:-}" in bootstrap
+    assert "${ASTRILL_LAZY_RECOVERY_BOOTSTRAP_MD5:-}" in bootstrap
+    assert '[ "$(nvram get astrill_lazy_installed)" = 1 ]' in bootstrap
+    assert '[ "$(nvram get astrill_lazy_version)" = "$RECOVERY_VERSION" ]' in (
+        bootstrap
+    )
+    check = "verify_bootstrap_identity || exit 1"
+    assert bootstrap.count(check) == 2
+    first_check = bootstrap.index(check)
+    second_check = bootstrap.index(check, first_check + 1)
+    package_read = bootstrap.index(
+        "COUNT=$(nvram get astrill_lazy_pkg_count)",
+    )
+    lock_publish = bootstrap.index('printf \'%s\\n\' "$$" > "$LOCK/pid"')
+    replacement = bootstrap.index('rm -f "$BASE/PACKAGE_MD5"')
+    assert first_check < package_read < lock_publish < second_check < replacement
+
+
+@pytest.mark.skipif(SHELL is None, reason="POSIX shell is unavailable")
+def test_bootstrap_publishes_verified_runtime_marker_and_resets_ram_layers(
+    tmp_path: Path,
+) -> None:
+    assert SHELL is not None
+    base = tmp_path / "runtime"
+    overlays = base / "overlays"
+    overlays.mkdir(parents=True)
+    (base / "alhybrid").write_text("old helper\n", encoding="ascii")
+    (base / "rules.tsv").write_text("old core\n", encoding="ascii")
+    (base / "runtime-epoch").write_text("old epoch\n", encoding="ascii")
+    (base / "chain-a.document-hash").write_text("old hash\n", encoding="ascii")
+    (base / "active-chain").write_text("AL_LAZY_A\n", encoding="ascii")
+    (overlays / "owner.meta").write_text("old overlay\n", encoding="ascii")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    scripts = {
+        "nvram": """#!/bin/sh
+[ "$1" = get ] || exit 1
+case "$2" in
+  astrill_lazy_bootstrap) printf '%s' "$BOOTSTRAP_TEXT" ;;
+  astrill_lazy_bootstrap_md5) printf '%s' "$BOOTSTRAP_DIGEST" ;;
+  astrill_lazy_pkg_count) printf 1 ;;
+  astrill_lazy_pkg_md5) printf '%s' "$PACKAGE_DIGEST" ;;
+  astrill_lazy_pkg_0) printf X ;;
+  astrill_lazy_installed) printf 1 ;;
+  astrill_lazy_version) printf '%s' "$PACKAGE_VERSION" ;;
+  *) printf '' ;;
+esac
+""",
+        "uudecode": """#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  [ "$1" != -o ] || { shift; output=$1; }
+  shift
+done
+cp "$ARCHIVE_SOURCE" "$output"
+""",
+        "md5sum": """#!/bin/sh
+printf 'call\n' >> "$MD5_TRACE"
+if [ "$1" = "$BOOTSTRAP_COPY_PATH" ]; then
+  printf '%s  %s\n' "$BOOTSTRAP_DIGEST" "$1"
+else
+  printf '%s  %s\n' "$PACKAGE_DIGEST" "$1"
+fi
+""",
+        "tar": """#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  [ "$1" != -C ] || { shift; target=$1; }
+  shift
+done
+mkdir -p "$target/astrill-lazy"
+cat > "$target/astrill-lazy/alctl" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$1" > "$START_RECORD"
+EOF
+printf '#!/bin/sh\n' > "$target/astrill-lazy/alapi"
+printf '#!/bin/sh\n' > "$target/astrill-lazy/alpage"
+printf '%s\n' "$PACKAGE_VERSION" > "$target/astrill-lazy/VERSION"
+""",
+    }
+    for name, script in scripts.items():
+        path = bin_dir / name
+        path.write_text(script, encoding="ascii", newline="\n")
+        path.chmod(0o755)
+
+    archive = tmp_path / "package.tar.gz"
+    archive.write_bytes(b"verified package bytes")
+    source = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
+    replacements = {
+        "BASE=/tmp/astrill-lazy": f"BASE='{base.as_posix()}'",
+        "ARCHIVE=/tmp/astrill-lazy-router.$$.tar.gz": (
+            f"ARCHIVE='{(tmp_path / 'decoded.tar.gz').as_posix()}'"
+        ),
+        "ENCODED=/tmp/astrill-lazy-router.$$.b64": (
+            f"ENCODED='{(tmp_path / 'encoded.b64').as_posix()}'"
+        ),
+        "BOOTSTRAP_COPY=/tmp/astrill-lazy-bootstrap.$$.sh": (
+            f"BOOTSTRAP_COPY='{(tmp_path / 'bootstrap-copy.sh').as_posix()}'"
+        ),
+        "STAGE=/tmp/astrill-lazy-install.$$": (
+            f"STAGE='{(tmp_path / 'stage').as_posix()}.$$'"
+        ),
+    }
+    for before, after in replacements.items():
+        source = source.replace(before, after)
+    scenario = tmp_path / "bootstrap.sh"
+    scenario.write_text(source, encoding="ascii", newline="\n")
+    digest = "a" * 32
+    bootstrap_digest = "b" * 32
+    version = "0.2.11"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir.as_posix()}:/usr/bin:/bin",
+        "ARCHIVE_SOURCE": archive.as_posix(),
+        "PACKAGE_DIGEST": digest,
+        "BOOTSTRAP_DIGEST": bootstrap_digest,
+        "ASTRILL_LAZY_BOOTSTRAP_MD5": bootstrap_digest,
+        "BOOTSTRAP_TEXT": "#!/bin/sh\nprintf bootstrap\n",
+        "BOOTSTRAP_COPY_PATH": (tmp_path / "bootstrap-copy.sh").as_posix(),
+        "PACKAGE_VERSION": version,
+        "MD5_TRACE": (tmp_path / "md5.trace").as_posix(),
+        "START_RECORD": (tmp_path / "start.record").as_posix(),
+    }
+    result = subprocess.run(
+        [SHELL, scenario.as_posix()],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (base / "PACKAGE_MD5").read_text(encoding="ascii").strip() == digest
+    assert (base / "VERSION").read_text(encoding="ascii").strip() == version
+    assert (tmp_path / "md5.trace").read_text(encoding="ascii").count("call") == 4
+    assert (tmp_path / "start.record").read_text(encoding="ascii").strip() == "start"
+    assert (base / "active-chain").read_text(encoding="ascii").strip() == "AL_LAZY_A"
+    assert not (base / "alhybrid").exists()
+    assert not (base / "rules.tsv").exists()
+    assert not (base / "runtime-epoch").exists()
+    assert not (base / "chain-a.document-hash").exists()
+    assert list((base / "overlays").iterdir()) == []
+    assert not (base / "controller.lock").exists()
+
+
+@pytest.mark.skipif(SHELL is None, reason="POSIX shell is unavailable")
 def test_application_profile_has_a_stable_locally_administered_mac() -> None:
+    assert SHELL is not None
     helper = ROOT / "helpers" / "astrill-lazy-netns"
     helper_source = helper.read_text(encoding="ascii")
     result = subprocess.run(
-        ["sh", str(helper), "identity", "uuremote"],
+        [SHELL, helper.as_posix(), "identity", "uuremote"],
         check=True,
         capture_output=True,
         text=True,
@@ -67,7 +309,7 @@ def test_application_profile_has_a_stable_locally_administered_mac() -> None:
         "mac": "02:41:4c:de:39:3a",
     }
     invalid = subprocess.run(
-        ["sh", str(helper), "identity", "../invalid"],
+        [SHELL, helper.as_posix(), "identity", "../invalid"],
         check=False,
         capture_output=True,
         text=True,
@@ -119,19 +361,18 @@ def test_novnc_service_is_rendered_from_the_checked_out_repository() -> None:
     assert "restarting the noVNC stack" in runner
 
 
-def test_router_upgrade_cleans_existing_runtime_before_extraction() -> None:
+def test_router_upgrade_stages_files_and_forces_fresh_core_reconciliation() -> None:
     bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
-    guarded_stop = '"$BASE/alctl" stop >/dev/null 2>&1 || exit 1'
-    extraction = 'tar -xzf "$ARCHIVE" -C /tmp || exit 1'
-
-    assert guarded_stop in bootstrap
-    assert bootstrap.index("for pid in $(watchdog_pids)") < bootstrap.index(
-        'while [ -d "$BASE/controller.lock" ]'
-    )
-    assert bootstrap.index('while [ -d "$BASE/controller.lock" ]') < bootstrap.index(
-        guarded_stop
-    )
-    assert bootstrap.index(guarded_stop) < bootstrap.index(extraction)
+    assert 'tar -xzf "$ARCHIVE" -C "$STAGE"' in bootstrap
+    assert 'tar -xzf "$ARCHIVE" -C /tmp' not in bootstrap
+    assert '"$BASE/alctl" stop' not in bootstrap
+    assert 'cp "$SOURCE/$name" "$BASE/$name.new.$$"' in bootstrap
+    assert 'mv "$BASE/$name.new.$$" "$BASE/$name"' in bootstrap
+    assert '"$BASE/alhybrid"' in bootstrap
+    assert '"$BASE/rules.tsv"' in bootstrap
+    assert '"$BASE/runtime-epoch"' in bootstrap
+    assert '"$BASE/chain-a.document-hash"' in bootstrap
+    assert '"$BASE/active-chain"' not in bootstrap
 
 
 def test_desktop_installer_selects_a_supported_python_and_opt_in_autostart() -> None:
@@ -191,18 +432,23 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "ASTRILL_CONNECT_ATTEMPTS=60" in controller
     assert "MAX_RULE_BYTES=6144" in controller
     assert "MIN_NVRAM_FREE_BYTES=2048" in controller
-    assert 'nvram unset "$PREVIOUS_RULES_KEY"' in controller
     assert "CURRENT_RULES_GZ_KEY=astrill_lazy_rules_gz" in controller
-    assert "persistent_rule_bytes" in controller
-    assert "persist_rule_document" in controller
+    hybrid = (ROOT / "router" / "alhybrid").read_text(encoding="ascii")
+    assert 'nvram unset "$PREVIOUS_RULES_KEY"' in hybrid
+    assert "persistent_rule_bytes" in hybrid
+    assert "persist_rule_document" in hybrid
     assert '"rollback_persistent":%s' in controller
     assert controller.count("iptables -w 10") >= 15
-    assert "insufficient NVRAM headroom" in controller
+    assert "insufficient NVRAM headroom" in hybrid
     assert "watchdog_pids | grep -qx" in controller
     assert "cleanup_watchdog_pid" in controller
     assert "refresh_mode=${3:-0}" in controller
-    assert 'apply_runtime "$CURRENT" 1' in controller
+    assert 'apply_runtime "$refresh_document" 1' in controller
+    assert '[ "$(hybrid_overlay_count)" -gt 0 ]' in controller
     assert '"$RESOLVED"' in controller
+    assert "HYBRID_DNS_BATCH=8" in hybrid
+    assert "iptables-restore" in hybrid
+    assert '"$IPTABLES_RESTORE" -w 10 -n -t' in hybrid
     assert 'kill -9 "$pid"' in controller
     assert 'wait "$watchdog_sleep_pid"' in controller
     assert '[ "$watchdog" = true ] || health=degraded' in controller
@@ -216,6 +462,54 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "astrill-connect)" in controller
     assert "astrill-disconnect)" in controller
     assert "/dev/astrill/astrillvpn stop" in controller
+
+
+def test_policy_mutations_verify_package_and_helper_identity_under_lock() -> None:
+    controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
+    mutations = {
+        "apply": "initialize_rules",
+        "core-apply": "hybrid_apply_core_file",
+        "rollback": "initialize_rules",
+        "core-rollback": "hybrid_apply_core_file",
+        "overlay-put": "hybrid_put_overlay",
+        "overlay-remove": "hybrid_remove_overlay",
+        "toggle-origin": "transform_origin toggle",
+        "route-origin": "transform_origin route",
+    }
+    for command, mutation in mutations.items():
+        match = re.search(
+            rf"\n    {re.escape(command)}\)\n"
+            r"(?P<body>.*?)(?=\n    [a-z][a-z0-9|-]*\)\n)",
+            controller,
+            re.DOTALL,
+        )
+        assert match is not None, command
+        body = match.group("body")
+        lock = body.index("acquire_lock")
+        identity = body.index(
+            'require_package_identity "$expected_version" "$expected_md5"'
+        )
+        helper_identity = body.index(
+            'require_hybrid_helper_identity "$expected_helper_md5"'
+        )
+        write = body.index(mutation)
+        assert lock < identity < helper_identity < write
+
+    assert (
+        "overlay-put VERSION PACKAGE_MD5 HELPER_MD5 OWNER GENERATION SOURCE "
+        "EXPECTED_SOURCE EXPECTED_MAC FILE|-"
+    ) in controller
+    assert "core-apply VERSION PACKAGE_MD5 HELPER_MD5 GENERATION FILE|-" in controller
+
+
+def test_router_lock_and_watchdog_traps_include_hup() -> None:
+    controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
+    bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
+    assert "trap 'exit 129' HUP" in controller
+    assert "trap - EXIT HUP INT TERM" in controller
+    assert "HUP INT TERM EXIT" in controller
+    assert "trap 'exit 129' HUP" in bootstrap
+    assert "trap bootstrap_cleanup EXIT" in bootstrap
 
 
 def test_macos_uu_reporter_is_change_driven_and_process_scoped() -> None:
@@ -419,8 +713,9 @@ def test_ddwrt_banner_is_removed_from_ssh_errors() -> None:
     assert _clean_ssh_stderr(output) == "actual failure"
 
 
-@pytest.mark.skipif(shutil.which("sh") is None, reason="POSIX shell is unavailable")
+@pytest.mark.skipif(SHELL is None, reason="POSIX shell is unavailable")
 def test_router_clients_merge_lan_sources_and_exclude_wan(tmp_path: Path) -> None:
+    assert SHELL is not None
     leases = tmp_path / "dnsmasq.leases"
     leases.write_text(
         "2000000000 AA:BB:CC:DD:EE:01 192.168.1.10 * client-id\n",
@@ -449,15 +744,18 @@ def test_router_clients_merge_lan_sources_and_exclude_wan(tmp_path: Path) -> Non
         encoding="ascii",
     )
     nvram.chmod(0o755)
+    path = f"{bin_dir.as_posix()}:{os.environ['PATH']}"
+    if os.name == "nt":
+        path = f"{bin_dir.as_posix()}:/usr/bin:/bin"
     environment = {
         **os.environ,
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "ASTRILL_LAZY_BASE": str(tmp_path / "runtime"),
-        "ASTRILL_LAZY_LEASES_FILE": str(leases),
-        "ASTRILL_LAZY_ARP_FILE": str(arp),
+        "PATH": path,
+        "ASTRILL_LAZY_BASE": (tmp_path / "runtime").as_posix(),
+        "ASTRILL_LAZY_LEASES_FILE": leases.as_posix(),
+        "ASTRILL_LAZY_ARP_FILE": arp.as_posix(),
     }
     result = subprocess.run(
-        ["sh", str(ROOT / "router" / "alctl"), "clients", "--json"],
+        [SHELL, (ROOT / "router" / "alctl").as_posix(), "clients", "--json"],
         check=True,
         capture_output=True,
         text=True,
