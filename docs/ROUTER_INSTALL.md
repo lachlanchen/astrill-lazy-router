@@ -13,6 +13,11 @@ a transient password; and a missing Astrill applet accepts a user-provided,
 hash-reviewed installer. The CLI workflow below assumes setup is already
 complete.
 
+Installing DD-WRT and the vendor applet on a stock Linksys E4200 v1 is covered
+separately in the
+[E4200 DD-WRT and Astrill tutorial](tutorials/e4200-dd-wrt-astrill/README.md).
+That firmware procedure does not apply to E4200 v2.
+
 Password authentication remains disabled for SSH. Telnet was intentionally
 left available as a recovery path; its credentials are not stored here.
 Generate and verify a dedicated deployment key rather than copying a

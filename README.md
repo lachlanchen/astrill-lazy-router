@@ -300,6 +300,10 @@ shared or untrusted LAN.
 Review [router prerequisites and rollback](docs/ROUTER_INSTALL.md) before the
 first router installation.
 
+For a stock Linksys E4200 v1, follow the separate
+[E4200 DD-WRT and Astrill tutorial](docs/tutorials/e4200-dd-wrt-astrill/README.md)
+before installing the optional companion.
+
 ### Install on Ubuntu
 
 ```bash

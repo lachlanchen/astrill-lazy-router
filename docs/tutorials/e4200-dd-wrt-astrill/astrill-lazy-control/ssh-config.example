@@ -1,0 +1,10 @@
+Host astrill-router
+    HostName 192.168.1.1
+    User root
+    Port 22
+    IdentityFile ~/.ssh/astrill_lazy_router_ed25519
+    IdentitiesOnly yes
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    ServerAliveInterval 15
+    ServerAliveCountMax 3
