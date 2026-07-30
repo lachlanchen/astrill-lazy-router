@@ -427,6 +427,11 @@ under `/etc/systemd/system`, and create a root-owned mode-`0600`
 `/etc/astrill-lazy/profiles/PROFILE.conf`. The configuration declares the
 profile ID, physical parent interface, desktop UID, and absolute executable.
 `contrib/ubuntu/uuremote-profile.conf.example` is the UU Remote example.
+Profiles normally inherit the DNS servers returned by DHCP. Set
+`ASTRILL_LAZY_PROFILE_DNS` to a quoted, space-separated list of at most three
+IPv4 resolvers when the router-provided resolver is not usable inside the
+namespace. The helper validates the list before writing the profile-specific
+`resolv.conf`.
 
 The system service prepares DHCP, waits for the logged-in GNOME session, and
 then launches the fixed executable as that desktop user. A stop or failed

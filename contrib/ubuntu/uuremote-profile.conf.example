@@ -4,6 +4,10 @@ PARENT_INTERFACE=enp0s31f6
 DESKTOP_UID=1000
 EXECUTABLE=/home/CHANGE_ME/.local/bin/uu-remote-bridge
 
+# Optional: use explicit resolvers when the router's DHCP DNS is not reachable
+# from the application namespace. Supply at most three IPv4 addresses.
+ASTRILL_LAZY_PROFILE_DNS="223.5.5.5 1.1.1.1"
+
 # Optional variables consumed by the UU Remote bridge.
 UURB_RDP_PORT=3391
 UURB_RESOLUTION=1920x1080

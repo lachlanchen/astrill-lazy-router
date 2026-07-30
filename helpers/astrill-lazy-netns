@@ -76,6 +76,40 @@ dhcp_pid_for() (
     printf '%s\n' "$pid"
 )
 
+write_profile_resolver() {
+    namespace=$1
+    dhcp_servers=${2:-}
+    configured_servers=${ASTRILL_LAZY_PROFILE_DNS:-}
+    resolv_file="/etc/netns/$namespace/resolv.conf"
+    server_count=0
+
+    if [ -n "$configured_servers" ] && [ "${#configured_servers}" -gt 128 ]; then
+        fail "profile DNS configuration is too long"
+    fi
+    : > "$resolv_file"
+    set -f
+    if [ -n "$configured_servers" ]; then
+        for server in $configured_servers; do
+            valid_ipv4 "$server" || fail "profile DNS contains an invalid IPv4 address"
+            server_count=$((server_count + 1))
+            [ "$server_count" -le 3 ] || fail "profile DNS supports at most three servers"
+            printf 'nameserver %s\n' "$server" >> "$resolv_file"
+        done
+    else
+        for server in $dhcp_servers; do
+            if valid_ipv4 "$server"; then
+                server_count=$((server_count + 1))
+                [ "$server_count" -le 3 ] || break
+                printf 'nameserver %s\n' "$server" >> "$resolv_file"
+            fi
+        done
+    fi
+    set +f
+    [ -s "$resolv_file" ] ||
+        printf 'nameserver 192.168.1.1\n' > "$resolv_file"
+    chmod 644 "$resolv_file"
+}
+
 mask_prefix() {
     case ${1:-} in
         255.0.0.0) printf 8 ;;
@@ -144,12 +178,7 @@ dhcp_hook() {
             set +f
             IFS=$old_ifs
             [ "$#" -eq 0 ] || ip route replace default via "$1" dev eth0
-            resolv_file="/etc/netns/$namespace/resolv.conf"
-            : > "$resolv_file"
-            for server in ${dns:-}; do
-                valid_ipv4 "$server" && printf 'nameserver %s\n' "$server" >> "$resolv_file"
-            done
-            [ -s "$resolv_file" ] || printf 'nameserver 192.168.1.1\n' > "$resolv_file"
+            write_profile_resolver "$namespace" "${dns:-}"
             printf '%s\n' "$ip" > "$state_file"
             chmod 644 "$state_file"
             ;;
@@ -179,6 +208,9 @@ prepare_profile() {
         pid=$(dhcp_pid_for "$pid_file" 2>/dev/null || printf 0)
         if valid_ipv4 "$address" && [ "$current_mac" = "$mac" ] &&
             [ "$pid" -gt 1 ]; then
+            if [ -n "${ASTRILL_LAZY_PROFILE_DNS:-}" ]; then
+                write_profile_resolver "$namespace" ""
+            fi
             printf '{"profile":"%s","namespace":"%s","address":"%s","mac":"%s"}\n' \
                 "$profile" "$namespace" "$address" "$mac"
             return 0

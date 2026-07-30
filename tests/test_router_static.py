@@ -416,6 +416,9 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "eval " not in controller
     assert "eval " not in helper
     assert "eval " not in runner
+    assert "ASTRILL_LAZY_PROFILE_DNS" in helper
+    assert "write_profile_resolver" in helper
+    assert "profile DNS supports at most three servers" in helper
     assert "APP_CHAIN=AL_LAZY_APP" in controller
     assert "MAX_APP_FLOWS=16" in controller
     assert "--sport" in controller

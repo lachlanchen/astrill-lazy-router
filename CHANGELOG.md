@@ -57,6 +57,8 @@
   packet counters for both source/MAC bindings. Final two-owner status was 566
   metadata rows, 66,546 bytes, 892 generated matches, 37,720 KiB available
   memory, and 2,374 NVRAM bytes free.
+- Allow a boot-persistent Ubuntu application profile to declare up to three
+  validated IPv4 resolvers, while retaining DHCP DNS as the default.
 
 ## 0.2.13 - 2026-07-30
 
