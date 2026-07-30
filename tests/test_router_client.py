@@ -25,6 +25,7 @@ from astrill_lazy.router import (
     _openssh_config_path,
     _parse_native_clients,
 )
+from astrill_lazy.subprocess_support import background_process_options
 
 WINDOWS_NO_WINDOW = 0x08000000
 
@@ -80,7 +81,7 @@ nvram() {{
         check=True,
         capture_output=True,
         text=True,
-        creationflags=WINDOWS_NO_WINDOW,
+        **background_process_options(),
     )
     values = dict(line.split("\t", 1) for line in result.stdout.splitlines())
 
