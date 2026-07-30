@@ -29,8 +29,8 @@
       <description>
         <p>Adds verified dynamic router-policy precedence, explicit Apply-all
         and multi-select Apply-selected capacity preflight, clearer
-        local-versus-applied state, and expanded UU Remote and Nutstore
-        destination profiles.</p>
+        local-versus-applied state, reboot-persistent Ubuntu application
+        identities, and a bounded transient macOS UU media-socket route.</p>
       </description>
     </release>
     <release version="0.2.11" date="2026-07-30">

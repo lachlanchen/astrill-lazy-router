@@ -42,6 +42,15 @@ valid_ipv4() {
     '
 }
 
+profile_mac() {
+    profile=$1
+    checksum=$(printf '%s' "$profile" | cksum | awk '{ print $1 }')
+    printf '02:41:4c:%02x:%02x:%02x\n' \
+        "$((checksum / 65536 % 256))" \
+        "$((checksum / 256 % 256))" \
+        "$((checksum % 256))"
+}
+
 namespace_for() {
     printf 'al-%s\n' "$1"
 }
@@ -53,6 +62,19 @@ state_file_for() {
 pid_file_for() {
     printf '%s/%s.udhcpc.pid\n' "$STATE_DIR" "$1"
 }
+
+dhcp_pid_for() (
+    pid_file=$1
+    pid=$(cat "$pid_file" 2>/dev/null || printf 0)
+    is_uint "$pid" && [ "$pid" -gt 1 ] || exit 1
+    [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$BUSYBOX" ] ||
+        exit 1
+    tr '\000' '\n' < "/proc/$pid/cmdline" 2>/dev/null |
+        grep -Fxq udhcpc || exit 1
+    tr '\000' '\n' < "/proc/$pid/cmdline" 2>/dev/null |
+        grep -Fxq "$pid_file" || exit 1
+    printf '%s\n' "$pid"
+)
 
 mask_prefix() {
     case ${1:-} in
@@ -87,8 +109,8 @@ cleanup_profile() {
     profile=$1
     namespace=$(namespace_for "$profile")
     pid_file=$(pid_file_for "$profile")
-    pid=$(cat "$pid_file" 2>/dev/null || printf 0)
-    if is_uint "$pid" && [ "$pid" -gt 1 ]; then
+    pid=$(dhcp_pid_for "$pid_file" 2>/dev/null || printf 0)
+    if [ "$pid" -gt 1 ]; then
         kill "$pid" 2>/dev/null || true
     fi
     ip netns delete "$namespace" 2>/dev/null || true
@@ -146,10 +168,19 @@ prepare_profile() {
     chmod 755 "$STATE_DIR"
     namespace=$(namespace_for "$profile")
     state_file=$(state_file_for "$profile")
+    pid_file=$(pid_file_for "$profile")
+    mac=$(profile_mac "$profile")
     if ip netns list | awk '{print $1}' | grep -Fxq "$namespace" && [ -f "$state_file" ]; then
         address=$(cat "$state_file")
-        if valid_ipv4 "$address" && ip -n "$namespace" link show eth0 >/dev/null 2>&1; then
-            printf '{"profile":"%s","namespace":"%s","address":"%s"}\n' "$profile" "$namespace" "$address"
+        current_mac=$(
+            ip -n "$namespace" link show eth0 2>/dev/null |
+                awk '/link\/ether/ { print $2; exit }'
+        )
+        pid=$(dhcp_pid_for "$pid_file" 2>/dev/null || printf 0)
+        if valid_ipv4 "$address" && [ "$current_mac" = "$mac" ] &&
+            [ "$pid" -gt 1 ]; then
+            printf '{"profile":"%s","namespace":"%s","address":"%s","mac":"%s"}\n' \
+                "$profile" "$namespace" "$address" "$mac"
             return 0
         fi
     fi
@@ -161,12 +192,12 @@ prepare_profile() {
     ip netns add "$namespace"
     mkdir -p "/etc/netns/$namespace"
     ip link add link "$parent" name "$host_link" type macvlan mode bridge
+    ip link set "$host_link" address "$mac"
     ip link set "$host_link" netns "$namespace"
     ip -n "$namespace" link set lo up
     ip -n "$namespace" link set "$host_link" name eth0
     ip -n "$namespace" link set eth0 up
 
-    pid_file=$(pid_file_for "$profile")
     ip netns exec "$namespace" env ASTRILL_LAZY_PROFILE="$profile" \
         "$BUSYBOX" udhcpc -f -i eth0 -p "$pid_file" -s "$0" \
         -x "hostname:astrill-$profile" > "$STATE_DIR/$profile.udhcpc.log" 2>&1 &
@@ -178,7 +209,8 @@ prepare_profile() {
             if valid_ipv4 "$address"; then
                 prepare_cleanup=0
                 trap - EXIT INT TERM
-                printf '{"profile":"%s","namespace":"%s","address":"%s"}\n' "$profile" "$namespace" "$address"
+                printf '{"profile":"%s","namespace":"%s","address":"%s","mac":"%s"}\n' \
+                    "$profile" "$namespace" "$address" "$mac"
                 return 0
             fi
         fi
@@ -226,17 +258,24 @@ launch_profile() {
     bus=$(read_process_env "$session_pid" DBUS_SESSION_BUS_ADDRESS)
     language=$(read_process_env "$session_pid" LANG)
     xauthority=$(read_process_env "$session_pid" XAUTHORITY)
+    session_type=$(read_process_env "$session_pid" XDG_SESSION_TYPE)
 
     exec ip netns exec "$namespace" runuser -u "$username" -- env \
         "HOME=$home" "USER=$username" "LOGNAME=$username" \
         "XDG_RUNTIME_DIR=$runtime" "DISPLAY=$display" "WAYLAND_DISPLAY=$wayland" \
         "DBUS_SESSION_BUS_ADDRESS=$bus" "LANG=${language:-C.UTF-8}" \
-        "XAUTHORITY=$xauthority" "$executable" "$@"
+        "XAUTHORITY=$xauthority" "XDG_SESSION_TYPE=$session_type" \
+        "$executable" "$@"
 }
 
-[ "$(id -u)" -eq 0 ] || fail "this helper must run through pkexec"
 command=${1:-}
 shift || true
+if [ "$command" = identity ]; then
+    valid_profile "${1:-}" || fail "invalid profile"
+    printf '{"profile":"%s","mac":"%s"}\n' "$1" "$(profile_mac "$1")"
+    exit 0
+fi
+[ "$(id -u)" -eq 0 ] || fail "this helper must run through pkexec"
 case $command in
     prepare) prepare_profile "$@" ;;
     launch) launch_profile "$@" ;;
@@ -245,5 +284,6 @@ case $command in
         cleanup_profile "$1"
         ;;
     dhcp-hook) dhcp_hook "$@" ;;
-    *) fail "usage: astrill-lazy-netns prepare|launch|cleanup ..." ;;
+    deconfig|bound|renew) dhcp_hook "$command" ;;
+    *) fail "usage: astrill-lazy-netns identity|prepare|launch|cleanup ..." ;;
 esac

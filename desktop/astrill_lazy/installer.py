@@ -8,6 +8,7 @@ import shlex
 import sys
 import tarfile
 import time
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from io import BytesIO
@@ -22,6 +23,10 @@ STARTUP_LINE = "nvram get astrill_lazy_bootstrap | sh;"
 PAGE_COMMANDS = (
     "/tmp/astrill-lazy/alpage",
     "/tmp/astrill-lazy/alapi",
+)
+RULE_STORAGE_PAIRS = (
+    ("astrill_lazy_rules", "astrill_lazy_rules_gz"),
+    ("astrill_lazy_rules_previous", "astrill_lazy_rules_previous_gz"),
 )
 
 
@@ -239,6 +244,9 @@ class RouterInstaller:
         else:
             previous_startup = self._nvram_get("astrill_lazy_previous_rc_startup")
             previous_pages = self._nvram_get("astrill_lazy_previous_mypage_scripts")
+        stored_rules = {
+            key: self._nvram_get(key) for pair in RULE_STORAGE_PAIRS for key in pair
+        }
 
         if STARTUP_LINE not in startup:
             startup = f"{startup.rstrip()}\n{STARTUP_LINE}".lstrip()
@@ -263,6 +271,7 @@ class RouterInstaller:
         )
 
         script = ["set -e"]
+        script.extend(_rule_storage_migration_commands(stored_rules))
         script.extend(_nvram_set_command(key, value) for key, value in assignments)
         for index in range(len(chunks), old_count):
             script.append(f"nvram unset {shlex.quote(f'astrill_lazy_pkg_{index}')}")
@@ -272,7 +281,7 @@ class RouterInstaller:
                 "nvram get astrill_lazy_bootstrap | sh",
             ]
         )
-        self.client.run_script("\n".join(script) + "\n", timeout=90)
+        self.client.run_script("\n".join(script) + "\n", timeout=300)
         status = self.client.status()
         if not self._runtime_is_current(status):
             raise RouterError(
@@ -312,6 +321,8 @@ class RouterInstaller:
             "astrill_lazy_previous_mypage_scripts",
             "astrill_lazy_rules",
             "astrill_lazy_rules_previous",
+            "astrill_lazy_rules_gz",
+            "astrill_lazy_rules_previous_gz",
         ]
         keys.extend(f"astrill_lazy_pkg_{index}" for index in range(count))
 
@@ -414,3 +425,39 @@ def _nvram_set_command(key: str, value: str) -> str:
     if not re.fullmatch(r"[a-zA-Z0-9_]+", key):
         raise ValueError(f"invalid NVRAM key: {key!r}")
     return f"nvram set {shlex.quote(f'{key}={value}')}"
+
+
+def _compressed_rule_document(value: str) -> str:
+    payload = gzip.compress(value.encode("ascii"), compresslevel=9, mtime=0)
+    return base64.b64encode(payload).decode("ascii")
+
+
+def _valid_compressed_rule_document(value: str) -> bool:
+    try:
+        payload = base64.b64decode(value, validate=True)
+        document = gzip.decompress(payload).decode("ascii")
+    except (EOFError, OSError, UnicodeError, ValueError, zlib.error):
+        return False
+    return document.startswith("# astrill-lazy-rules-v1")
+
+
+def _rule_storage_migration_commands(values: dict[str, str]) -> list[str]:
+    commands: list[str] = []
+    for plain_key, compressed_key in RULE_STORAGE_PAIRS:
+        plain_value = values.get(plain_key, "")
+        compressed_value = values.get(compressed_key, "")
+        if compressed_value and _valid_compressed_rule_document(compressed_value):
+            if plain_value:
+                commands.append(f"nvram unset {plain_key}")
+            continue
+        if not plain_value:
+            continue
+        try:
+            candidate = _compressed_rule_document(plain_value)
+        except UnicodeEncodeError:
+            continue
+        if len(candidate) >= len(plain_value.encode("ascii")):
+            continue
+        commands.append(_nvram_set_command(compressed_key, candidate))
+        commands.append(f"nvram unset {plain_key}")
+    return commands

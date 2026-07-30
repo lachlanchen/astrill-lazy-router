@@ -85,9 +85,14 @@ The plugin owns only NVRAM keys beginning with `astrill_lazy_`:
 
 - package chunks, count, MD5, and version;
 - bootstrap script;
-- current and previous compiled rule documents;
+- the current compiled rule document and, when NVRAM reserve permits, the
+  previous document, stored as gzip/base64 when that is smaller than plain TSV;
 - original startup/MyPage values for recovery metadata;
 - installation marker.
+
+Upgrade migrates legacy plain policy values before writing larger package
+chunks. This avoids transient NVRAM exhaustion, and the controller continues
+to read the legacy keys as a recovery fallback.
 
 `rc_startup` still runs the original `astrill_bootstrap` first. The plugin then
 pipes its own stored bootstrap to `sh`. `mypage_scripts` retains Astrill as

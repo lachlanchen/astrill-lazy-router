@@ -27,3 +27,19 @@ def test_fresh_read_only_config_blocks_mutating_cli_before_ssh(
 
     assert main(["apply"]) == 2
     assert "read-only access blocks this command" in capsys.readouterr().err
+
+    assert (
+        main(
+            [
+                "app-flow",
+                "set",
+                "mac-uuremote",
+                "192.168.1.99",
+                "udp",
+                "64479",
+                "direct",
+            ]
+        )
+        == 2
+    )
+    assert "read-only access blocks this command" in capsys.readouterr().err

@@ -16,6 +16,8 @@ from astrill_lazy.autostart import (
 from astrill_lazy.installer import (
     STARTUP_LINE,
     RouterInstaller,
+    _compressed_rule_document,
+    _rule_storage_migration_commands,
     build_router_package,
     find_router_root,
 )
@@ -57,6 +59,40 @@ def test_router_package_canonicalizes_crlf_version(tmp_path: Path) -> None:
         version_file = archive.extractfile("astrill-lazy/VERSION")
         assert version_file is not None
         assert version_file.read() == b"0.2.3\n"
+
+
+def test_rule_storage_migration_compresses_legacy_documents_before_package() -> None:
+    document = "# astrill-lazy-rules-v1\n" + (
+        "service:uu-remote\t1\tdirect\tcidr\t8.221.56.176/32\n" * 80
+    )
+    commands = _rule_storage_migration_commands(
+        {
+            "astrill_lazy_rules": document,
+            "astrill_lazy_rules_gz": "",
+            "astrill_lazy_rules_previous": "",
+            "astrill_lazy_rules_previous_gz": "",
+        }
+    )
+
+    assert commands[0].startswith("nvram set astrill_lazy_rules_gz=")
+    assert commands[1] == "nvram unset astrill_lazy_rules"
+    assert len(_compressed_rule_document(document)) < len(document.encode("ascii"))
+
+
+def test_rule_storage_migration_keeps_valid_compressed_document() -> None:
+    document = "# astrill-lazy-rules-v1\n"
+    compressed = _compressed_rule_document(document)
+
+    commands = _rule_storage_migration_commands(
+        {
+            "astrill_lazy_rules": document,
+            "astrill_lazy_rules_gz": compressed,
+            "astrill_lazy_rules_previous": "",
+            "astrill_lazy_rules_previous_gz": "",
+        }
+    )
+
+    assert commands == ["nvram unset astrill_lazy_rules"]
 
 
 def test_config_store_round_trip_is_private(tmp_path: Path) -> None:
@@ -488,6 +524,8 @@ def test_router_uninstall_audits_cleanup_and_preserves_native_state() -> None:
     assert result == native_status
     assert "astrill_lazy_pkg_0" in client.script
     assert "astrill_lazy_pkg_1" in client.script
+    assert "astrill_lazy_rules_gz" in client.script
+    assert "astrill_lazy_rules_previous_gz" in client.script
     assert "rm -rf /tmp/astrill-lazy" in client.script
     assert "iptables -w 10 -t mangle -S" in client.script
     assert "iptables -w 10 -t filter -S" in client.script

@@ -13,7 +13,12 @@ from astrill_lazy.astrill import (
     AstrillServer,
 )
 from astrill_lazy.catalog import load_catalog
-from astrill_lazy.installer import CompanionCheck, EnsureResult, InstallResult
+from astrill_lazy.installer import (
+    CompanionCheck,
+    EnsureResult,
+    InstallResult,
+    find_router_root,
+)
 from astrill_lazy.models import MatchKind, RouteTarget, Rule
 from astrill_lazy.native_settings import NativeAstrillSettings
 from astrill_lazy.router import AstrillConnectionResult, RouterMonitorSnapshot
@@ -31,6 +36,8 @@ from astrill_lazy.windows_ssh_setup import (
     WindowsKeyAuthorization,
 )
 
+ROUTER_VERSION = (find_router_root() / "VERSION").read_text(encoding="ascii").strip()
+
 
 class FakeRouter:
     def __init__(self) -> None:
@@ -38,12 +45,12 @@ class FakeRouter:
         self.write_calls: list[tuple[str, object]] = []
         self.monitor_presence: dict[str, Any] = {
             "installed": True,
-            "version": "0.2.5",
+            "version": ROUTER_VERSION,
             "runtime": True,
         }
         self.monitor_companion_status: dict[str, Any] | None = {
             "health": "healthy",
-            "version": "0.2.5",
+            "version": ROUTER_VERSION,
             "jump_installed": True,
             "watchdog": True,
             "policy_health": "ready",
@@ -594,13 +601,13 @@ def test_connection_state_repairs_vanished_companion_runtime_before_catalog(
     router = FakeRouter()
     router.monitor_presence = {
         "installed": True,
-        "version": "0.2.4",
+        "version": ROUTER_VERSION,
         "runtime": False,
     }
     router.monitor_companion_status = None
     repaired = {
         "health": "healthy",
-        "version": "0.2.4",
+        "version": ROUTER_VERSION,
         "jump_installed": True,
         "watchdog": True,
         "vpn_state": "down",
@@ -623,8 +630,8 @@ def test_connection_state_repairs_vanished_companion_runtime_before_catalog(
             assert status is None
             return CompanionCheck(
                 "repair",
-                "0.2.4",
-                "0.2.4",
+                ROUTER_VERSION,
+                ROUTER_VERSION,
                 None,
                 "runtime needs repair",
             )
@@ -659,7 +666,7 @@ def test_connection_state_never_masks_unrepairable_runtime_as_native(
     router = FakeRouter()
     router.monitor_presence = {
         "installed": True,
-        "version": "0.2.4",
+        "version": ROUTER_VERSION,
         "runtime": False,
     }
     router.monitor_companion_status = None
@@ -679,8 +686,8 @@ def test_connection_state_never_masks_unrepairable_runtime_as_native(
             assert status is None
             return CompanionCheck(
                 "install",
-                "0.2.4",
-                "0.2.4",
+                ROUTER_VERSION,
+                ROUTER_VERSION,
                 None,
                 "stored runtime cannot be repaired",
             )

@@ -130,7 +130,7 @@ broad hosting-provider CIDRs.
 
 ## Application Helper
 
-`astrill-lazy-netns` requires root and rejects:
+`astrill-lazy-netns` and the boot profile runner require root and reject:
 
 - malformed profile and interface names;
 - missing parent links;
@@ -142,6 +142,18 @@ broad hosting-provider CIDRs.
 It launches the app through `runuser` after entering the namespace, preserving
 only required session variables. Arguments remain an `argv` list and are never
 evaluated by a shell.
+
+Boot profiles are read from root-owned files under
+`/etc/astrill-lazy/profiles`. The systemd template passes those fixed values
+as arguments to the same validated helper. The runner does not accept commands
+from the desktop session; it only waits for that user's GNOME session bus.
+
+macOS application flow reports accept an exact IPv4 source, TCP or UDP, at
+most 15 source ports, a Direct/Astrill target, and a constrained ID. The router
+retains at most 16 such rows and 1,024 bytes under `/tmp`; they are not written
+to NVRAM. Private and multicast destinations return before a flow can set a
+route mark. The provided UU reporter inspects only processes inside the signed
+application's bundle path and uses key-only SSH with strict host-key checking.
 
 For a shared multi-user installation, install the helper root-owned under
 `/usr/local/libexec` and use a narrow Polkit policy. The source deployment

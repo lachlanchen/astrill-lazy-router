@@ -10,6 +10,7 @@ PREVIOUS=$BASE/rules.previous.tsv
 RESOLVED=$BASE/resolved.tsv
 UNRESOLVED=$BASE/unresolved.txt
 ACTIVE_FILE=$BASE/active-chain
+APP_FLOWS=$BASE/app-flows.tsv
 WATCHDOG_PID=$BASE/watchdog.pid
 LOCK_DIR=$BASE/controller.lock
 LOG_FILE=$BASE/controller.log
@@ -23,6 +24,7 @@ ARP_FILE=${ASTRILL_LAZY_ARP_FILE:-/proc/net/arp}
 CHAIN_A=AL_LAZY_A
 CHAIN_B=AL_LAZY_B
 VPN_FAIL_CHAIN=AL_LAZY_VPN_FAIL
+APP_CHAIN=AL_LAZY_APP
 DIRECT_MARK=0x4000000
 VPN_MARK=0x8000000
 MARK_MASK=0xc000000
@@ -37,6 +39,14 @@ WATCHDOG_INTERVAL=60
 WATCHDOG_REFRESH_CYCLES=30
 ASTRILL_CONNECT_ATTEMPTS=60
 MAX_RULE_BYTES=6144
+MAX_APP_FLOW_BYTES=1024
+MAX_APP_FLOWS=16
+MIN_NVRAM_FREE_BYTES=2048
+PERSIST_PREVIOUS=1
+CURRENT_RULES_KEY=astrill_lazy_rules
+PREVIOUS_RULES_KEY=astrill_lazy_rules_previous
+CURRENT_RULES_GZ_KEY=astrill_lazy_rules_gz
+PREVIOUS_RULES_GZ_KEY=astrill_lazy_rules_previous_gz
 TAB="$(printf '\t')"
 policy_routes_changed=false
 
@@ -110,6 +120,13 @@ valid_ipv4_network() {
             }
         }
     '
+}
+
+valid_ipv4_host() {
+    case ${1:-} in
+        */*) return 1 ;;
+    esac
+    valid_ipv4_network "$1"
 }
 
 valid_mac() {
@@ -191,6 +208,33 @@ validate_rules() {
     return 0
 }
 
+validate_app_flows() {
+    file=$1
+    bytes=$(wc -c < "$file" 2>/dev/null || printf 0)
+    [ "$bytes" -le "$MAX_APP_FLOW_BYTES" ] || {
+        printf 'application flow document exceeds %s bytes\n' \
+            "$MAX_APP_FLOW_BYTES" >&2
+        return 1
+    }
+    awk -F '\t' -v maximum="$MAX_APP_FLOWS" '
+        NF != 5 { exit 1 }
+        { count++ }
+        END { exit count > maximum }
+    ' "$file" || {
+        printf 'application flows require five fields and at most %s rows\n' \
+            "$MAX_APP_FLOWS" >&2
+        return 1
+    }
+
+    while IFS="$TAB" read -r id source protocol ports target; do
+        valid_id "$id" || return 1
+        valid_ipv4_host "$source" || return 1
+        case $protocol in tcp|udp) ;; *) return 1 ;; esac
+        valid_ports "$ports" && [ "$ports" != "-" ] || return 1
+        case $target in direct|vpn) ;; *) return 1 ;; esac
+    done < "$file"
+}
+
 acquire_lock() {
     attempts=0
     while ! mkdir "$LOCK_DIR" 2>/dev/null; do
@@ -214,16 +258,116 @@ release_lock() {
     trap - EXIT INT TERM
 }
 
+encode_rule_document() {
+    source_file=$1
+    archive_file=$BASE/rules.encode.$$.gz
+    wrapper_file=$BASE/rules.encode.$$.txt
+    gzip -9 -c "$source_file" > "$archive_file" || {
+        rm -f "$archive_file" "$wrapper_file"
+        return 1
+    }
+    uuencode -m "$archive_file" rules.tsv.gz > "$wrapper_file" || {
+        rm -f "$archive_file" "$wrapper_file"
+        return 1
+    }
+    sed '1d;$d' "$wrapper_file"
+    encode_status=$?
+    rm -f "$archive_file" "$wrapper_file"
+    return "$encode_status"
+}
+
+decode_rule_document() {
+    encoded_value=$1
+    destination=$2
+    archive_file=$BASE/rules.decode.$$.gz
+    candidate_file=$BASE/rules.decode.$$.tsv
+    {
+        printf 'begin-base64 600 rules.tsv.gz\n'
+        printf '%s\n' "$encoded_value"
+        printf '====\n'
+    } | uudecode -o "$archive_file" || {
+        rm -f "$archive_file" "$candidate_file"
+        return 1
+    }
+    gunzip -c "$archive_file" > "$candidate_file" || {
+        rm -f "$archive_file" "$candidate_file"
+        return 1
+    }
+    rm -f "$archive_file"
+    validate_rules "$candidate_file" || {
+        rm -f "$candidate_file"
+        return 1
+    }
+    mv "$candidate_file" "$destination"
+}
+
+restore_rule_document() {
+    destination=$1
+    compressed_key=$2
+    plain_key=$3
+    compressed_value=$(nvram get "$compressed_key")
+    if [ -n "$compressed_value" ]; then
+        if decode_rule_document "$compressed_value" "$destination"; then
+            return 0
+        fi
+        log_message WARN "stored compressed rule document $compressed_key is invalid"
+    fi
+    plain_value=$(nvram get "$plain_key")
+    [ -n "$plain_value" ] || return 1
+    printf '%s\n' "$plain_value" > "$destination"
+    validate_rules "$destination" || {
+        rm -f "$destination"
+        return 1
+    }
+}
+
+persistent_rule_bytes() {
+    source_file=$1
+    plain_value=$(cat "$source_file") || return 1
+    plain_bytes=$(printf '%s' "$plain_value" | wc -c)
+    compressed_value=$(encode_rule_document "$source_file") || {
+        printf '%s\n' "$plain_bytes"
+        return 0
+    }
+    compressed_bytes=$(printf '%s' "$compressed_value" | wc -c)
+    if [ "$compressed_bytes" -lt "$plain_bytes" ]; then
+        printf '%s\n' "$compressed_bytes"
+    else
+        printf '%s\n' "$plain_bytes"
+    fi
+}
+
+persist_rule_document() {
+    source_file=$1
+    plain_key=$2
+    compressed_key=$3
+    plain_value=$(cat "$source_file") || return 1
+    plain_bytes=$(printf '%s' "$plain_value" | wc -c)
+    compressed_value=$(encode_rule_document "$source_file") || compressed_value=
+    compressed_bytes=$(printf '%s' "$compressed_value" | wc -c)
+    if [ -n "$compressed_value" ] &&
+       [ "$compressed_bytes" -lt "$plain_bytes" ]; then
+        nvram set "$compressed_key=$compressed_value" || return 1
+        nvram unset "$plain_key" || return 1
+    else
+        nvram set "$plain_key=$plain_value" || return 1
+        nvram unset "$compressed_key" || return 1
+    fi
+}
+
 initialize_rules() {
     [ -f "$CURRENT" ] && return 0
-    stored=$(nvram get astrill_lazy_rules)
-    if [ -n "$stored" ]; then
-        printf '%s\n' "$stored" > "$CURRENT"
-    else
+    if ! restore_rule_document \
+        "$CURRENT" "$CURRENT_RULES_GZ_KEY" "$CURRENT_RULES_KEY"; then
         printf '# astrill-lazy-rules-v1\n' > "$CURRENT"
     fi
-    stored_previous=$(nvram get astrill_lazy_rules_previous)
-    [ -z "$stored_previous" ] || printf '%s\n' "$stored_previous" > "$PREVIOUS"
+    restore_rule_document \
+        "$PREVIOUS" "$PREVIOUS_RULES_GZ_KEY" "$PREVIOUS_RULES_KEY" ||
+        rm -f "$PREVIOUS"
+}
+
+initialize_app_flows() {
+    [ -f "$APP_FLOWS" ] || : > "$APP_FLOWS"
 }
 
 chain_exists() {
@@ -333,6 +477,54 @@ append_compiled_rule() {
     done
 }
 
+append_app_flow_pair() {
+    chain=$1
+    source=$2
+    target=$3
+    protocol=$4
+    port=$5
+
+    if [ "$target" = direct ]; then
+        mark=$DIRECT_MARK
+    else
+        mark=$VPN_MARK
+    fi
+
+    set -- iptables -w 10 -t mangle -A "$chain" \
+        -s "$source" -p "$protocol" --sport "$port"
+    "$@" -j MARK --set-xmark "$mark/$MARK_MASK" || return 1
+    "$@" -j RETURN || return 1
+}
+
+append_app_flow() {
+    chain=$1
+    source=$2
+    target=$3
+    protocol=$4
+    ports=$5
+    old_ifs=$IFS
+    IFS=,
+    set -f
+    # shellcheck disable=SC2086
+    set -- $ports
+    set +f
+    IFS=$old_ifs
+    for port in "$@"; do
+        append_app_flow_pair \
+            "$chain" "$source" "$target" "$protocol" "$port" || return 1
+    done
+}
+
+build_app_chain() {
+    file=$1
+    ensure_chain_shell "$APP_CHAIN" || return 1
+    while IFS="$TAB" read -r _id source protocol ports target; do
+        append_app_flow \
+            "$APP_CHAIN" "$source" "$target" "$protocol" "$ports" || return 1
+    done < "$file"
+    iptables -w 10 -t mangle -A "$APP_CHAIN" -j RETURN
+}
+
 build_chain() {
     chain=$1
     file=$2
@@ -400,6 +592,110 @@ activate_chain() {
         iptables -w 10 -t mangle -D PREROUTING -j "$activation_target" || break
     done
     printf '%s\n' "$activation_target" > "$ACTIVE_FILE"
+}
+
+cleanup_app_chain() {
+    app_cleanup_failed=false
+    remove_prerouting_jump "$APP_CHAIN"
+    iptables -w 10 -t mangle -C PREROUTING -j "$APP_CHAIN" \
+        >/dev/null 2>&1 && app_cleanup_failed=true
+    if chain_exists "$APP_CHAIN"; then
+        iptables -w 10 -t mangle -F "$APP_CHAIN" 2>/dev/null ||
+            app_cleanup_failed=true
+        iptables -w 10 -t mangle -X "$APP_CHAIN" 2>/dev/null ||
+            app_cleanup_failed=true
+    fi
+    chain_exists "$APP_CHAIN" && app_cleanup_failed=true
+    [ "$app_cleanup_failed" = false ]
+}
+
+ensure_app_jump() {
+    active=$(active_chain)
+    first_jump=$(iptables -w 10 -t mangle -S PREROUTING 2>/dev/null | sed -n '2p')
+    [ "$first_jump" = "-A PREROUTING -j $active" ] || return 1
+    second_jump=$(iptables -w 10 -t mangle -S PREROUTING 2>/dev/null | sed -n '3p')
+    if [ "$second_jump" != "-A PREROUTING -j $APP_CHAIN" ]; then
+        remove_prerouting_jump "$APP_CHAIN"
+        iptables -w 10 -t mangle -I PREROUTING 2 -j "$APP_CHAIN" || return 1
+    fi
+}
+
+ensure_app_runtime() {
+    initialize_app_flows
+    validate_app_flows "$APP_FLOWS" || return 1
+    if [ ! -s "$APP_FLOWS" ]; then
+        cleanup_app_chain
+        return 0
+    fi
+    if ! chain_exists "$APP_CHAIN"; then
+        build_app_chain "$APP_FLOWS" || return 1
+    fi
+    ensure_app_jump
+}
+
+apply_app_flow_file() {
+    candidate=$1
+    validate_app_flows "$candidate" || return 1
+    ensure_routes || return 1
+    previous=$BASE/app-flows.previous.tsv
+    cp "$APP_FLOWS" "$previous" || return 1
+    if [ -s "$candidate" ]; then
+        if ! build_app_chain "$candidate" || ! ensure_app_jump; then
+            if [ -s "$previous" ]; then
+                build_app_chain "$previous" >/dev/null 2>&1 || true
+                ensure_app_jump >/dev/null 2>&1 || true
+            else
+                cleanup_app_chain
+            fi
+            rm -f "$previous"
+            return 1
+        fi
+    else
+        cleanup_app_chain
+    fi
+    if ! cp "$candidate" "$APP_FLOWS"; then
+        if [ -s "$previous" ]; then
+            build_app_chain "$previous" >/dev/null 2>&1 || true
+            ensure_app_jump >/dev/null 2>&1 || true
+        else
+            cleanup_app_chain
+        fi
+        rm -f "$previous"
+        return 1
+    fi
+    rm -f "$previous"
+}
+
+transform_app_flow() {
+    operation=$1
+    id=${2:-}
+    valid_id "$id" || fail "invalid application flow id"
+    initialize_app_flows
+    candidate=$BASE/app-flows.candidate.tsv
+    awk -F '\t' -v id="$id" '$1 != id' "$APP_FLOWS" > "$candidate"
+
+    case $operation in
+        set)
+            source=${3:-}
+            protocol=${4:-}
+            ports=${5:-}
+            target=${6:-}
+            valid_ipv4_host "$source" || fail "invalid application source address"
+            case $protocol in tcp|udp) ;; *) fail "application flow must use tcp or udp" ;; esac
+            if ! valid_ports "$ports" || [ "$ports" = "-" ]; then
+                fail "invalid application source ports"
+            fi
+            case $target in direct|vpn) ;; *) fail "route target must be direct or vpn" ;; esac
+            printf '%s\t%s\t%s\t%s\t%s\n' \
+                "$id" "$source" "$protocol" "$ports" "$target" >> "$candidate"
+            ;;
+        delete) ;;
+        *) fail "unknown application flow operation" ;;
+    esac
+
+    apply_app_flow_file "$candidate" ||
+        fail "could not activate application flow"
+    rm -f "$candidate"
 }
 
 ensure_ip_rule() {
@@ -991,39 +1287,53 @@ apply_runtime() {
 }
 
 persist_rules() {
-    current_value=$(cat "$CURRENT")
-    nvram set "astrill_lazy_rules=$current_value"
-    if [ -f "$PREVIOUS" ]; then
-        previous_value=$(cat "$PREVIOUS")
-        nvram set "astrill_lazy_rules_previous=$previous_value"
+    persist_rule_document \
+        "$CURRENT" "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY" || return 1
+    if [ "$PERSIST_PREVIOUS" -eq 1 ] && [ -f "$PREVIOUS" ]; then
+        persist_rule_document \
+            "$PREVIOUS" "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY" ||
+            return 1
+    else
+        nvram unset "$PREVIOUS_RULES_KEY"
+        nvram unset "$PREVIOUS_RULES_GZ_KEY"
     fi
     nvram commit >/dev/null
 }
 
 check_persistence_capacity() {
     candidate=$1
-    candidate_bytes=$(wc -c < "$candidate")
-    current_bytes=$(wc -c < "$CURRENT" 2>/dev/null || printf 0)
-    stored_current=$(nvram get astrill_lazy_rules)
-    stored_previous=$(nvram get astrill_lazy_rules_previous)
-    stored_bytes=$((
-        $(printf '%s' "$stored_current" | wc -c) +
-        $(printf '%s' "$stored_previous" | wc -c)
-    ))
+    candidate_bytes=$(persistent_rule_bytes "$candidate") || return 1
+    current_bytes=$(persistent_rule_bytes "$CURRENT") || return 1
+    stored_bytes=0
+    for stored_key in \
+        "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY" \
+        "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY"; do
+        stored_value=$(nvram get "$stored_key")
+        stored_bytes=$((stored_bytes + $(printf '%s' "$stored_value" | wc -c)))
+    done
     desired_bytes=$((candidate_bytes + current_bytes))
     growth=$((desired_bytes - stored_bytes))
-    [ "$growth" -gt 0 ] || return 0
 
     size_line=$(nvram show 2>&1 >/dev/null)
     free_bytes=$(printf '%s\n' "$size_line" | sed -n 's/.*(\([0-9][0-9]*\) left).*/\1/p')
     if ! is_uint "$free_bytes"; then
         log_message WARN "could not determine NVRAM headroom"
+        PERSIST_PREVIOUS=1
         return 0
     fi
-    if [ $((free_bytes - growth)) -lt 2048 ]; then
-        printf 'insufficient NVRAM headroom for current and rollback rules\n' >&2
+    if [ $((free_bytes - growth)) -ge "$MIN_NVRAM_FREE_BYTES" ]; then
+        PERSIST_PREVIOUS=1
+        return 0
+    fi
+
+    current_only_growth=$((candidate_bytes - stored_bytes))
+    if [ $((free_bytes - current_only_growth)) -lt "$MIN_NVRAM_FREE_BYTES" ]; then
+        printf 'insufficient NVRAM headroom for the active rule document\n' >&2
         return 1
     fi
+    PERSIST_PREVIOUS=0
+    log_message WARN \
+        "NVRAM headroom permits active rules only; rollback remains available until reboot"
 }
 
 apply_file() {
@@ -1052,6 +1362,7 @@ ensure_runtime() {
         remove_prerouting_jump "$active"
         iptables -w 10 -t mangle -I PREROUTING 1 -j "$active" || return 1
     fi
+    ensure_app_runtime || return 1
 }
 
 cleanup_policy() {
@@ -1061,6 +1372,7 @@ cleanup_policy() {
     iptables -w 10 -t filter -S >/dev/null 2>&1 ||
         cleanup_failed=true
     ip rule show >/dev/null 2>&1 || cleanup_failed=true
+    cleanup_app_chain || cleanup_failed=true
     remove_prerouting_jump "$CHAIN_A" || cleanup_failed=true
     remove_prerouting_jump "$CHAIN_B" || cleanup_failed=true
     for chain in "$CHAIN_A" "$CHAIN_B"; do
@@ -1120,6 +1432,7 @@ cleanup_policy() {
 
     rm -f "$RECONCILE_ERROR_FILE" "$REBASE_REQUIRED_FILE"
     ip route flush cache 2>/dev/null || true
+    rm -f "$APP_FLOWS"
     [ "$cleanup_failed" = false ]
 }
 
@@ -1245,8 +1558,25 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]/?/g'
 }
 
+app_flows_json() {
+    initialize_app_flows
+    validate_app_flows "$APP_FLOWS" || fail "stored application flows are invalid"
+    count=$(wc -l < "$APP_FLOWS" 2>/dev/null || printf 0)
+    printf '{"ok":true,"count":%s,"flows":[' "$count"
+    first=true
+    while IFS="$TAB" read -r id source protocol ports target; do
+        [ "$first" = true ] || printf ','
+        first=false
+        printf '{"id":"%s","source":"%s","protocol":"%s"' \
+            "$id" "$source" "$protocol"
+        printf ',"source_ports":"%s","target":"%s"}' "$ports" "$target"
+    done < "$APP_FLOWS"
+    printf ']}\n'
+}
+
 status_json() {
     initialize_rules
+    initialize_app_flows
     active=$(active_chain)
     version=$(cat "$VERSION_FILE" 2>/dev/null || printf unknown)
     compiled_count=$(awk -F '\t' '$0 !~ /^#/ && NF == 10 { count++ } END { print count + 0 }' "$CURRENT")
@@ -1256,6 +1586,7 @@ status_json() {
     vpn_count=$(awk -F '\t' '$2 == 1 && $6 == "vpn" { count++ } END { print count + 0 }' "$CURRENT")
     resolved_count=$(wc -l < "$RESOLVED" 2>/dev/null || printf 0)
     unresolved_count=$(wc -l < "$UNRESOLVED" 2>/dev/null || printf 0)
+    app_flow_count=$(wc -l < "$APP_FLOWS" 2>/dev/null || printf 0)
     last_apply=$(cat "$BASE/last-apply" 2>/dev/null || printf 0)
     astrill_status=$(nvram get astrill_status)
     astrill_server=$(nvram get astrill_serverid)
@@ -1267,6 +1598,9 @@ status_json() {
     watchdog_running && watchdog=true
     jump=false
     iptables -w 10 -t mangle -C PREROUTING -j "$active" >/dev/null 2>&1 && jump=true
+    app_jump=false
+    iptables -w 10 -t mangle -C PREROUTING -j "$APP_CHAIN" >/dev/null 2>&1 &&
+        app_jump=true
     direct_table_ready=false
     direct_table_is_ready && direct_table_ready=true
     vpn_table_ready=false
@@ -1318,6 +1652,14 @@ status_json() {
     health=healthy
     [ "$watchdog" = true ] || health=degraded
     [ "$policy_health" = ready ] || health=degraded
+    [ "$app_flow_count" -eq 0 ] || [ "$app_jump" = true ] || health=degraded
+    rollback_available=false
+    [ -f "$PREVIOUS" ] && rollback_available=true
+    rollback_persistent=false
+    if [ -n "$(nvram get "$PREVIOUS_RULES_KEY")" ] ||
+       [ -n "$(nvram get "$PREVIOUS_RULES_GZ_KEY")" ]; then
+        rollback_persistent=true
+    fi
 
     printf '{'
     printf '"schema_version":1,"ok":true'
@@ -1326,6 +1668,10 @@ status_json() {
     printf ',"astrill_server_id":%s,"astrill_protocol":%s' "${astrill_server:-0}" "${astrill_protocol:-0}"
     printf ',"wan_interface":"%s","active_chain":"%s"' "$(json_escape "$wan_iface")" "$active"
     printf ',"watchdog":%s,"jump_installed":%s' "$watchdog" "$jump"
+    printf ',"app_flow_count":%s,"app_jump_installed":%s' \
+        "$app_flow_count" "$app_jump"
+    printf ',"rollback_available":%s,"rollback_persistent":%s' \
+        "$rollback_available" "$rollback_persistent"
     printf ',"policy_health":"%s","precedence_ok":%s' \
         "$policy_health" "$precedence_ok"
     printf ',"native_min_pref":%s,"direct_pref":%s,"vpn_pref":%s' \
@@ -1735,6 +2081,10 @@ Usage: alctl COMMAND
   rollback [--json]     Restore the previous rule document
   toggle-origin ID      Enable or disable all compiled rules for an origin
   route-origin ID ROUTE Set an origin to direct or vpn
+  app-flow list         Show transient application source-port routes
+  app-flow set ID SOURCE PROTOCOL PORTS ROUTE
+                        Set one transient application source-port route
+  app-flow delete ID    Delete one transient application source-port route
   clients [--json]      List DHCP clients
   astrill-switch ...    Transactionally switch Astrill server settings
   astrill-connect       Connect using Astrill's current native settings
@@ -1798,6 +2148,32 @@ case $command in
         acquire_lock
         transform_origin route "${2:-}" "${3:-}"
         status_json
+        ;;
+    app-flow)
+        operation=${2:-list}
+        case $operation in
+            list)
+                app_flows_json
+                ;;
+            set)
+                acquire_lock
+                ensure_runtime || fail "could not repair policy runtime"
+                transform_app_flow \
+                    set "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}"
+                log_message INFO "updated transient application flow ${3:-}"
+                app_flows_json
+                ;;
+            delete)
+                acquire_lock
+                ensure_runtime || fail "could not repair policy runtime"
+                transform_app_flow delete "${3:-}"
+                log_message INFO "deleted transient application flow ${3:-}"
+                app_flows_json
+                ;;
+            *)
+                fail "app-flow operation must be list, set, or delete"
+                ;;
+        esac
         ;;
     clients)
         clients_json

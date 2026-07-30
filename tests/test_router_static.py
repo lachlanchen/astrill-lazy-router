@@ -21,14 +21,80 @@ def test_router_and_helper_scripts_parse_with_posix_shell() -> None:
         ROOT / "router" / "alpage",
         ROOT / "router" / "bootstrap.sh",
         ROOT / "helpers" / "astrill-lazy-netns",
+        ROOT / "helpers" / "astrill-lazy-profile-runner",
         ROOT / "scripts" / "install-desktop.sh",
         ROOT / "scripts" / "install-novnc-service.sh",
         ROOT / "scripts" / "run-novnc-debug.sh",
         ROOT / "scripts" / "uninstall-novnc-service.sh",
         ROOT / "contrib" / "macos" / "install-launcher.sh",
+        ROOT / "contrib" / "macos" / "install-uuremote-route-reporter.sh",
+        ROOT / "contrib" / "macos" / "uuremote-route-reporter.sh",
     ]
     for script in scripts:
         subprocess.run(["sh", "-n", str(script)], check=True)
+
+
+def test_router_bootstrap_waits_for_the_old_controller_before_replacement() -> None:
+    bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
+    installer = (ROOT / "desktop" / "astrill_lazy" / "installer.py").read_text(
+        encoding="utf-8"
+    )
+
+    stop_watchdog = bootstrap.index("for pid in $(watchdog_pids)")
+    wait_for_lock = bootstrap.index('while [ -d "$BASE/controller.lock" ]')
+    stop_controller = bootstrap.index('"$BASE/alctl" stop')
+    extract_package = bootstrap.index('tar -xzf "$ARCHIVE"')
+    assert stop_watchdog < wait_for_lock < stop_controller < extract_package
+    assert 'kill -0 "$lock_pid"' in bootstrap
+    assert '*" $BASE/alctl refresh "*)' in bootstrap
+    assert 'kill -9 "$lock_pid"' in bootstrap
+    assert 'rmdir "$BASE/controller.lock"' in bootstrap
+    assert "timeout=300" in installer
+
+
+def test_application_profile_has_a_stable_locally_administered_mac() -> None:
+    helper = ROOT / "helpers" / "astrill-lazy-netns"
+    helper_source = helper.read_text(encoding="ascii")
+    result = subprocess.run(
+        ["sh", str(helper), "identity", "uuremote"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout) == {
+        "profile": "uuremote",
+        "mac": "02:41:4c:de:39:3a",
+    }
+    invalid = subprocess.run(
+        ["sh", str(helper), "identity", "../invalid"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert invalid.returncode != 0
+    assert "invalid profile" in invalid.stderr
+    assert "deconfig|bound|renew) dhcp_hook" in helper_source
+    assert "dhcp_pid_for" in helper_source
+    assert 'grep -Fxq "$pid_file"' in helper_source
+
+
+def test_application_profile_system_service_is_fixed_and_restartable() -> None:
+    unit = (
+        ROOT
+        / "data"
+        / "io.github.lachlanchen.AstrillLazyRouter.ApplicationProfile@.service"
+    ).read_text(encoding="ascii")
+    runner = (ROOT / "helpers" / "astrill-lazy-profile-runner").read_text(
+        encoding="ascii"
+    )
+
+    assert "EnvironmentFile=/etc/astrill-lazy/profiles/%i.conf" in unit
+    assert "ExecStopPost=-/usr/local/libexec/astrill-lazy-netns cleanup" in unit
+    assert "Restart=always" in unit
+    assert "pgrep -u" in runner
+    assert "DBUS_SESSION_BUS_ADDRESS" in runner
+    assert "eval " not in runner
 
 
 def test_novnc_service_is_rendered_from_the_checked_out_repository() -> None:
@@ -53,15 +119,19 @@ def test_novnc_service_is_rendered_from_the_checked_out_repository() -> None:
     assert "restarting the noVNC stack" in runner
 
 
-def test_router_upgrade_aborts_when_existing_runtime_cleanup_fails() -> None:
+def test_router_upgrade_cleans_existing_runtime_before_extraction() -> None:
     bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
     guarded_stop = '"$BASE/alctl" stop >/dev/null 2>&1 || exit 1'
     extraction = 'tar -xzf "$ARCHIVE" -C /tmp || exit 1'
 
-    assert 'if [ -x "$BASE/alctl" ]; then' in bootstrap
     assert guarded_stop in bootstrap
+    assert bootstrap.index("for pid in $(watchdog_pids)") < bootstrap.index(
+        'while [ -d "$BASE/controller.lock" ]'
+    )
+    assert bootstrap.index('while [ -d "$BASE/controller.lock" ]') < bootstrap.index(
+        guarded_stop
+    )
     assert bootstrap.index(guarded_stop) < bootstrap.index(extraction)
-    assert '[ ! -x "$BASE/alctl" ] ||' not in bootstrap
 
 
 def test_desktop_installer_selects_a_supported_python_and_opt_in_autostart() -> None:
@@ -92,8 +162,17 @@ def test_remote_novnc_launchers_prefer_the_current_ubuntu_host() -> None:
 def test_policy_controller_never_evaluates_rule_content() -> None:
     controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
     helper = (ROOT / "helpers" / "astrill-lazy-netns").read_text(encoding="ascii")
+    runner = (ROOT / "helpers" / "astrill-lazy-profile-runner").read_text(
+        encoding="ascii"
+    )
     assert "eval " not in controller
     assert "eval " not in helper
+    assert "eval " not in runner
+    assert "APP_CHAIN=AL_LAZY_APP" in controller
+    assert "MAX_APP_FLOWS=16" in controller
+    assert "--sport" in controller
+    assert "app-flow)" in controller
+    assert "astrill_lazy_app_flows" not in controller
     assert "--set-xmark" in controller
     assert "0xc000000" in controller
     assert "RPDB_PREF_FLOOR=100" in controller
@@ -111,6 +190,12 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "WATCHDOG_REFRESH_CYCLES=30" in controller
     assert "ASTRILL_CONNECT_ATTEMPTS=60" in controller
     assert "MAX_RULE_BYTES=6144" in controller
+    assert "MIN_NVRAM_FREE_BYTES=2048" in controller
+    assert 'nvram unset "$PREVIOUS_RULES_KEY"' in controller
+    assert "CURRENT_RULES_GZ_KEY=astrill_lazy_rules_gz" in controller
+    assert "persistent_rule_bytes" in controller
+    assert "persist_rule_document" in controller
+    assert '"rollback_persistent":%s' in controller
     assert controller.count("iptables -w 10") >= 15
     assert "insufficient NVRAM headroom" in controller
     assert "watchdog_pids | grep -qx" in controller
@@ -131,6 +216,33 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "astrill-connect)" in controller
     assert "astrill-disconnect)" in controller
     assert "/dev/astrill/astrillvpn stop" in controller
+
+
+def test_macos_uu_reporter_is_change_driven_and_process_scoped() -> None:
+    reporter = (ROOT / "contrib" / "macos" / "uuremote-route-reporter.sh").read_text(
+        encoding="ascii"
+    )
+    installer = (
+        ROOT / "contrib" / "macos" / "install-uuremote-route-reporter.sh"
+    ).read_text(encoding="ascii")
+    template = (
+        ROOT / "contrib" / "macos" / "com.lachlan.astrill-lazy-uuremote-route.plist.in"
+    ).read_text(encoding="ascii")
+
+    assert "/Applications/UURemote\\.app/" in reporter
+    assert "lsof -nP -a" in reporter
+    assert "-iUDP" in reporter
+    assert "app-flow" in reporter
+    assert "PasswordAuthentication=no" in reporter
+    assert 'nc -z -G 1 "$router_address" 22' in reporter
+    assert "eval " not in reporter
+    assert 'SUPPORT_DIR="$HOME/Library/Application Support/Astrill Lazy Router"' in (
+        installer
+    )
+    assert 'PROGRAM="$SUPPORT_DIR/uuremote-route-reporter"' in installer
+    assert "<integer>30</integer>" in template
+    assert "ASTRILL_LAZY_ROUTER_ADDRESS" in template
+    assert "ASTRILL_LAZY_HEARTBEAT_SECONDS" in template
 
 
 def test_failed_astrill_switch_restores_settings_and_original_tunnel_state() -> None:

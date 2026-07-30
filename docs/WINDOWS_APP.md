@@ -253,9 +253,9 @@ The app never silently installs or rewrites a missing or incompatible
 companion; that still requires the separate **Install / upgrade**
 confirmation.
 
-### Companion 0.2.5 runtime boundaries
+### Companion 0.2.10 runtime boundaries
 
-Companion `0.2.5` does not assume a fixed safe policy-priority range. Before a
+Companion `0.2.10` does not assume a fixed safe policy-priority range. Before a
 managed Astrill start it removes only its recorded owned Direct/Astrill pair.
 After Astrill's native rules settle, it allocates two adjacent free preferences
 immediately ahead of the current native minimum and verifies the entire RPDB
@@ -301,7 +301,7 @@ rows.
 Choose **Suggested**, **Direct**, or **Astrill**, then select **Add to
 Policies**. Suggested preserves each catalog profile's maintained route.
 Adding saves or updates the selected policies in the Windows configuration;
-it does not write the router. With companion `0.2.5`, the Policies page compares
+it does not write the router. With companion `0.2.10`, the Policies page compares
 the exact enabled origin-ID sets in the Windows configuration and latest router
 status. It reports which identities exist only locally or only on the router.
 Count-only comparison is retained solely for older companion status documents

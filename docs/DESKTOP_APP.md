@@ -392,7 +392,8 @@ The first Launch action:
 
 1. requests Polkit administrator authorization;
 2. creates or reuses a named macvlan namespace;
-3. obtains a distinct DD-WRT DHCP lease;
+3. assigns a deterministic locally administered MAC and obtains a distinct
+   DD-WRT DHCP lease;
 4. saves that address in the rule;
 5. applies the router policy;
 6. launches the executable as the desktop user.
@@ -404,7 +405,44 @@ reported without changing the router rule.
 
 Application namespaces last until explicitly removed, rebooted, or deleted
 through the app. BusyBox `udhcpc` remains inside each namespace to renew its
-lease.
+lease. The profile MAC remains stable across namespace recreation and can be
+read without administrator access:
+
+```bash
+helpers/astrill-lazy-netns identity profileid
+```
+
+This lets DD-WRT reserve a fixed address for an application identity instead
+of tying the rule to a transient DHCP assignment.
+
+For a boot-persistent profile, install both root helpers under
+`/usr/local/libexec`, install
+`data/io.github.lachlanchen.AstrillLazyRouter.ApplicationProfile@.service`
+under `/etc/systemd/system`, and create a root-owned mode-`0600`
+`/etc/astrill-lazy/profiles/PROFILE.conf`. The configuration declares the
+profile ID, physical parent interface, desktop UID, and absolute executable.
+`contrib/ubuntu/uuremote-profile.conf.example` is the UU Remote example.
+
+The system service prepares DHCP, waits for the logged-in GNOME session, and
+then launches the fixed executable as that desktop user. A stop or failed
+restart kills the profile process group and removes only its namespace. The
+network helper reuses a namespace only while its exact BusyBox DHCP process is
+still alive, preventing a stale lease file from disabling renewals.
+
+### macOS UU Media Socket
+
+macOS cannot provide Linux-style network namespaces to an unsigned desktop
+companion. `contrib/macos/install-uuremote-route-reporter.sh` instead installs
+a per-user LaunchAgent that reads unconnected IPv4 UDP sockets owned by
+`/Applications/UURemote.app`. It reports only the current source ports and the
+Mac's reserved LAN address through key-only SSH to the Ubuntu CLI.
+
+Companion `0.2.10` stores those routes only under `/tmp`, limits them to 16
+validated rows, and matches source address plus UDP source port after private
+LAN destinations have already returned. The reporter runs locally every 30
+seconds but opens SSH only after a port change or a 10-minute recovery
+heartbeat. Removing the reporter or stopping the companion removes its owned
+route without changing native Astrill device mode.
 
 ## Configuration
 

@@ -1,0 +1,22 @@
+[Unit]
+Description=Astrill Lazy application network profile %i
+Wants=network-online.target
+After=network-online.target systemd-user-sessions.service
+ConditionPathExists=/etc/astrill-lazy/profiles/%i.conf
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/astrill-lazy/profiles/%i.conf
+ExecStart=/usr/local/libexec/astrill-lazy-profile-runner ${PROFILE_ID} ${PARENT_INTERFACE} ${DESKTOP_UID} ${EXECUTABLE}
+ExecStopPost=-/usr/local/libexec/astrill-lazy-netns cleanup ${PROFILE_ID}
+Restart=always
+RestartSec=15
+TimeoutStopSec=30
+KillMode=control-group
+LimitNOFILE=65536
+TasksMax=2048
+
+[Install]
+WantedBy=multi-user.target

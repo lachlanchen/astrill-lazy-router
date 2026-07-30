@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lachlan.astrill-lazy-uuremote-route</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@PROGRAM@</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ASTRILL_LAZY_FLOW_ID</key>
+    <string>mac-uuremote</string>
+    <key>ASTRILL_LAZY_SOURCE_ADDRESS</key>
+    <string>@SOURCE_ADDRESS@</string>
+    <key>ASTRILL_LAZY_REMOTE_HOST</key>
+    <string>@REMOTE_HOST@</string>
+    <key>ASTRILL_LAZY_REMOTE_CLI</key>
+    <string>@REMOTE_CLI@</string>
+    <key>ASTRILL_LAZY_ROUTER_ADDRESS</key>
+    <string>@ROUTER_ADDRESS@</string>
+    <key>ASTRILL_LAZY_HEARTBEAT_SECONDS</key>
+    <string>600</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>30</integer>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>@LOG@</string>
+  <key>StandardErrorPath</key>
+  <string>@LOG@</string>
+</dict>
+</plist>

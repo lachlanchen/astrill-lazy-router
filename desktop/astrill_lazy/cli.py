@@ -67,6 +67,23 @@ def build_parser() -> argparse.ArgumentParser:
     switch.add_argument("server_id", type=int)
     switch.add_argument("--protocol", type=int, choices=range(4), default=None)
 
+    app_flow = subparsers.add_parser(
+        "app-flow",
+        help="manage transient process socket routes through the router companion",
+    )
+    app_flow_commands = app_flow.add_subparsers(dest="app_flow_command", required=True)
+    app_flow_commands.add_parser("list", help="list transient socket routes")
+    set_app_flow = app_flow_commands.add_parser("set", help="set a source-port route")
+    set_app_flow.add_argument("flow_id")
+    set_app_flow.add_argument("source")
+    set_app_flow.add_argument("protocol", choices=("tcp", "udp"))
+    set_app_flow.add_argument("source_ports")
+    set_app_flow.add_argument("target", choices=("direct", "vpn"))
+    delete_app_flow = app_flow_commands.add_parser(
+        "delete", help="delete a source-port route"
+    )
+    delete_app_flow.add_argument("flow_id")
+
     device_policy = subparsers.add_parser(
         "device-policy",
         help="validate and inspect a device-local routing policy",
@@ -217,7 +234,12 @@ def main(argv: list[str] | None = None) -> int:
         "uninstall-router",
         "switch",
     }
-    if store.read_only and arguments.command in mutating_commands:
+    mutating_app_flow = (
+        arguments.command == "app-flow" and arguments.app_flow_command != "list"
+    )
+    if store.read_only and (
+        arguments.command in mutating_commands or mutating_app_flow
+    ):
         print(
             "astrill-lazy: read-only access blocks this command; "
             "run `astrill-lazy access read-write` first",
@@ -281,6 +303,25 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(router.refresh())
         elif arguments.command == "rollback":
             _print_json(router.rollback())
+        elif arguments.command == "app-flow":
+            if not store.companion_enabled:
+                raise RouterError(
+                    "application flow routes require the router companion"
+                )
+            if arguments.app_flow_command == "list":
+                _print_json(router.app_flows())
+            elif arguments.app_flow_command == "set":
+                _print_json(
+                    router.set_app_flow(
+                        arguments.flow_id,
+                        arguments.source,
+                        arguments.protocol,
+                        arguments.source_ports,
+                        arguments.target,
+                    )
+                )
+            elif arguments.app_flow_command == "delete":
+                _print_json(router.delete_app_flow(arguments.flow_id))
         elif arguments.command == "install-router":
             result = RouterInstaller(router).install()
             store.companion_enabled = True

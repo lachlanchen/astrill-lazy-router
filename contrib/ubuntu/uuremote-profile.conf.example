@@ -1,0 +1,15 @@
+# Install as /etc/astrill-lazy/profiles/uuremote.conf with mode 0600.
+PROFILE_ID=uuremote
+PARENT_INTERFACE=enp0s31f6
+DESKTOP_UID=1000
+EXECUTABLE=/home/CHANGE_ME/.local/bin/uu-remote-bridge
+
+# Optional variables consumed by the UU Remote bridge.
+UURB_RDP_PORT=3391
+UURB_RESOLUTION=1920x1080
+UURB_DISPLAY=auto
+UURB_GRD_FD_RESTART_THRESHOLD=4096
+UURB_TEXT_KEY_DELAY_MS=0
+UURB_PHYSICAL_KEY_DELAY_MS=0
+UURB_KEYBOARD_ROUTE=rdp
+UURB_NETWORK_INTERFACE=all

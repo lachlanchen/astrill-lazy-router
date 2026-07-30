@@ -46,6 +46,9 @@ jobs:
           scripts/uninstall-desktop.sh
           scripts/uninstall-novnc-service.sh
           helpers/astrill-lazy-netns
+          helpers/astrill-lazy-profile-runner
+          contrib/macos/install-uuremote-route-reporter.sh
+          contrib/macos/uuremote-route-reporter.sh
           router/alctl
           router/alapi
           router/alpage

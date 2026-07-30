@@ -113,7 +113,7 @@ Rows with an existing policy show its actual route. Other rows show the
 catalog suggestion, so the list retains its intended mixed Direct/Astrill
 view. **Add to Policies** saves the selected rules locally; only a separately
 confirmed **Apply policies** or **Apply selected** operation changes the router.
-With companion `0.2.5`, the Policies view compares the exact enabled local and
+With companion `0.2.10`, the Policies view compares the exact enabled local and
 applied origin-ID sets; count-only comparison remains a compatibility fallback
 for older companions. These are deliberately different states: an Apply
 rejection leaves the router's complete previous policy active and never
@@ -225,6 +225,9 @@ reload conflict is shown instead of silently replacing them.
 The companion merges DHCP leases, static reservations, and active LAN
 neighbors. Ubuntu application profiles use a validated Polkit helper and a
 macvlan network namespace to obtain an independent router-visible identity.
+The optional macOS UU reporter registers only the signed app's persistent UDP
+media source port in a bounded transient companion chain; it does not exclude
+the Mac or route all of its UDP traffic directly.
 The native Windows frontend supports device policies but deliberately has no
 per-application WFP backend; see the
 [Windows application guide](docs/WINDOWS_APP.md).
@@ -232,12 +235,18 @@ per-application WFP backend; see the
 ## Safety model
 
 - The companion never edits Astrill applet files.
-- Companion `0.2.5` removes its recorded lookups before a managed Astrill
+- Companion `0.2.10` removes its recorded lookups before a managed Astrill
   start, waits for the native rules to settle, then allocates and verifies two
   free adjacent preferences immediately ahead of the native minimum. It
   uses recorded preferences when available; if that record is missing, cleanup
   scans only exact companion mark, mask, and table signatures and preserves
   unrelated rules.
+- Transient application socket rules are limited to 16 validated rows in a
+  separate chain, are restored by a change-driven client reporter, and are
+  never committed to router NVRAM.
+- The active policy remains reboot-persistent. Rule documents use gzip/base64
+  storage when smaller. Rollback is retained only until reboot when persisting
+  a second document would leave less than 2 KiB of NVRAM free.
 - Direct and Astrill policies use separate high mark bits and tables.
 - VPN table `212` retains a lower-priority blackhole fallback while `tun0` is
   active and uses the blackhole as its only default while disconnected, so

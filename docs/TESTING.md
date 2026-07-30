@@ -10,7 +10,8 @@ Run from the repository:
 .venv/bin/ruff format --check desktop tests scripts/validate-catalog.py
 .venv/bin/python scripts/validate-catalog.py --dns
 shellcheck -x -s sh \
-  scripts/*.sh helpers/astrill-lazy-netns \
+  scripts/*.sh helpers/astrill-lazy-netns helpers/astrill-lazy-profile-runner \
+  contrib/macos/*.sh \
   router/alctl router/alapi router/alpage router/bootstrap.sh
 desktop-file-validate data/*.desktop
 appstreamcli validate --no-net data/*.metainfo.xml
@@ -21,7 +22,7 @@ Current result:
 ```text
 253 tests passed, 4 skipped
 Ruff lint and format: all checks passed
-Catalog: 261 profiles, 19 categories, 729 seeds / 650 unique
+Catalog: 261 profiles, 19 categories, 731 seeds / 652 unique
 ```
 
 The release pytest result was produced by the full Windows build virtual
@@ -70,9 +71,10 @@ Tests cover:
   and native/companion transactional controller paths;
 - seven-section Windows Astrill rendering, complete safe-key coverage, and
   section changes that preserve draft/dirty state;
-- companion `0.2.5` executable coverage for post-connect allocation,
+- companion `0.2.10` executable coverage for post-connect allocation,
   no-ratchet undercut handling, persistent table `212` blackhole fallback,
-  exact owned-rule cleanup, stale-lock recovery, and degraded-state reporting;
+  exact owned-rule cleanup, bounded transient application source-port routes,
+  upgrade-lock recovery, and degraded-state reporting;
 - route probe parsing, noise thresholds, minimum bypasses, and service-aware
   recommendations;
 - complete native-only removal and preserved Astrill state.
@@ -234,6 +236,33 @@ Throughput used sequential Cloudflare 25 MB download and 10 MB upload probes.
 These are a point-in-time path check, not a server capacity benchmark. The
 matching UU rule covers catalogued destinations; a newly introduced UU
 hostname or address still requires a catalog update before it can bypass.
+
+### 2026-07-30 UU Media-Path Check
+
+A later active-session trace separated UU's catalogued signaling from its
+dynamic WebRTC media path. The signaling flow to `34.95.122.33:443` was Direct,
+but ICE selected the Astrill public address and reached rotating peer and relay
+addresses that cannot be exhaustively represented by a hostname catalog.
+
+Ubuntu UU was therefore moved into application profile `uuremote`, with stable
+MAC `02:41:4c:de:39:3a`, reserved address `192.168.1.108`, and a source Direct
+rule. Live checks then showed:
+
+- GameViewer and its NetEase TLS socket inside the profile namespace;
+- profile public egress `209.9.115.16` through the WAN;
+- ordinary Ubuntu public egress `185.152.67.39` through Astrill;
+- the native Astrill device exclusion unchanged and still limited to the 3040.
+
+This source identity covers signaling, TURN, STUN, and peer media without
+routing all 7090 traffic Direct. A service-domain rule remains useful to other
+LAN clients for known destinations, but does not claim complete dynamic-media
+coverage.
+
+The 7050/iMac remained in native Global mode. A process-owned socket audit of
+the signed `com.netease.uuremote` application found three current control
+addresses absent from the earlier catalog. Those exact `/32` addresses were
+added to the cross-device UU service profile; the Mac was not converted to a
+whole-device Direct exception.
 
 The bootstrap was exercised directly, during multiple upgrades, and through a
 physical reboot. Astrill was later connected using its own upstream state while

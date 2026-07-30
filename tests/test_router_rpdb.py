@@ -488,6 +488,7 @@ cat "$TRACE"
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == (
+        "jump-AL_LAZY_APP\n"
         "jump-AL_LAZY_A\n"
         "jump-AL_LAZY_B\n"
         "filter-jump\n"

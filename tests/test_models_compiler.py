@@ -53,7 +53,10 @@ def test_core_catalog_contains_requested_services() -> None:
     uu_remote = catalog.services_by_id["uu-remote"]
     assert "a56.gdl.netease.com" in uu_remote.domains
     assert set(uu_remote.networks) == {
+        "8.221.56.176/32",
+        "42.186.47.187/32",
         "115.236.122.145/32",
+        "115.236.122.175/32",
         "223.252.194.149/32",
     }
     nutstore = catalog.services_by_id["nutstore"]
@@ -77,7 +80,10 @@ def test_default_uu_rule_compiles_complete_global_direct_profile() -> None:
         "relay-mg-3303-d.nrd.nie.163.com",
         "online-logger.webapp.163.com",
         "a56.gdl.netease.com",
+        "8.221.56.176/32",
+        "42.186.47.187/32",
         "115.236.122.145/32",
+        "115.236.122.175/32",
         "223.252.194.149/32",
     } <= selectors
     assert all(compiled.target is RouteTarget.DIRECT for compiled in compilation.rules)
@@ -117,7 +123,7 @@ def test_uu_and_nutstore_direct_profiles_fit_router_contract() -> None:
         load_catalog(),
     )
 
-    assert len(compilation.rules) == 24
+    assert len(compilation.rules) == 27
     assert len(compilation.to_tsv().encode("ascii")) <= MAX_COMPILED_BYTES
 
 

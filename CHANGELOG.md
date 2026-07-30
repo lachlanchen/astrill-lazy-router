@@ -2,7 +2,7 @@
 
 ## 0.2.12 - 2026-07-30
 
-- Upgrade the router companion to `0.2.5` and replace the unsafe fixed
+- Upgrade the router companion to `0.2.10` and replace the unsafe fixed
   policy-priority range with a post-connect lifecycle that removes only owned
   lookups, waits for Astrill's native rules, allocates a free adjacent pair
   immediately ahead of them, and verifies precedence. An unmanaged native
@@ -29,6 +29,28 @@
 - Document dynamic UU ICE/relay/peer coverage limits, safe source-device or
   process-aware alternatives, and application reconnection after policy
   changes without a router-wide connection-tracking flush.
+- Give Ubuntu application profiles deterministic locally administered MAC
+  addresses, validate the exact BusyBox DHCP owner before reusing or killing a
+  lease process, and fix direct dispatch of BusyBox `udhcpc` hook events.
+- Add a root-owned systemd application-profile runner that waits for the GNOME
+  session, starts a fixed executable inside its namespace, cleans up on stop,
+  and survives both desktop and router reboots.
+- Route the 7090 UU Remote bridge through reserved identity `192.168.1.108`
+  while preserving ordinary 7090 traffic on Astrill and leaving the native
+  3040-only device exclusion unchanged.
+- Extend observed UU control endpoint coverage without broad country routes or
+  whole-device Mac exclusion.
+- Add a bounded, transient
+  application source-port chain and add a change-driven macOS UU media-socket
+  reporter. Dynamic ports are never committed to NVRAM, and stale companion
+  lookups are removed only by their exact owned mark and table signatures.
+- Preserve the active policy while keeping at least 2 KiB of NVRAM free by
+  retaining rollback only in runtime memory when a second persistent policy
+  copy would exceed that reserve.
+- Make package upgrades stop the old watchdog, cancel only a verified
+  companion domain-refresh lock owner, remove only stale lock directories, and
+  wait for every other controller operation before starting the replacement
+  watchdog.
 
 ## 0.2.11 - 2026-07-30
 

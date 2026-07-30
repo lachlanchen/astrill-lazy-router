@@ -56,7 +56,13 @@ where = ["desktop"]
 "share/astrill-lazy/schemas" = [
   "schemas/device-policy-v1.schema.json"
 ]
-"libexec" = ["helpers/astrill-lazy-netns"]
+"libexec" = [
+  "helpers/astrill-lazy-netns",
+  "helpers/astrill-lazy-profile-runner"
+]
+"share/systemd/system" = [
+  "data/io.github.lachlanchen.AstrillLazyRouter.ApplicationProfile@.service"
+]
 "share/applications" = [
   "data/io.github.lachlanchen.AstrillLazyRouter.desktop"
 ]

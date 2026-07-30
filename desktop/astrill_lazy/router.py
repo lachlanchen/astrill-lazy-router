@@ -107,6 +107,50 @@ class RouterClient:
             error_prefix="router returned invalid apply result",
         )
 
+    def app_flows(self) -> dict[str, Any]:
+        result = self._run_alctl(["app-flow", "list"])
+        try:
+            return json.loads(_last_json_line(result.stdout))
+        except json.JSONDecodeError as exc:
+            raise RouterError(
+                f"router returned invalid application flow data: {exc}"
+            ) from exc
+
+    def set_app_flow(
+        self,
+        flow_id: str,
+        source: str,
+        protocol: str,
+        source_ports: str,
+        target: str,
+    ) -> dict[str, Any]:
+        result = self._run_alctl(
+            [
+                "app-flow",
+                "set",
+                flow_id,
+                source,
+                protocol,
+                source_ports,
+                target,
+            ]
+        )
+        try:
+            return json.loads(_last_json_line(result.stdout))
+        except json.JSONDecodeError as exc:
+            raise RouterError(
+                f"router returned invalid application flow result: {exc}"
+            ) from exc
+
+    def delete_app_flow(self, flow_id: str) -> dict[str, Any]:
+        result = self._run_alctl(["app-flow", "delete", flow_id])
+        try:
+            return json.loads(_last_json_line(result.stdout))
+        except json.JSONDecodeError as exc:
+            raise RouterError(
+                f"router returned invalid application flow result: {exc}"
+            ) from exc
+
     def rollback(self) -> dict[str, Any]:
         result = self._run_alctl(["rollback", "--json"])
         return _decode_status_document(

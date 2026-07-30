@@ -92,7 +92,9 @@ It then:
 4. verifies both policy tables and rules;
 5. inserts the completed chain at `PREROUTING` position one;
 6. removes the old jump;
-7. persists current and previous documents to NVRAM.
+7. persists the current document and, when the 2 KiB reserve permits, the
+   previous document to NVRAM, using gzip/base64 when it is smaller than plain
+   TSV; otherwise rollback remains runtime-only.
 
 An invalid document or failed chain build leaves the previous jump active.
 Rollback applies the same transaction in the opposite direction.

@@ -43,6 +43,52 @@ def test_refresh_allows_a_full_forced_domain_resolution(
     assert client.refresh() == {"health": "healthy"}
 
 
+def test_transient_application_flow_commands_use_structured_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+    calls: list[list[str]] = []
+
+    def run_alctl(
+        arguments: list[str],
+        *,
+        input_bytes: bytes | None = None,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        calls.append(arguments)
+        assert input_bytes is None
+        assert timeout is None
+        return CommandResult('{"ok":true,"count":1,"flows":[]}\n', "", 0)
+
+    monkeypatch.setattr(client, "_run_alctl", run_alctl)
+
+    assert client.app_flows()["ok"] is True
+    assert (
+        client.set_app_flow(
+            "mac-uuremote",
+            "192.168.1.99",
+            "udp",
+            "64479",
+            "direct",
+        )["count"]
+        == 1
+    )
+    assert client.delete_app_flow("mac-uuremote")["ok"] is True
+    assert calls == [
+        ["app-flow", "list"],
+        [
+            "app-flow",
+            "set",
+            "mac-uuremote",
+            "192.168.1.99",
+            "udp",
+            "64479",
+            "direct",
+        ],
+        ["app-flow", "delete", "mac-uuremote"],
+    ]
+
+
 def test_astrill_switch_timeout_covers_verified_failure_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
