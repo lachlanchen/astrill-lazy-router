@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Astrill Lazy Policy Workspace</title>
+  <meta name="description"
+        content="Review, customize, and download verified Direct or Astrill service policies.">
+  <link rel="icon" href="assets/lazyingart-banner.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="https://lachlanchen.github.io/astrill-lazy-policies/"
+       aria-label="Astrill Lazy policy workspace">
+      <img src="assets/lazyingart-banner.png" alt="LazyingArt">
+      <span>
+        <strong>Astrill Lazy</strong>
+        <small>Policy workspace</small>
+      </span>
+    </a>
+    <div class="release-state" aria-live="polite">
+      <span id="release-dot" class="state-dot"></span>
+      <span id="release-label">Loading verified release</span>
+    </div>
+    <nav aria-label="Project links">
+      <a href="https://github.com/lachlanchen/astrill-lazy-policies">Repository</a>
+      <a href="https://github.com/sponsors/lachlanchen">Sponsor</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="command-band" aria-labelledby="install-title">
+      <div>
+        <p class="eyebrow">HTTPS policy source</p>
+        <h1 id="install-title">Daily balanced routing</h1>
+        <p id="release-summary">Loading the stable catalog-relative policy.</p>
+      </div>
+      <div class="command-control">
+        <label for="install-command">Verified import command</label>
+        <div class="command-row">
+          <code id="install-command">Loading...</code>
+          <button id="copy-command" class="icon-button" type="button"
+                  title="Copy verified import command" aria-label="Copy verified import command">
+            <span aria-hidden="true">Copy</span>
+          </button>
+        </div>
+        <p>The command changes local policy only. Router deployment remains a separate confirmed action.</p>
+      </div>
+    </section>
+
+    <section class="workspace" aria-labelledby="catalog-title">
+      <div class="workspace-toolbar">
+        <div>
+          <p class="eyebrow">Catalog</p>
+          <h2 id="catalog-title">Services and companies</h2>
+        </div>
+        <div class="workspace-actions">
+          <button id="reset-stable" type="button">Use stable</button>
+          <button id="download-policy" class="primary" type="button">Download policy</button>
+        </div>
+      </div>
+
+      <div class="filters" role="search">
+        <label class="search-field">
+          <span>Search</span>
+          <input id="search" type="search" autocomplete="off"
+                 placeholder="App, company, alias, or domain">
+        </label>
+        <label>
+          <span>Provider country</span>
+          <select id="country-filter"><option value="">All countries</option></select>
+        </label>
+        <label>
+          <span>Category</span>
+          <select id="category-filter"><option value="">All categories</option></select>
+        </label>
+        <fieldset class="route-filter">
+          <legend>Route</legend>
+          <div class="segments">
+            <button type="button" data-route-filter="" class="active">All</button>
+            <button type="button" data-route-filter="direct">Direct</button>
+            <button type="button" data-route-filter="vpn">Astrill</button>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="batch-bar">
+        <label class="select-visible">
+          <input id="select-visible" type="checkbox">
+          <span>Select visible</span>
+        </label>
+        <span id="selection-count">0 selected</span>
+        <span class="batch-spacer"></span>
+        <button id="set-direct" type="button">Set Direct</button>
+        <button id="set-vpn" type="button">Set Astrill</button>
+      </div>
+
+      <div class="table-wrap" tabindex="0" aria-label="Policy catalog table">
+        <table>
+          <thead>
+            <tr>
+              <th class="check-column"><span class="sr-only">Selected</span></th>
+              <th>Service</th>
+              <th>Company</th>
+              <th>Country</th>
+              <th>Category</th>
+              <th>Route</th>
+              <th>Endpoint preference</th>
+            </tr>
+          </thead>
+          <tbody id="catalog-body"></tbody>
+        </table>
+      </div>
+      <div class="table-footer">
+        <span id="visible-count">0 services</span>
+        <span id="policy-hash">SHA-256 unavailable</span>
+      </div>
+    </section>
+  </main>
+
+  <template id="service-row">
+    <tr>
+      <td class="check-column"><input class="row-select" type="checkbox"></td>
+      <td>
+        <strong class="service-name"></strong>
+        <small class="service-type"></small>
+      </td>
+      <td class="company"></td>
+      <td class="country"></td>
+      <td class="category"></td>
+      <td>
+        <select class="route-choice" aria-label="Route">
+          <option value="direct">Direct</option>
+          <option value="vpn">Astrill</option>
+        </select>
+      </td>
+      <td class="region"></td>
+    </tr>
+  </template>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

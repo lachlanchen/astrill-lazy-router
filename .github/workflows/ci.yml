@@ -49,8 +49,11 @@ jobs:
           helpers/astrill-lazy-profile-runner
           contrib/macos/install-uuremote-route-reporter.sh
           contrib/macos/uuremote-route-reporter.sh
+          contrib/portable/install-agent.sh
+          contrib/portable/uninstall-agent.sh
           router/alapi
           router/alpage
+          router/alpage-ui
           router/bootstrap.sh
 
       # alctl exports shared state to a digest-verified, dynamically sourced
@@ -59,6 +62,7 @@ jobs:
       - name: Check modular router controller shell
         run: >-
           shellcheck -e SC1090,SC2034,SC2015 -x -s sh router/alctl
+          router/alhybrid
 
       - name: Build wheel
         run: python -m pip wheel --no-deps --wheel-dir /tmp/wheel .

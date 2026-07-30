@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.3.0 - 2026-07-31
+
+- Preserve the known stable `0.2.13` application state as immutable tag
+  `v0.2.13` before beginning cross-platform deployment work.
+- Share the proven hybrid-policy controller with Ubuntu and split enabled
+  policy deterministically: device and namespace identities plus UU Remote,
+  WeChat, Taobao, Meituan, and Nutstore stay in the reboot-persistent core;
+  remaining destination policy becomes a source/MAC-scoped computer overlay.
+- Add a self-contained Python 3.9-compatible macOS/Linux restore-agent bundle
+  with checksum-covered installer and uninstaller, pinned OpenSSH host key,
+  exact companion/package/helper identities, explicit first enrollment,
+  atomic local state, and at-most-once restoration per router runtime.
+- Add low-frequency, opt-in recovery across frontends. Windows verifies an
+  enabled exact deployment every 15 minutes only while idle; Ubuntu reacts to
+  startup, refresh, and network return; the portable service uses a 15-minute
+  status interval with bounded unavailable-router retries. Matching state
+  performs no router write.
+- Add strict catalog-only policy bundles, mandatory SHA-256 for apply,
+  HTTPS-only remote fetch and redirects, atomic replace/merge behavior, and
+  export that omits device, process, path, SSH, and credential data.
+- Publish the token-free policy workspace at
+  `https://lachlanchen.github.io/astrill-lazy-policies/`, with 261 searchable
+  catalog profiles, provider-country/category/route filters, durable batch
+  routing, custom download, and the 88-rule `daily-balanced` policy tagged
+  `policy-v1.0.0`. The exact stable policy SHA-256 is
+  `59cedac9c159df3deb60afe93eeed528b7b6ec006d8073a87ba04eebf69a2fbe`.
+- Add public-release gates for catalog and policy validation, exact metadata
+  hashes, credential/private-address scanning, responsive Chromium rendering,
+  filter/batch/reset behavior, real downloaded JSON, and live HTTPS import.
+- Upgrade the router companion identity to `0.2.12`. Keep the rich layered
+  MyPage in RAM and retain a compact persistent fallback, while staging both
+  the optional hybrid helper and page under the package-bound controller lock.
+- Admit up to 640 effective metadata rows so the measured Ubuntu and macOS
+  overlays can coexist. Keep the stricter 1,536 generated-match limit, 8 MiB
+  free-memory floor, bounded build time, source isolation, and transactional
+  rollback unchanged.
+- Compact the persistent package and startup launcher without weakening
+  digest verification. The final 18,347-byte package uses 14 NVRAM chunks,
+  MD5 `62084ec42351966c633697d452ea1629`, and SHA-256
+  `f8bc8ea8ec0231150f8ad6891f061674fadb8899624388211e65a3df08bee897`.
+  The final read-only live preflight observed 2,693 bytes free, projected 243
+  bytes of growth and 2,450 bytes free after upgrade, above the enforced
+  2,048-byte reserve.
+- Add an explicit router SSH fingerprint row to the Ubuntu GUI, use the shared
+  balanced deployment for GUI apply and application launchers, and reconcile
+  only an exact current companion package.
+- Sanitize portable policy provenance to ID, version, and SHA-256 so a local
+  path or tokenized source URL cannot enter a generated deployment bundle.
+
 ## 0.2.13 - 2026-07-30
 
 - Split router policy storage into a reboot-persistent compressed core and

@@ -19,6 +19,7 @@ from .router import RouterClient, RouterError
 
 PACKAGE_FILES = ("alctl", "alapi", "alpage", "VERSION")
 HYBRID_HELPER_FILE = "alhybrid"
+POLICY_PAGE_FILE = "alpage-ui"
 CHUNK_SIZE = 1800
 LEGACY_STARTUP_LINE = "nvram get astrill_lazy_bootstrap | sh;"
 PREVIOUS_STARTUP_LINE = (
@@ -41,24 +42,13 @@ UNCOMPRESSED_DIGEST_STARTUP_LINE = (
     '/bin/sh -c "$astrill_lazy_bootstrap_script" ;; esac;'
 )
 STARTUP_LINE = (
-    'astrill_lazy_bootstrap_payload="$(nvram get astrill_lazy_bootstrap)"; '
-    'astrill_lazy_bootstrap_digest="$(nvram get astrill_lazy_bootstrap_md5)"; '
-    'case "$astrill_lazy_bootstrap_digest" in '
-    f"{MD5_SHELL_PATTERN}) "
-    "astrill_lazy_bootstrap_actual=\"$(printf '%s\\n' "
-    '"$astrill_lazy_bootstrap_payload" | md5sum | awk \'{print $1}\')"; '
-    '[ -n "$(printf \'%s\' "$astrill_lazy_bootstrap_payload" | '
-    "tr -d '[:space:]')\" ] && "
-    '[ "$astrill_lazy_bootstrap_actual" = "$astrill_lazy_bootstrap_digest" ] && '
-    'astrill_lazy_bootstrap_script="$({ '
-    "printf 'begin-base64 600 bootstrap.gz\\n'; "
-    "printf '%s\\n' \"$astrill_lazy_bootstrap_payload\"; "
-    "printf '====\\n'; "
-    '} | uudecode -o - 2>/dev/null | gzip -dc 2>/dev/null)" && '
-    '[ -n "$(printf \'%s\' "$astrill_lazy_bootstrap_script" | '
-    "tr -d '[:space:]')\" ] && "
-    'ASTRILL_LAZY_BOOTSTRAP_MD5="$astrill_lazy_bootstrap_digest" '
-    '/bin/sh -c "$astrill_lazy_bootstrap_script" ;; esac;'
+    'b="$(nvram get astrill_lazy_bootstrap)";'
+    'd="$(nvram get astrill_lazy_bootstrap_md5)";'
+    '[ -n "$b" ]&&'
+    '[ "$(printf \'%s\\n\' "$b"|md5sum|cut -d\' \' -f1)" = "$d" ]&&'
+    "{ printf 'begin-base64 600 bootstrap.gz\\n%s\\n====\\n' \"$b\"|"
+    "uudecode -o - 2>/dev/null|gzip -dc 2>/dev/null|"
+    'ASTRILL_LAZY_BOOTSTRAP_MD5="$d" /bin/sh;}'
 )
 PAGE_COMMANDS = (
     "/tmp/astrill-lazy/alpage",
@@ -106,6 +96,20 @@ class InstallResult:
 
 
 @dataclass(frozen=True)
+class InstallPreflight:
+    version: str
+    installed_version: str | None
+    package_bytes: int
+    package_sha256: str
+    nvram_chunks: int
+    nvram_free_before: int
+    projected_growth: int
+    projected_free: int
+    minimum_free: int
+    can_install: bool
+
+
+@dataclass(frozen=True)
 class EnsureResult:
     status: dict[str, Any]
     action: str
@@ -141,6 +145,24 @@ class _RollbackTarget:
     bootstrap_md5: str
     runtime_md5: tuple[tuple[str, str], ...]
     status_has_package_md5: bool
+
+
+@dataclass(frozen=True)
+class _PreparedInstall:
+    archive: bytes
+    chunks: tuple[str, ...]
+    version: str
+    package_md5: str
+    package_sha256: str
+    snapshot: _InstallSnapshot
+    rollback_target: _RollbackTarget | None
+    pages: tuple[str, ...]
+    assignments: tuple[tuple[str, str], ...]
+    expected_install: dict[str, str]
+    expected_install_present: frozenset[str]
+    stored_rules: dict[str, str]
+    projected_growth: int
+    projected_free: int
 
 
 class RouterInstaller:
@@ -181,6 +203,21 @@ class RouterInstaller:
             expected_version=self.expected_version,
             expected_package_md5=self.expected_package_md5,
         )
+        page = self.router_root / POLICY_PAGE_FILE
+        stage_asset = getattr(self.client, "ensure_runtime_asset", None)
+        if page.is_file() and callable(stage_asset):
+            page_payload = page.read_bytes()
+            stage_asset(
+                page_payload,
+                hashlib.md5(
+                    page_payload,
+                    usedforsecurity=False,
+                ).hexdigest(),
+                target="/tmp/astrill-lazy/alpage-ui",
+                label="policy page",
+                expected_version=self.expected_version,
+                expected_package_md5=self.expected_package_md5,
+            )
         return HybridHelperResult(
             action=action,
             helper_bytes=len(payload),
@@ -384,7 +421,27 @@ class RouterInstaller:
             and status.get("watchdog") is True
         )
 
-    def install(self) -> InstallResult:
+    def preflight_install(self) -> InstallPreflight:
+        """Project the exact install transaction without changing the router."""
+
+        prepared = self._prepare_install()
+        installed_version = (
+            prepared.snapshot.values["astrill_lazy_version"].strip() or None
+        )
+        return InstallPreflight(
+            version=prepared.version,
+            installed_version=installed_version,
+            package_bytes=len(prepared.archive),
+            package_sha256=prepared.package_sha256,
+            nvram_chunks=len(prepared.chunks),
+            nvram_free_before=prepared.snapshot.nvram_free_bytes,
+            projected_growth=prepared.projected_growth,
+            projected_free=prepared.projected_free,
+            minimum_free=MIN_NVRAM_FREE_BYTES,
+            can_install=prepared.projected_free >= MIN_NVRAM_FREE_BYTES,
+        )
+
+    def _prepare_install(self) -> _PreparedInstall:
         archive = build_router_package(self.router_root)
         encoded = base64.b64encode(archive).decode("ascii")
         chunks = tuple(_chunks(encoded, CHUNK_SIZE))
@@ -400,7 +457,6 @@ class RouterInstaller:
                 "cannot be used for safe rollback"
             )
         rollback_target = _validate_rollback_target(snapshot)
-        old_count = snapshot.package_count
         old_installed = snapshot.values["astrill_lazy_installed"] == "1"
         startup = snapshot.values["rc_startup"]
         pages = snapshot.values["mypage_scripts"].split()
@@ -447,11 +503,49 @@ class RouterInstaller:
             assignments,
             new_package_count=len(chunks),
         )
-        growth = self._preflight_install(
+        growth, projected_free = self._project_install_headroom(
             snapshot,
             expected_install,
             expected_install_present,
         )
+        return _PreparedInstall(
+            archive=archive,
+            chunks=chunks,
+            version=version,
+            package_md5=md5,
+            package_sha256=sha256,
+            snapshot=snapshot,
+            rollback_target=rollback_target,
+            pages=tuple(pages),
+            assignments=tuple(assignments),
+            expected_install=expected_install,
+            expected_install_present=expected_install_present,
+            stored_rules=stored_rules,
+            projected_growth=growth,
+            projected_free=projected_free,
+        )
+
+    def install(self) -> InstallResult:
+        prepared = self._prepare_install()
+        if prepared.projected_free < MIN_NVRAM_FREE_BYTES:
+            raise RouterError(
+                "insufficient NVRAM headroom for companion installation: "
+                f"{prepared.projected_free} bytes would remain after projected "
+                f"{prepared.projected_growth:+d}-byte growth; at least "
+                f"{MIN_NVRAM_FREE_BYTES} bytes must remain"
+            )
+        snapshot = prepared.snapshot
+        chunks = prepared.chunks
+        version = prepared.version
+        sha256 = prepared.package_sha256
+        rollback_target = prepared.rollback_target
+        pages = list(prepared.pages)
+        assignments = list(prepared.assignments)
+        expected_install = prepared.expected_install
+        expected_install_present = prepared.expected_install_present
+        stored_rules = prepared.stored_rules
+        growth = prepared.projected_growth
+        old_count = snapshot.package_count
         script = self._install_transaction_script(
             snapshot,
             expected_install,
@@ -499,7 +593,7 @@ class RouterInstaller:
         api_page = pages.index(PAGE_COMMANDS[1]) + 1
         return InstallResult(
             version=version,
-            package_bytes=len(archive),
+            package_bytes=len(prepared.archive),
             package_sha256=sha256,
             nvram_chunks=len(chunks),
             policy_page=policy_page,
@@ -600,6 +694,26 @@ printf '%s\\n' "$free_bytes"
         expected_install: dict[str, str],
         expected_install_present: frozenset[str],
     ) -> int:
+        growth, projected_free = self._project_install_headroom(
+            snapshot,
+            expected_install,
+            expected_install_present,
+        )
+        if projected_free < MIN_NVRAM_FREE_BYTES:
+            raise RouterError(
+                "insufficient NVRAM headroom for companion installation: "
+                f"{projected_free} bytes would remain after projected "
+                f"{growth:+d}-byte growth; at least "
+                f"{MIN_NVRAM_FREE_BYTES} bytes must remain"
+            )
+        return growth
+
+    @staticmethod
+    def _project_install_headroom(
+        snapshot: _InstallSnapshot,
+        expected_install: dict[str, str],
+        expected_install_present: frozenset[str],
+    ) -> tuple[int, int]:
         current = {key: snapshot.values[key] for key in snapshot.present}
         desired = {key: expected_install[key] for key in expected_install_present}
 
@@ -611,14 +725,7 @@ printf '%s\\n' "$free_bytes"
         )
         growth = desired_bytes - current_bytes
         projected_free = snapshot.nvram_free_bytes - growth
-        if projected_free < MIN_NVRAM_FREE_BYTES:
-            raise RouterError(
-                "insufficient NVRAM headroom for companion installation: "
-                f"{projected_free} bytes would remain after projected "
-                f"{growth:+d}-byte growth; at least "
-                f"{MIN_NVRAM_FREE_BYTES} bytes must remain"
-            )
-        return growth
+        return growth, projected_free
 
     @staticmethod
     def _expected_install_state(

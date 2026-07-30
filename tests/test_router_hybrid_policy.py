@@ -630,9 +630,15 @@ hybrid_put_overlay reassigned 0 auto "$BASE/shared.tsv" \
 grep -q 'overlay MAC binding changed' "$BASE/reassigned" || exit 16
 hybrid_put_overlay second 0 192.168.1.50 "$BASE/shared.tsv" \
     2>/dev/null && exit 12
-hybrid_put_overlay second 0 192.168.1.60 "$BASE/collision.tsv" \
+hybrid_put_overlay second 0 192.168.1.60 "$BASE/shared.tsv" || exit 13
+[ "$(grep -c 'shared-origin' "$BASE/applied.tsv")" -eq 2 ] || exit 14
+grep -q 'shared-origin	192.168.1.50/32	aa:bb:cc:dd:ee:ff' \
+    "$BASE/applied.tsv" || exit 15
+grep -q 'shared-origin	192.168.1.60/32	-' \
+    "$BASE/applied.tsv" || exit 16
+hybrid_put_overlay collision 0 192.168.1.70 "$BASE/collision.tsv" \
     2>/dev/null && exit 13
-[ ! -s "$NVRAM_WRITES" ] || exit 14
+[ ! -s "$NVRAM_WRITES" ] || exit 17
 cat "$BASE/stale"
 printf 'overlays=%s no-nvram-writes\n' "$(hybrid_overlay_count)"
 """,
@@ -643,7 +649,7 @@ printf 'overlays=%s no-nvram-writes\n' "$(hybrid_overlay_count)"
         "generation=1 source=192.168.1.50/32 mac=aa:bb:cc:dd:ee:ff"
     ) in result.stdout
     assert "overlay generation conflict: expected 0, current 1" in result.stdout
-    assert result.stdout.endswith("overlays=1 no-nvram-writes\n")
+    assert result.stdout.endswith("overlays=2 no-nvram-writes\n")
 
 
 def test_ddwrt_memory_and_ipv4_admission_avoid_32_bit_shell_limits(

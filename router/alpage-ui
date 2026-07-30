@@ -1,0 +1,43 @@
+#!/bin/sh
+
+cat <<'EOF'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Astrill Lazy Router</title>
+<style>
+body{margin:0;background:#f3f5f5;color:#172126;font:14px sans-serif}header{padding:14px;color:#fff;background:#12191d;border-bottom:3px solid #d94f5c;font-size:18px}main{padding:14px}.hero{display:flex;align-items:center}.hero h1{flex:1;font-size:18px}button{border:1px solid #0f6b4a;border-radius:5px;background:#167552;color:#fff;padding:9px 13px}.notice{display:none;margin-bottom:9px;padding:9px;border:1px solid #e2a7ad;background:#fff1f2}.notice.on{display:block}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.card,.panel{background:#fff;border:1px solid #d7dde0;border-radius:6px}.card{padding:12px}.card span,footer{display:block;color:#637078}.g{color:#087a55}.b{color:#c52b45}.panel{margin-top:11px}.panel h2{font-size:15px;margin:0;padding:11px}pre{margin:0;padding:11px;border-top:1px solid #e4e8ea;overflow:auto}footer{padding-top:11px}@media(max-width:680px){.grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header>Astrill Lazy Router</header>
+<main>
+<div class="hero"><h1>Layered policy</h1><button id="refresh">Refresh</button></div>
+<div id="notice" class="notice"></div>
+<section class="grid">
+<div class="card"><span>Controller</span><b id="health">Loading</b></div>
+<div class="card"><span>Persistent core</span><b id="core">-</b></div>
+<div class="card"><span>RAM overlays</span><b id="overlays">-</b></div>
+<div class="card"><span>Effective policy</span><b id="effective">-</b></div>
+</section>
+<section class="panel"><h2>Active layers</h2><pre id="layers"></pre></section>
+<footer>Read-only. No polling.</footer>
+</main>
+<script>
+const $=x=>document.getElementById(x);
+function render(d){
+ let c=d.core,o=d.overlays||[],e=d.effective,ok=d.health==='healthy',h=$('health');h.textContent=ok?'Healthy':'Needs attention';h.className=ok?'g':'b';
+ $('core').textContent=c.origins+' origins / '+c.rows+' rows';$('overlays').textContent=o.length+' overlays';$('effective').textContent=e.rows+' rows'+(e.generated_matches==null?'':' / '+e.generated_matches+' matches');
+ let error=d.last_reconcile_error,n=$('notice');n.textContent=error||'';n.className=error?'notice on':'notice';
+ let rows=[['Layer','Gen','Scope','MD5'],['Core',c.generation,'Global',c.hash]];
+ for(let x of o)rows.push([x.owner,x.generation,x.source+(x.mac&&x.mac!='-'?' / '+x.mac:''),x.hash]);
+ $('layers').textContent=rows.map(x=>x.join(' | ')).join('\n');
+}
+async function load(){try{let r=await fetch('/MyPage.asp?4',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);render(await r.json())}catch(e){let h=$('health'),n=$('notice');h.textContent='Unavailable';h.className='b';n.textContent='Could not read status: '+e.message;n.className='notice on'}}
+$('refresh').onclick=load;load();
+</script>
+</body>
+</html>
+EOF

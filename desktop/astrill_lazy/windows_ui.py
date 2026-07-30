@@ -159,6 +159,7 @@ HYBRID_CONTROLLER_METHODS = {
     "remove": ("remove_ram_overlay",),
     "auto_restore": ("set_overlay_restore_enabled",),
 }
+POLICY_VERIFY_INTERVAL_MS = 900_000
 
 
 class EndpointTreeWidget(QTreeWidget):
@@ -817,6 +818,10 @@ class MainWindow(QMainWindow):
         self._network_recovery_pending = False
         self._network_recovery_used = False
         self._network_recovery_generation = 0
+        self._policy_verification_timer = QTimer(self)
+        self._policy_verification_timer.setInterval(POLICY_VERIFY_INTERVAL_MS)
+        self._policy_verification_timer.timeout.connect(self._run_policy_verification)
+        self._policy_verification_timer.start()
         self.clients: list[dict[str, Any]] = []
         self._selected_service_ids: set[str] = set()
         self._syncing_service_selection = False
@@ -939,7 +944,8 @@ class MainWindow(QMainWindow):
         header.addWidget(self.refresh_mode_label)
         self.refresh_button = QPushButton("Refresh router")
         self.refresh_button.setToolTip(
-            "Read router status now. Status is not polled automatically."
+            "Read router status now. Opted-in RAM overlays are also verified "
+            "at most once every 15 minutes."
         )
         self.refresh_button.clicked.connect(lambda: self._refresh_status())
         header.addWidget(self.refresh_button)
@@ -2067,6 +2073,25 @@ class MainWindow(QMainWindow):
         self._network_was_offline = False
         self._network_recovery_pending = False
         self._refresh_status(quiet=True)
+
+    def _run_policy_verification(self) -> None:
+        """Check infrequently only when this controller opted into restore."""
+
+        if (
+            self.busy_count
+            or self.controller.store.read_only
+            or not self.controller.store.companion_enabled
+        ):
+            return
+        enabled = any(
+            deployment.router_host == self.controller.store.router_host
+            and deployment.router_port == self.controller.store.router_port
+            and deployment.controller_id == self.controller.store.controller_id
+            and deployment.restore_overlay_after_reboot
+            for deployment in self.controller.store.policy_deployments
+        )
+        if enabled:
+            self._refresh_status(quiet=True)
 
     def _resume_pending_network_recovery(self) -> None:
         if (

@@ -32,9 +32,9 @@ The native Windows application provides:
   optional DD-WRT companion;
 - a local read-only guard that is enabled for every fresh configuration.
 
-Version `0.2.13` has nine views: Policies, Services, Countries, Devices,
+Version `0.3.0` has nine views: Policies, Services, Countries, Devices,
 Connection, Endpoints, Astrill, Router, and Settings. Local policy edits are
-saved immediately, but they do not affect traffic until companion `0.2.11` is
+saved immediately, but they do not affect traffic until companion `0.2.12` is
 installed and an explicit core or RAM-overlay action succeeds.
 
 ## Requirements
@@ -227,12 +227,14 @@ A fresh Windows configuration is:
 - empty: no policy is seeded or applied automatically.
 
 The application performs one status and reconciliation check when its window
-starts. It does not run a recurring timer or poll DD-WRT over SSH in the
-background. After that startup check, router status is read only when the
-operator selects **Refresh router**, a page first needs router data, or a
-completed action returns status or verified readback.
+starts. When volatile-overlay restoration is explicitly enabled for an exact
+deployment manifest, it also runs one policy verification every 15 minutes.
+The timer runs only while the controller is idle, companion writes are
+enabled, and the version/package-bound manifest remains eligible. A matching
+layer causes no router write. Endpoint, favorite, latency, and native settings
+remain event-driven.
 
-Version `0.2.13` also listens for a Windows network-change notification. If
+Version `0.3.0` also listens for a Windows network-change notification. If
 the operator explicitly enabled volatile-overlay restoration, the first
 eligible startup or network event after a new router runtime can restore this
 controller's missing RAM overlay once. The runtime epoch and attempted result
@@ -251,9 +253,9 @@ empty device result. Moving between pages therefore does not turn an empty
 inventory into repeated router requests. Use the page's explicit Load or
 Refresh action when fresh data is required.
 
-This removes desktop SSH polling only. An installed companion still performs
-the router-local maintenance described below; those cycles do not open desktop
-SSH sessions or periodically rebuild a workstation overlay.
+The bounded policy verification is independent of the installed companion's
+router-local maintenance described below; those cycles do not open desktop SSH
+sessions or periodically rebuild a workstation overlay.
 
 When the local configuration records a previously confirmed companion,
 refresh also reconciles router-reboot state:
@@ -279,9 +281,9 @@ helper, this computer's overlay, other workstation overlays, effective policy,
 epoch, and generations are reconstructed in `/tmp` and are never committed to
 NVRAM.
 
-### Companion 0.2.11 runtime boundaries
+### Companion 0.2.12 runtime boundaries
 
-Companion `0.2.11` retains the dynamic precedence and fail-closed behavior
+Companion `0.2.12` retains the dynamic precedence and fail-closed behavior
 introduced in `0.2.10`. It does not assume a fixed safe policy-priority range.
 Before a
 managed Astrill start it removes only its recorded owned Direct/Astrill pair.
@@ -331,7 +333,7 @@ rows.
 Choose **Suggested**, **Direct**, or **Astrill**, then select **Add to
 Policies**. Suggested preserves each catalog profile's maintained route.
 Adding saves or updates the selected policies in the Windows configuration;
-it does not write the router. With companion `0.2.11`, Policies follows the
+it does not write the router. With companion `0.2.12`, Policies follows the
 same local-versus-applied hierarchy as the Ubuntu app while making the two
 router storage layers explicit:
 
@@ -590,7 +592,7 @@ change the router.
 ## Human-Readable Astrill Settings
 
 The **Astrill** view uses the same effective native controls as the Ubuntu
-frontend instead of presenting an editable raw NVRAM table. Version `0.2.13`
+frontend instead of presenting an editable raw NVRAM table. Version `0.3.0`
 uses seven spacious tabs: **Overview**, **Connection**, **Routing**, **Privacy
 & DNS**, **Devices**, **Resilience**, and **Advanced**. Boolean values use
 checkboxes, validated modes use named choices, MTU uses a bounded number

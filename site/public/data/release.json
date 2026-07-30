@@ -1,0 +1,12 @@
+{
+  "contains_credentials": false,
+  "policy_absolute_url": "https://lachlanchen.github.io/astrill-lazy-policies/policies/daily-balanced-v1.json",
+  "policy_bytes": 16230,
+  "policy_id": "daily-balanced",
+  "policy_rules": 88,
+  "policy_sha256": "59cedac9c159df3deb60afe93eeed528b7b6ec006d8073a87ba04eebf69a2fbe",
+  "policy_url": "policies/daily-balanced-v1.json",
+  "policy_version": "1.0.0",
+  "router_boot_dependency": false,
+  "schema_version": 1
+}

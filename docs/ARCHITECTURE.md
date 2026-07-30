@@ -2,16 +2,19 @@
 
 ## Components
 
-Astrill Lazy Router has three deliberately small trust domains:
+Astrill Lazy Router has four deliberately small trust domains:
 
-1. The native Ubuntu and Windows applications own editable rules, catalogs,
-   Astrill server discovery, and platform-specific application profiles.
+1. The native Ubuntu and Windows applications plus the portable macOS/Linux
+   agent own editable or enrolled policy and computer-local state.
 2. The DD-WRT controller owns validated compiled rules, address resolution,
    packet marking, policy tables, rollback, and runtime recovery.
 3. Astrill continues to own its tunnel, DNS behavior, low-order marks, server
    configuration, and OpenVPN process.
+4. The public policy site distributes catalog references only. The computer
+   treats it as untrusted input and requires schema, catalog, and exact
+   SHA-256 validation before changing local policy.
 
-The device-local policy model is a fourth, currently non-enforcing trust
+The device-local policy model is a fifth, currently non-enforcing trust
 domain. It validates Direct and multi-tunnel decisions without touching the
 router or host routes. Platform-specific privileged backends remain separate
 and must consume the same versioned policy only after opening their own
@@ -174,20 +177,20 @@ extracts into a private staging directory, publishes each runtime file by
 atomic rename, and writes the running `PACKAGE_MD5` marker last.
 The host installer also records SHA-256 for release verification.
 
-The desktop reconciles the companion once at launch. Later reconciliation is
-manual; status and data otherwise come from explicit page loads or the result
-of an action the operator requested. A matching version, stored-package MD5,
-stored-bootstrap-payload MD5, verified stored chunk/bootstrap integrity, and
-exact persistent hooks with the corresponding running package marker, jump,
-and watchdog are left untouched. A stopped current runtime may be started in
+The desktop reconciles the companion at launch or explicit refresh. An
+opted-in exact hybrid deployment can additionally perform a low-frequency
+status check and one owner-overlay restore in a new router runtime. A matching
+version, stored-package MD5, stored-bootstrap-payload MD5, verified stored
+chunk/bootstrap integrity, persistent hooks, running marker, jump, and
+watchdog are left untouched. A stopped current runtime may be started in
 place, and that exact current package can be reconstructed from its verified
-stored bootstrap payload without a rewrite. If login startup
-precedes router startup, the failed read does not change the saved mode and
-manual Refresh retries after DD-WRT is reachable. A missing, outdated,
-package-mismatched, fingerprint-mismatched, or non-repairable package only
-opens the Install/Upgrade confirmation. No background desktop monitor can
-invoke the NVRAM installer. This lifecycle is separate from Astrill connection
-management and does not change `astrill_autostart`.
+stored bootstrap payload without a rewrite. If login startup precedes router
+startup, a bounded retry or later refresh handles availability without
+changing the saved mode. A missing, outdated, package-mismatched,
+fingerprint-mismatched, or non-repairable package requires explicit upgrade
+approval. No background controller can invoke the NVRAM installer. This
+lifecycle is separate from Astrill connection management and does not change
+`astrill_autostart`.
 
 The applet endpoint payload is a separate, larger read. Startup queues it only
 after the health snapshot completes instead of opening both SSH sessions

@@ -33,7 +33,7 @@ astrill-lazy access read-write
 astrill-lazy install-router
 ```
 
-The `0.2.11` installer:
+The `0.2.12` installer:
 
 1. creates a deterministic gzip/tar package;
 2. base64 encodes it into NVRAM-safe chunks;
@@ -63,16 +63,16 @@ The `0.2.11` installer:
     serialized recovery logic, if bootstrap or post-install verification
     fails. Recovery refuses to overwrite a newer policy/package/startup state.
 
-On the documented E4200 deployment, the 19,960-byte package encodes to exactly
-26,616 base64 bytes in 15 NVRAM chunks. Its MD5 is
-`3552747bcb9a06a8f6b64dcbb1ce0675`; its SHA-256 is
-`2f0dbbda03af55a54ebf75fa6a06d2f47ffcd071310082544202edac4422a4be`.
-The locked live preflight started with 3,115 NVRAM bytes free, projected 608
-bytes of growth and 2,507 bytes free afterward—459 bytes above the enforced
-2,048-byte reserve. The physical-reboot observation was 2,494 bytes free, a
-446-byte margin. These are snapshot measurements, not durable capacity
-guarantees. The installer recomputes the projection under the controller lock
-immediately before mutation.
+On the documented E4200 deployment, the `0.2.12` 18,347-byte package encodes
+to exactly 24,464 base64 bytes in 14 NVRAM chunks. Its MD5 is
+`62084ec42351966c633697d452ea1629`; its SHA-256 is
+`f8bc8ea8ec0231150f8ad6891f061674fadb8899624388211e65a3df08bee897`.
+The final read-only live preflight observed 2,693 NVRAM bytes free, projected
+243 bytes of growth and 2,450 bytes free afterward, 402 bytes above the
+enforced 2,048-byte reserve. These are snapshot measurements, not durable
+capacity guarantees. The installer recomputes the projection under the
+controller lock immediately before mutation. The prior `0.2.11` physical
+reboot retained 2,494 bytes free.
 
 Failed-upgrade rollback does not execute the captured old bootstrap. After
 restoring the exact NVRAM snapshot, the desktop-shipped current bootstrap runs
@@ -104,17 +104,16 @@ The `clients --json` operation is read-only. It merges DHCP leases, static
 reservations, and complete ARP neighbors on the configured LAN bridge,
 deduplicates by MAC address, and excludes WAN-interface neighbors.
 
-The desktop GUI calls a lighter reconciliation path once at startup. It does
-not repeat that check through background SSH polling. Manual Refresh retries
-the same safe path, including when desktop login startup occurred before
-DD-WRT finished booting. The check performs no NVRAM write when version,
-package and stored-bootstrap-payload digests, stored chunk/bootstrap
-integrity, persistent hooks, running package marker, active jump, and watchdog
-are current. It attempts `alctl start` before reinstalling a degraded current
-version and can reconstruct that exact verified stored package without
-rewriting it. If that identical package still fails, reconciliation reports
-the error instead of repeatedly writing NVRAM; use Install/Upgrade to request
-an explicit rewrite.
+The Ubuntu GUI calls a lighter reconciliation path at startup, network return,
+and manual Refresh. Windows and the optional portable agent can perform an
+opted-in exact-deployment status check every 15 minutes. The check performs no
+NVRAM write when version, package and stored-bootstrap-payload digests, stored
+chunk/bootstrap integrity, persistent hooks, running package marker, active
+jump, and watchdog are current. It attempts `alctl start` before reinstalling
+a degraded current version and can reconstruct that exact verified stored
+package without rewriting it. If that identical package still fails,
+reconciliation reports the error instead of repeatedly writing NVRAM; use
+Install/Upgrade to request an explicit rewrite.
 
 Removing the desktop timer does not remove the installed companion's own
 router-local recovery. Its watchdog still runs every 60 seconds on DD-WRT. If

@@ -61,7 +61,10 @@ package.
 The Ubuntu Router page stores only the host, SSH user, port, and dedicated
 identity path. Fresh defaults are `192.168.1.1`, `root`, port `22`, and
 `~/.ssh/astrill_lazy_router_ed25519`. Save & Check creates the local Ed25519 key
-when needed and tests it with bounded connection attempts and keepalives.
+when needed and tests it with bounded connection attempts and keepalives. The
+Policy identity row separately inspects the live SSH host key, shows its
+SHA-256 fingerprint and trust state, and requires explicit trust before a
+hybrid policy write.
 Authorize Key accepts a transient router password, verifies key login before
 disabling SSH password login, and never writes the password to disk.
 
@@ -213,15 +216,17 @@ active while the tunnel is disconnected. Each rule has:
 - an application launch button when applicable;
 - a delete action.
 
-Local edits are saved immediately. The orange Apply action compiles and
-transactionally installs the full rule set on DD-WRT.
+Local edits are saved immediately. Apply computes the balanced split, updates
+the small persistent core only when its generation/hash differs, then loads
+this Ubuntu computer's remaining destination policy as a source/MAC-bound RAM
+overlay. It enables one-shot restoration only after exact readback.
 
 `Detect` measures the same representative IPv4 destination through the WAN
 interface and `tun0`. Results show Direct and Astrill path latency on each
 enabled service or website policy. Recommendations require a meaningful
 improvement, keep the current route when both paths cannot be compared, and
-honor the catalog's access profile. UU Remote, WeChat, Taobao, and Meituan are
-minimum Direct recommendations. Detection never changes routing;
+honor the catalog's access profile. UU Remote, WeChat, Taobao, Meituan, and
+Nutstore are minimum Direct recommendations. Detection never changes routing;
 `Apply Recommendations` is a separate explicit action.
 
 ### Services

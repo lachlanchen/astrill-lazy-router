@@ -31,6 +31,7 @@ def test_router_and_helper_scripts_parse_with_posix_shell() -> None:
         ROOT / "router" / "alctl",
         ROOT / "router" / "alapi",
         ROOT / "router" / "alpage",
+        ROOT / "router" / "alpage-ui",
         ROOT / "router" / "bootstrap.sh",
         ROOT / "helpers" / "astrill-lazy-netns",
         ROOT / "helpers" / "astrill-lazy-profile-runner",
@@ -41,14 +42,20 @@ def test_router_and_helper_scripts_parse_with_posix_shell() -> None:
         ROOT / "contrib" / "macos" / "install-launcher.sh",
         ROOT / "contrib" / "macos" / "install-uuremote-route-reporter.sh",
         ROOT / "contrib" / "macos" / "uuremote-route-reporter.sh",
+        ROOT / "contrib" / "portable" / "install-agent.sh",
+        ROOT / "contrib" / "portable" / "uninstall-agent.sh",
     ]
     for script in scripts:
         subprocess.run([SHELL, "-n", script.as_posix()], check=True)
 
 
 def test_router_page_is_layered_read_only_and_refreshes_only_on_request() -> None:
-    page = (ROOT / "router" / "alpage").read_text(encoding="ascii")
+    fallback = (ROOT / "router" / "alpage").read_text(encoding="ascii")
+    page = (ROOT / "router" / "alpage-ui").read_text(encoding="ascii")
 
+    assert "p=/tmp/astrill-lazy/alpage-ui" in fallback
+    assert 'exec "$p"' in fallback
+    assert "href=/MyPage.asp?4" in fallback
     assert "Persistent core" in page
     assert "RAM overlays" in page
     assert "Effective policy" in page

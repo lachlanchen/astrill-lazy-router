@@ -28,6 +28,7 @@ HYBRID_POLICY_TIMEOUT = 330
 OVERLAY_OWNER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 MD5_RE = re.compile(r"^[0-9a-f]{32}$")
 HYBRID_HELPER_PATH = "/tmp/astrill-lazy/alhybrid"
+POLICY_PAGE_PATH = "/tmp/astrill-lazy/alpage-ui"
 _COMPANION_INTEGRITY_SHELL = r"""
 integrity_package=false
 integrity_bootstrap=false
@@ -352,9 +353,34 @@ class RouterClient:
     ) -> str:
         """Stage the desktop-shipped helper under the shared controller lock."""
 
+        return self.ensure_runtime_asset(
+            payload,
+            expected_md5,
+            target=HYBRID_HELPER_PATH,
+            label="hybrid helper",
+            expected_version=expected_version,
+            expected_package_md5=expected_package_md5,
+        )
+
+    def ensure_runtime_asset(
+        self,
+        payload: bytes,
+        expected_md5: str,
+        *,
+        target: str,
+        label: str,
+        expected_version: str,
+        expected_package_md5: str,
+    ) -> str:
+        """Stage one allowlisted RAM asset under the shared controller lock."""
+
+        if target not in {HYBRID_HELPER_PATH, POLICY_PAGE_PATH}:
+            raise ValueError("runtime asset target is not allowlisted")
+        if label not in {"hybrid helper", "policy page"}:
+            raise ValueError("runtime asset label is not allowlisted")
         normalized_md5 = str(expected_md5).strip().casefold()
         if not MD5_RE.fullmatch(normalized_md5):
-            raise ValueError("hybrid helper MD5 is invalid")
+            raise ValueError(f"{label} MD5 is invalid")
         normalized_version = str(expected_version).strip()
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", normalized_version):
             raise ValueError("companion version is invalid")
@@ -362,9 +388,9 @@ class RouterClient:
         if not MD5_RE.fullmatch(normalized_package_md5):
             raise ValueError("companion package MD5 is invalid")
         if not payload:
-            raise ValueError("hybrid helper payload cannot be empty")
+            raise ValueError(f"{label} payload cannot be empty")
         probe = f"""
-target={shlex.quote(HYBRID_HELPER_PATH)}
+target={shlex.quote(target)}
 expected={shlex.quote(normalized_md5)}
 if [ -x "$target" ] &&
    [ "$(md5sum "$target" | awk '{{print $1}}')" = "$expected" ]; then
@@ -380,10 +406,10 @@ fi
         if probe_action == "current":
             return "current"
         if probe_action != "upload":
-            raise RouterError("router omitted the hybrid helper probe result")
+            raise RouterError(f"router omitted the {label} probe result")
         script = f"""
 set -e
-target={shlex.quote(HYBRID_HELPER_PATH)}
+target={shlex.quote(target)}
 expected={shlex.quote(normalized_md5)}
 expected_version={shlex.quote(normalized_version)}
 expected_package={shlex.quote(normalized_package_md5)}
@@ -413,7 +439,7 @@ umask 077
 cat > "$temporary"
 actual=$(md5sum "$temporary" | awk '{{print $1}}')
 [ "$actual" = "$expected" ] || {{
-    printf '%s\\n' 'hybrid helper upload failed MD5 verification' >&2
+    printf '%s\\n' {shlex.quote(label + " upload failed MD5 verification")} >&2
     exit 1
 }}
 chmod 700 "$temporary"
@@ -465,7 +491,7 @@ printf installed
         )
         action = result.stdout.strip()
         if action not in {"current", "installed"}:
-            raise RouterError("router omitted the hybrid helper install result")
+            raise RouterError(f"router omitted the {label} install result")
         return action
 
     def rollback(self) -> dict[str, Any]:

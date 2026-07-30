@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astrill-lazy-router"
-version = "0.2.13"
+version = "0.3.0"
 description = "Native Ubuntu and DD-WRT policy routing controls for Astrill"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -50,12 +50,18 @@ where = ["desktop"]
   "router/alctl",
   "router/alapi",
   "router/alpage",
+  "router/alpage-ui",
   "router/alhybrid",
   "router/bootstrap.sh",
   "router/VERSION"
 ]
 "share/astrill-lazy/schemas" = [
   "schemas/device-policy-v1.schema.json"
+]
+"share/astrill-lazy/portable" = [
+  "contrib/portable/astrill-lazy-agent.py",
+  "contrib/portable/install-agent.sh",
+  "contrib/portable/uninstall-agent.sh"
 ]
 "libexec" = [
   "helpers/astrill-lazy-netns",

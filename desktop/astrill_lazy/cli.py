@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .agent_package import build_portable_agent_package, plan_balanced_policy
 from .astrill import parse_applet
 from .autostart import (
     autostart_path,
@@ -12,7 +13,7 @@ from .autostart import (
     enable_autostart,
     is_autostart_enabled,
 )
-from .catalog import load_catalog
+from .catalog import Catalog, load_catalog
 from .compiler import compile_rules
 from .device_policy import (
     TrafficContext,
@@ -21,7 +22,15 @@ from .device_policy import (
     load_country_networks,
     load_device_policy,
 )
+from .host_key import inspect_host_key
 from .installer import RouterInstaller
+from .policy_bundle import (
+    PolicyBundleDownload,
+    apply_policy_bundle,
+    download_policy_bundle,
+    export_service_policy_bundle,
+    load_policy_bundle,
+)
 from .router import RouterClient, RouterError
 from .ssh_setup import ensure_local_identity, read_public_key
 from .store import ConfigStore
@@ -48,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("apply", help="compile and apply the desktop rules")
     subparsers.add_parser("refresh", help="refresh domain addresses and routing")
     subparsers.add_parser("rollback", help="restore the previous router rules")
+    subparsers.add_parser(
+        "preflight-router",
+        help="project a companion install without changing the router",
+    )
     subparsers.add_parser("install-router", help="install or upgrade the router plugin")
     subparsers.add_parser("uninstall-router", help="remove the router plugin")
     subparsers.add_parser("setup-ssh", help="create the dedicated local SSH identity")
@@ -109,6 +122,62 @@ def build_parser() -> argparse.ArgumentParser:
     )
     routes.add_argument("policy", type=Path)
     routes.add_argument("country_networks", type=Path)
+
+    policy_bundle = subparsers.add_parser(
+        "policy-bundle",
+        help="inspect, apply, or export a catalog-only policy bundle",
+    )
+    policy_bundle_commands = policy_bundle.add_subparsers(
+        dest="policy_bundle_command",
+        required=True,
+    )
+    inspect_bundle = policy_bundle_commands.add_parser(
+        "inspect",
+        help="validate a local file or HTTPS policy bundle without changing config",
+    )
+    inspect_bundle.add_argument("source")
+    inspect_bundle.add_argument("--sha256")
+    apply_bundle = policy_bundle_commands.add_parser(
+        "apply",
+        help="verify and apply a local file or HTTPS policy bundle",
+    )
+    apply_bundle.add_argument("source")
+    apply_bundle.add_argument("--sha256", required=True)
+    apply_bundle.add_argument(
+        "--merge",
+        action="store_true",
+        help="retain service policies absent from the bundle",
+    )
+    export_bundle = policy_bundle_commands.add_parser(
+        "export",
+        help="export service decisions without devices, paths, or credentials",
+    )
+    export_bundle.add_argument("output", type=Path)
+    export_bundle.add_argument("--bundle-id", default="daily-balanced")
+    export_bundle.add_argument("--version", default="1.0.0")
+    export_bundle.add_argument("--description", default="")
+
+    agent = subparsers.add_parser(
+        "agent",
+        help="plan or build a source-bound portable restore agent",
+    )
+    agent_commands = agent.add_subparsers(dest="agent_command", required=True)
+    agent_commands.add_parser(
+        "plan",
+        help="preview the balanced persistent-core/RAM-overlay split",
+    )
+    build_agent = agent_commands.add_parser(
+        "build",
+        help="build a token-free portable agent package without changing the router",
+    )
+    build_agent.add_argument("output", type=Path)
+    build_agent.add_argument("--host", required=True)
+    build_agent.add_argument("--user", default="root")
+    build_agent.add_argument("--port", type=int, default=22)
+    build_agent.add_argument("--identity-file", required=True)
+    build_agent.add_argument("--host-fingerprint", required=True)
+    build_agent.add_argument("--controller-id")
+    build_agent.add_argument("--source", default="auto")
     return parser
 
 
@@ -225,6 +294,151 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
+    if arguments.command == "policy-bundle":
+        store = ConfigStore()
+        catalog = load_catalog(store.enabled_extensions)
+        try:
+            if arguments.policy_bundle_command == "export":
+                bundle = export_service_policy_bundle(
+                    store.rules,
+                    bundle_id=arguments.bundle_id,
+                    version=arguments.version,
+                    description=arguments.description,
+                )
+                payload = bundle.to_bytes()
+                arguments.output.parent.mkdir(parents=True, exist_ok=True)
+                arguments.output.write_bytes(payload)
+                _print_json(
+                    {
+                        "ok": True,
+                        "path": str(arguments.output.resolve()),
+                        "bundle_id": bundle.bundle_id,
+                        "version": bundle.version,
+                        "rules": len(bundle.entries),
+                        "bytes": len(payload),
+                        "sha256": bundle.sha256,
+                        "sensitive_selectors_exported": False,
+                    }
+                )
+                return 0
+            download = _load_policy_bundle_source(
+                arguments.source,
+                catalog=catalog,
+                expected_sha256=arguments.sha256,
+            )
+            if arguments.policy_bundle_command == "inspect":
+                _print_json(
+                    {
+                        "ok": True,
+                        "source": download.source,
+                        "bundle_id": download.bundle.bundle_id,
+                        "version": download.bundle.version,
+                        "rules": len(download.bundle.entries),
+                        "bytes": len(download.payload),
+                        "sha256": download.sha256,
+                        "mutated": False,
+                    }
+                )
+                return 0
+            result = apply_policy_bundle(
+                store,
+                catalog,
+                download,
+                replace_services=not arguments.merge,
+            )
+            _print_json(
+                {
+                    "ok": True,
+                    "bundle_id": result.bundle_id,
+                    "version": result.bundle_version,
+                    "sha256": result.bundle_sha256,
+                    "added": result.added,
+                    "updated": result.updated,
+                    "removed": result.removed,
+                    "unchanged": result.unchanged,
+                    "router_mutated": False,
+                }
+            )
+            return 0
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"astrill-lazy: {exc}", file=sys.stderr)
+            return 1
+
+    if arguments.command == "agent":
+        store = ConfigStore()
+        catalog = load_catalog(store.enabled_extensions)
+        try:
+            plan = plan_balanced_policy(store, catalog)
+            if arguments.agent_command == "plan":
+                _print_json(
+                    {
+                        "ok": True,
+                        "core": {
+                            "origins": len(plan.core_rule_ids),
+                            "rows": len(plan.core_compilation.rules),
+                            "bytes": plan.core_bytes,
+                            "rule_ids": list(plan.core_rule_ids),
+                        },
+                        "overlay": {
+                            "origins": len(plan.overlay_rule_ids),
+                            "rows": len(plan.overlay_compilation.rules),
+                            "bytes": plan.overlay_bytes,
+                        },
+                        "effective_rows": plan.effective_rows,
+                        "undeployed": len(plan.undeployed_rule_ids),
+                        "router_mutated": False,
+                    }
+                )
+                return 0
+            if not 1 <= arguments.port <= 65535:
+                raise ValueError("agent router port must be between 1 and 65535")
+            inspected = inspect_host_key(
+                arguments.host,
+                arguments.port,
+                known_hosts_path=arguments.output.expanduser() / "known_hosts",
+            )
+            if inspected.fingerprint != arguments.host_fingerprint:
+                raise ValueError(
+                    "inspected router SSH fingerprint does not match --host-fingerprint"
+                )
+            router = RouterClient(
+                arguments.host,
+                user=arguments.user,
+                port=arguments.port,
+                identity_file=arguments.identity_file,
+            )
+            result = build_portable_agent_package(
+                arguments.output,
+                store=store,
+                catalog=catalog,
+                host_key=inspected,
+                router_user=arguments.user,
+                identity_file=arguments.identity_file,
+                controller_id=arguments.controller_id,
+                source=arguments.source,
+                router_installer=RouterInstaller(router),
+            )
+            _print_json(
+                {
+                    "ok": True,
+                    "path": str(result.path),
+                    "controller_id": result.controller_id,
+                    "core_origins": len(result.core_rule_ids),
+                    "overlay_origins": len(result.overlay_rule_ids),
+                    "overlay_rows": result.overlay_rows,
+                    "overlay_bytes": result.overlay_bytes,
+                    "overlay_md5": result.overlay_md5,
+                    "overlay_sha256": result.overlay_sha256,
+                    "package_sha256": result.package_sha256,
+                    "router_mutated": False,
+                    "contains_private_key": False,
+                }
+            )
+            return 0
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            print(f"astrill-lazy: {exc}", file=sys.stderr)
+            return 1
+
     store = ConfigStore()
     mutating_commands = {
         "apply",
@@ -303,6 +517,23 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(router.refresh())
         elif arguments.command == "rollback":
             _print_json(router.rollback())
+        elif arguments.command == "preflight-router":
+            result = RouterInstaller(router).preflight_install()
+            _print_json(
+                {
+                    "version": result.version,
+                    "installed_version": result.installed_version,
+                    "package_bytes": result.package_bytes,
+                    "package_sha256": result.package_sha256,
+                    "nvram_chunks": result.nvram_chunks,
+                    "nvram_free_before": result.nvram_free_before,
+                    "projected_growth": result.projected_growth,
+                    "projected_free": result.projected_free,
+                    "minimum_free": result.minimum_free,
+                    "can_install": result.can_install,
+                    "mutated": False,
+                }
+            )
         elif arguments.command == "app-flow":
             if not store.companion_enabled:
                 raise RouterError(
@@ -461,6 +692,25 @@ def _services_for_domain(domain: str) -> set[str]:
         ):
             matches.add(service.id)
     return matches
+
+
+def _load_policy_bundle_source(
+    source: str,
+    *,
+    catalog: Catalog,
+    expected_sha256: str | None,
+) -> PolicyBundleDownload:
+    if source.startswith(("http://", "https://")):
+        return download_policy_bundle(
+            source,
+            catalog=catalog,
+            expected_sha256=expected_sha256,
+        )
+    return load_policy_bundle(
+        Path(source).expanduser(),
+        catalog=catalog,
+        expected_sha256=expected_sha256,
+    )
 
 
 if __name__ == "__main__":

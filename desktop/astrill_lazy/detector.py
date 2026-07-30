@@ -9,7 +9,9 @@ from .catalog import Catalog
 from .models import MatchKind, RouteTarget, Rule, validate_domain
 from .router import RouterClient
 
-MINIMUM_BYPASS_SERVICES = frozenset({"uu-remote", "wechat", "taobao", "meituan"})
+MINIMUM_BYPASS_SERVICES = frozenset(
+    {"uu-remote", "wechat", "taobao", "meituan", "nutstore"}
+)
 
 
 @dataclass(frozen=True)

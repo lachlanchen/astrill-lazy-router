@@ -15,15 +15,16 @@
 [![Policy](https://img.shields.io/badge/Policy-Direct%20%7C%20Astrill-0A7EA4)](docs/RULE_MODEL.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-2F81F7)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/lachlanchen)
+[![Policy workspace](https://img.shields.io/badge/Policy%20workspace-GitHub%20Pages-167552?logo=github)](https://lachlanchen.github.io/astrill-lazy-policies/)
 [![Website](https://img.shields.io/badge/Website-lazying.art-111827?logo=googlechrome&logoColor=white)](https://lazying.art)
 
 </div>
 
-Astrill Lazy Router provides native Ubuntu and Windows control applications
-with an optional small DD-WRT companion. Either frontend can safely inspect an
-already-working native Astrill router without installing anything, or add
-explicit policy routing beside Astrill after write access and companion
-deployment are deliberately enabled.
+Astrill Lazy Router provides native Ubuntu and Windows control applications,
+a portable macOS/Linux restore agent, and an optional small DD-WRT companion.
+Either frontend can safely inspect an already-working native Astrill router
+without installing anything, or add explicit policy routing beside Astrill
+after write access and companion deployment are deliberately enabled.
 
 ![Services view with provider-country filtering and batch policy controls](docs/assets/services-country-batch.png)
 
@@ -36,7 +37,7 @@ deployment are deliberately enabled.
 | Catalog | 261 maintained profiles with search and provider-country, category, and profile-type filters |
 | Batch workflow | Durable checkbox/Ctrl/Command/Shift selection, Select visible, and explicit Suggested, Direct, or Astrill policy creation |
 | Native sync | Bidirectional routing, DNS, endpoint, protocol, port, transport, favorite, and resilience settings |
-| Windows 0.2.13 | Reboot-persistent core, source-scoped RAM overlays, layered status, and one-shot recovery without polling |
+| Cross-platform 0.3.0 | Shared layered policy, hash-bound public bundles, and source-scoped Ubuntu, macOS, and Windows reboot recovery |
 | Native-only audit | Read-only status, settings, endpoints, and LAN clients with no companion or router writes |
 | Router safety | Validated input, separate marks/tables, transactional A/B activation, rollback, and watchdog recovery |
 | Recovery | One action removes every companion-owned object and restores native Astrill-only operation |
@@ -79,7 +80,8 @@ route lookups are intentionally absent until native rules exist again.
 ```mermaid
 flowchart LR
     GUI["Ubuntu GTK 4 or Windows Qt app"] -->|"allowlisted native inspection and settings"| APPLET["Native Astrill applet"]
-    GUI -->|"optional validated policy over key-only SSH"| CTRL["DD-WRT companion"]
+    HOST["macOS/Linux restore agent"] -->|"low-frequency verified restore"| CTRL["DD-WRT companion"]
+    GUI -->|"optional validated policy over key-only SSH"| CTRL
     CATALOG["Data-only service catalog"] --> GUI
     LAN["LAN devices and app identities"] --> CTRL
     CTRL -->|"Direct policy"| WAN["WAN gateway"]
@@ -113,7 +115,7 @@ Rows with an existing policy show its actual route. Other rows show the
 catalog suggestion, so the list retains its intended mixed Direct/Astrill
 view. **Add to Policies** saves the selected rules locally; only a separately
 confirmed core-replacement or RAM-overlay action changes the router.
-With companion `0.2.11`, the Policies view separates five states: the complete
+With companion `0.2.12`, the Policies view separates five states: the complete
 local library, the small reboot-persistent router core, this computer's
 source-scoped RAM overlay, other controllers' overlays, and the composed
 effective policy. Exact origin IDs, generations, and content hashes expose
@@ -241,7 +243,7 @@ per-application WFP backend; see the
 ## Safety model
 
 - The companion never edits Astrill applet files.
-- Companion `0.2.11` removes its recorded lookups before a managed Astrill
+- Companion `0.2.12` removes its recorded lookups before a managed Astrill
   start, waits for the native rules to settle, then allocates and verifies two
   free adjacent preferences immediately ahead of the native minimum. It
   uses recorded preferences when available; if that record is missing, cleanup
@@ -392,8 +394,11 @@ astrill-lazy apply
 astrill-lazy servers
 astrill-lazy refresh
 astrill-lazy rollback
+astrill-lazy preflight-router
 astrill-lazy install-router
 astrill-lazy autostart status
+astrill-lazy agent plan
+astrill-lazy policy-bundle inspect POLICY.json
 astrill-lazy device-policy validate examples/device-policy.sample.json
 ```
 
@@ -406,6 +411,7 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/ruff check desktop tests scripts
 .venv/bin/ruff format --check desktop tests scripts
 PYTHONPATH=desktop python3 scripts/validate-catalog.py
+shellcheck -x -s sh contrib/portable/*.sh router/alpage router/alpage-ui
 ```
 
 Run the GUI on an isolated display without taking focus from the active
@@ -427,7 +433,7 @@ address and teardown command.
 | Router | Linksys E4200 |
 | Firmware | DD-WRT `v3.0-r62374 mega` |
 | Astrill applet | `2.9.52` |
-| Desktop | Ubuntu with GTK 4 and Libadwaita; Windows 11 with native Qt |
+| Desktop | Ubuntu with GTK 4 and Libadwaita; Windows 11 with native Qt; macOS portable agent |
 | Policy engine | IPv4, one active Astrill tunnel |
 | Catalog | 261 profiles, 19 categories, 9 provider-country groups |
 
@@ -450,6 +456,8 @@ firewall behavior, and Astrill integration must be verified independently.
 | [Native-only operation](docs/NATIVE_ONLY.md) | Safe inspection, write guard, second-router evidence, and DD-WRT SSH lessons |
 | [Rule model](docs/RULE_MODEL.md) | Selectors, priorities, compilation, and native composition |
 | [Hybrid policy storage](docs/HYBRID_POLICY_STORAGE.md) | Persistent core, owner-scoped RAM overlays, reboot restoration, capacity limits, and recovery |
+| [Portable restore agent](docs/PORTABLE_AGENT.md) | Source/MAC enrollment, macOS/Linux startup, low-frequency recovery, and upgrades |
+| [Policy distribution](docs/POLICY_DISTRIBUTION.md) | Public workspace, catalog-only schema, exact hashes, import, export, and publication |
 | [Device-local routing](docs/DEVICE_ROUTING.md) | Validated non-enforcing multi-endpoint policy model |
 | [Extensions](docs/EXTENSIONS.md) | Data-only service, country, and region catalogs |
 | [Backup and restore](docs/BACKUP_RESTORE.md) | Encrypted backup boundaries and recovery |

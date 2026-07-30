@@ -2,8 +2,9 @@
 
 ## Status
 
-Companion `0.2.11` and Windows app `0.2.13` implement the hybrid policy model.
-It separates the editable local library from two router layers:
+Companion `0.2.11` and Windows app `0.2.13` introduced the hybrid policy
+model. Companion `0.2.12` and app `0.3.0` share it across Ubuntu, macOS, and
+Windows. It separates the editable local library from two router layers:
 
 - a small global core stored in NVRAM and activated immediately after reboot;
 - controller-owned, source-scoped overlays stored only in router RAM; and
@@ -21,19 +22,18 @@ endpoint. Each overlay applies to one LAN source identity, not one executable.
 
 ## Why Two Router Layers
 
-The Windows library on the verified workstation currently expands as follows:
+The `0.3.0` balanced library on the verified workstation expands as follows:
 
 | Scope | Origins | Compiled rows | ASCII bytes |
 | --- | ---: | ---: | ---: |
-| Complete enabled library | 88 | 316 | 28,686 |
-| UU Remote + Nutstore/Jianguoyun + WeChat core | 3 | 41 | 4,135 |
-| Remaining computer overlay | 85 | 275 | 24,551 |
+| Complete enabled library | 89 | 317 | 27,524 |
+| Device identity + five minimum bypass services | 6 | 68 | 5,959 |
+| Remaining computer overlay | 83 | 249 | 21,589 |
 
 The complete document cannot fit the persistent 6,144-byte contract. The
-three high-value Direct policies do fit and remain useful while every computer
-is offline. The rest can be restored into RAM for only the computer that owns
-them. Adding the overlay source/MAC scope fields produces a 316-row,
-38,455-byte effective runtime document.
+device identity and five high-value Direct policies do fit and remain useful
+while every computer is offline. The rest can be restored into RAM for only
+the computer that owns it.
 
 A read-only E4200 snapshot showed 58,708 KiB total RAM and roughly 6.3 KiB of
 free NVRAM after the earlier companion was installed. Those figures motivated
@@ -44,7 +44,7 @@ matches, rather than TSV bytes alone, are the important runtime cost.
 
 | Layer | Authority | Location | Reboot |
 | --- | --- | --- | --- |
-| Local library | Windows user | App configuration | Survives |
+| Local library | Desktop user | App configuration | Survives |
 | Base companion package | Router installer | Base64 NVRAM chunks | Survives |
 | Bootstrap payload | Router installer | Deterministic gzip/base64 NVRAM value | Survives |
 | Persistent core | Router administrator | Compressed or plain NVRAM rule record | Survives |
@@ -56,14 +56,13 @@ matches, rather than TSV bytes alone, are the important runtime cost.
 The persistent footprint is deliberately limited to the base package, the
 compressed bootstrap payload, and the small core. The normalized bootstrap is
 6,502 bytes; deterministic gzip plus base64 reduces its stored NVRAM value to
-2,560 bytes. The deployed base package is 19,960 bytes, exactly 26,616 base64
-bytes in 15 chunks, with MD5 `3552747bcb9a06a8f6b64dcbb1ce0675`
+2,560 bytes. The `0.2.12` base package is 18,347 bytes, exactly 24,464 base64
+bytes in 14 chunks, with MD5 `62084ec42351966c633697d452ea1629`
 and SHA-256
-`2f0dbbda03af55a54ebf75fa6a06d2f47ffcd071310082544202edac4422a4be`.
-The locked E4200 preflight started with 3,115 bytes free, projected 608 bytes of
-growth and 2,507 bytes free—459 bytes above the 2,048-byte reserve. The
-physical-reboot readback was 2,494 bytes free, a 446-byte margin. Every install
-recomputes the projection from the router's current snapshot.
+`f8bc8ea8ec0231150f8ad6891f061674fadb8899624388211e65a3df08bee897`.
+The final read-only E4200 preflight observed 2,693 bytes free, projected 243
+bytes of growth and 2,450 bytes free, 402 bytes above the 2,048-byte reserve.
+Every install recomputes the projection from the router's current snapshot.
 
 The package stored in NVRAM contains the base `alctl` runtime. The larger
 `alhybrid` extension is shipped by the desktop, atomically uploaded to
@@ -96,7 +95,9 @@ The effective chain is ordered as:
 4. return unmatched traffic to native Astrill behavior.
 
 The core therefore has deliberate global authority. An overlay cannot shadow
-a core origin, and duplicate origin IDs across layers are rejected.
+a core origin, and duplicate origin IDs between the core and an overlay are
+rejected. Different non-overlapping source owners may use the same origin IDs;
+their effective rows remain independently source-bound.
 
 Each overlay has:
 
@@ -123,8 +124,8 @@ router host key remain the controller authentication boundary.
 2. `alctl` decodes and validates the current core.
 3. It builds and activates a core-only A/B chain.
 4. It creates a fresh opaque runtime epoch and runtime generations.
-5. The Windows app checks once at startup, on a relevant Windows network
-   change, before an explicit router write, or on **Refresh router**.
+5. A paired frontend checks at startup or network return. Windows and the
+   portable agent may also use the opted-in 15-minute verification interval.
 6. If automatic restore was explicitly enabled and this controller's expected
    overlay is missing in a new epoch, the app uploads it once.
 7. The app verifies owner, source, MAC, generation, hash, and effective status.
@@ -133,12 +134,13 @@ The last attempted epoch and error are persisted locally. Relaunching the app
 does not repeatedly attack a router that rejected the same restore. Manual
 **Restore RAM overlay now** remains available.
 
-There is no recurring desktop SSH poll. The router's existing local watchdog
-still ensures its own runtime and routes every 60 seconds. It may refresh a
-core-only document about every 30 minutes when no overlay is loaded. Once any
-RAM overlay is active, it does not periodically rebuild that effective policy.
-Overlay construction occurs only for an explicit load, one-shot
-startup/network restoration, or a manual restore/reload.
+The low-frequency verification reads status only and performs no write when
+the layer matches. The router's existing local watchdog still ensures its own
+runtime and routes every 60 seconds. It may refresh a core-only document about
+every 30 minutes when no overlay is loaded. Once any RAM overlay is active, it
+does not periodically rebuild that effective policy. Overlay construction
+occurs only for an explicit load, one restoration in a new runtime, or a
+manual restore/reload.
 
 ## Transactional Commands
 
@@ -245,7 +247,7 @@ empty policy.
 
 ## Admission Limits
 
-Companion `0.2.11` starts with these E4200 bounds:
+Companion `0.2.12` retains these E4200 bounds:
 
 | Limit | Value |
 | --- | ---: |
@@ -253,7 +255,7 @@ Companion `0.2.11` starts with these E4200 bounds:
 | NVRAM reserve after core/package write | 2,048 bytes |
 | One overlay | 32,768 bytes / 320 rows |
 | Overlay owners | 8 |
-| Effective document | 131,072 bytes / 512 rows |
+| Effective document | 131,072 bytes / 640 rows |
 | Generated iptables matches | 1,536 |
 | Minimum reclaimable policy memory | 8,192 KiB |
 | Whole policy transaction | 240 seconds |

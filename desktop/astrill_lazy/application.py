@@ -13,6 +13,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
+from .agent_package import plan_balanced_policy
 from .astrill import (
     ASTRILL_PROTOCOL_NAMES,
     AstrillConnectionSelection,
@@ -33,13 +34,13 @@ from .autostart import (
     is_autostart_enabled,
 )
 from .catalog import Catalog, discover_extensions, load_catalog
-from .compiler import compile_rules
 from .connection_page import AstrillConnectionPage, ConnectionDraft
 from .detector import (
     MINIMUM_BYPASS_SERVICES,
     RouteRecommendation,
     detect_rules,
 )
+from .host_key import trust_host_key
 from .installer import CompanionCheck, EnsureResult, RouterInstaller
 from .latency import (
     EndpointSortField,
@@ -51,6 +52,7 @@ from .launcher import ApplicationLauncher, parse_command
 from .models import MatchKind, Region, RouteTarget, Rule, Service
 from .native_page import NativeSettingsPage
 from .native_settings import NativeAstrillSettings
+from .policy_controller import BalancedDeploymentResult, PolicyController
 from .router import AstrillConnectionResult, RouterClient
 from .service_policy import ServiceRouteMode, service_policy_route
 from .ssh_setup import authorize_router_key, ensure_local_identity
@@ -154,6 +156,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.ssh_setup_error = str(exc)
         self.catalog: Catalog = load_catalog(self.store.enabled_extensions)
         self.router = self._router_client_from_store()
+        self.controller = PolicyController(
+            store=self.store,
+            catalog=self.catalog,
+            router=self.router,
+        )
         self.launcher = ApplicationLauncher()
         self.router_status: dict[str, Any] = {}
         self.astrill_applet_available: bool | None = None
@@ -186,6 +193,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._astrill_install_prompted = False
         self._companion_install_prompted = False
         self._ssh_setup_prompted = False
+        self._network_was_offline = False
+        self._network_recovery_scheduled = False
         self.router_install_buttons: list[Gtk.Button] = []
 
         self._install_css()
@@ -201,6 +210,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_extensions()
         self.native_page.set_read_only(self.store.read_only)
         self.connection_page.set_read_only(self.store.read_only)
+        self._setup_network_recovery_hook()
         self.check_router_environment(quiet=False)
 
     def _install_css(self) -> None:
@@ -786,6 +796,23 @@ class MainWindow(Adw.ApplicationWindow):
         authorize_key.set_valign(Gtk.Align.CENTER)
         self.router_ssh_row.add_suffix(authorize_key)
         connection_list.append(self.router_ssh_row)
+        self.router_host_key_row = Adw.ActionRow(
+            title="Policy identity",
+            subtitle="Pin the router SSH fingerprint before layered policy writes",
+        )
+        self.router_host_key_row.set_use_markup(False)
+        self.router_host_key_icon = Gtk.Image.new_from_icon_name(
+            "dialog-password-symbolic"
+        )
+        self.router_host_key_row.add_prefix(self.router_host_key_icon)
+        trust_key = _button_with_icon(
+            "Inspect",
+            "security-high-symbolic",
+            self.confirm_trust_router_host_key,
+        )
+        trust_key.set_valign(Gtk.Align.CENTER)
+        self.router_host_key_row.add_suffix(trust_key)
+        connection_list.append(self.router_host_key_row)
         content.append(connection_list)
 
         astrill_heading = Gtk.Label(label="Astrill Connection")
@@ -2088,6 +2115,7 @@ class MainWindow(Adw.ApplicationWindow):
             configured.remove(extension_id)
         self.store.save()
         self.catalog = load_catalog(configured)
+        self.controller.catalog = self.catalog
         self.location_filter_regions = [
             Region("all", "All regions", "astrill"),
             *[region for region in self.catalog.regions if region.id != "direct"],
@@ -2475,26 +2503,35 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self.store.save()
         try:
-            compilation = compile_rules(self.store.rules, self.catalog)
+            plan_balanced_policy(self.store, self.catalog)
         except ValueError as exc:
             self.toast(str(exc))
             return
 
-        def success(status: dict[str, Any]) -> None:
-            self.router_status = status
+        def success(result: BalancedDeploymentResult) -> None:
+            self.router_status = result.status
             self.dirty = False
-            self.window_title.set_subtitle("Router policy is up to date")
+            self.window_title.set_subtitle(
+                "Persistent core and this computer's overlay are up to date"
+            )
             self._update_status()
-            if compilation.warnings:
-                self.policy_banner.set_title(" ".join(compilation.warnings))
+            warnings = (
+                *result.plan.core_compilation.warnings,
+                *result.plan.overlay_compilation.warnings,
+            )
+            if warnings:
+                self.policy_banner.set_title(" ".join(warnings))
                 self.policy_banner.set_revealed(True)
             else:
-                self.toast(f"Applied {status.get('origin_count', 0)} policy groups")
+                self.toast(
+                    f"Core {result.core_action}; computer overlay "
+                    f"{result.overlay_action}"
+                )
 
         self._run_task(
-            lambda: self.router.apply_rules(compilation.to_tsv()),
+            self.controller.deploy_balanced_policy,
             success,
-            "Could not apply router policy",
+            "Could not deploy layered router policy",
         )
 
     def detect_routes(self, _button: Gtk.Button | None = None) -> None:
@@ -2617,7 +2654,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def refresh_router(self) -> None:
         work = (
-            self.router.status
+            self.controller.reconcile_status
             if self.store.companion_enabled
             else self.router.native_astrill_status
         )
@@ -2627,6 +2664,34 @@ class MainWindow(Adw.ApplicationWindow):
             "Could not reach the router",
             quiet=True,
         )
+
+    def _setup_network_recovery_hook(self) -> None:
+        monitor = Gio.NetworkMonitor.get_default()
+        self._network_monitor = monitor
+        self._network_was_offline = not monitor.get_network_available()
+        monitor.connect("network-changed", self._network_changed)
+
+    def _network_changed(
+        self,
+        _monitor: Gio.NetworkMonitor,
+        available: bool,
+    ) -> None:
+        if not available:
+            self._network_was_offline = True
+            self._network_recovery_scheduled = False
+            return
+        if not self._network_was_offline or self._network_recovery_scheduled:
+            return
+        self._network_was_offline = False
+        self._network_recovery_scheduled = True
+        GLib.timeout_add(1500, self._run_network_recovery)
+
+    def _run_network_recovery(self) -> bool:
+        if self.busy_count:
+            return GLib.SOURCE_CONTINUE
+        self._network_recovery_scheduled = False
+        self.refresh_router()
+        return GLib.SOURCE_REMOVE
 
     def refresh_native_settings(
         self,
@@ -2881,12 +2946,20 @@ class MainWindow(Adw.ApplicationWindow):
     def _router_client_from_store(self) -> RouterClient:
         if self.store.router_use_ssh_config:
             return RouterClient(self.store.router_host)
+        known_hosts = self.store.path.with_name("known_hosts")
+        strict = known_hosts.is_file()
         return RouterClient(
             self.store.router_host,
             user=self.store.router_user,
             port=self.store.router_port,
             identity_file=self.store.router_identity,
+            host_key_policy="yes" if strict else "accept-new",
+            known_hosts_file=known_hosts if strict else None,
         )
+
+    def _set_router_client(self, router: RouterClient) -> None:
+        self.router = router
+        self.controller.router = router
 
     def _save_router_connection(self, _button: Gtk.Button | None = None) -> None:
         if not self._apply_router_connection_fields():
@@ -2918,7 +2991,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.router_identity = identity
         self.store.router_use_ssh_config = False
         self.store.save()
-        self.router = self._router_client_from_store()
+        self._set_router_client(self._router_client_from_store())
         self.router_ssh_icon.set_from_icon_name("content-loading-symbolic")
         self.router_ssh_row.set_subtitle("Checking key-only SSH")
         return True
@@ -2973,6 +3046,77 @@ class MainWindow(Adw.ApplicationWindow):
         self._ssh_setup_prompted = True
         self.check_router_environment(quiet=False)
 
+    def confirm_trust_router_host_key(
+        self,
+        _button: Gtk.Button | None = None,
+    ) -> None:
+        if not self._apply_router_connection_fields():
+            return
+
+        def inspected(host_key: Any) -> None:
+            fingerprint = str(host_key.fingerprint)
+            state = str(host_key.trust_state)
+            if state == "trusted":
+                self._set_router_client(self.controller.bind_trusted_router(host_key))
+                self.router_host_key_icon.set_from_icon_name("object-select-symbolic")
+                self.router_host_key_row.set_subtitle(
+                    f"Trusted {host_key.key_type} · {fingerprint}"
+                )
+                self.toast("Router SSH fingerprint is already trusted")
+                return
+            if state == "changed":
+                self.router_host_key_icon.set_from_icon_name("network-error-symbolic")
+                self.router_host_key_row.set_subtitle(
+                    "Saved key conflicts with the router; no key was changed"
+                )
+                self.toast(
+                    "Router SSH key changed. Verify the router before removing "
+                    "the prior known_hosts entry."
+                )
+                return
+            dialog = Adw.MessageDialog.new(
+                self,
+                "Trust this router SSH fingerprint?",
+                f"Host: {host_key.host}:{host_key.port}\n"
+                f"Key: {host_key.key_type}\n"
+                f"Fingerprint: {fingerprint}\n\n"
+                "Layered policy manifests will be bound to this exact key.",
+            )
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("trust", "Trust Fingerprint")
+            dialog.set_response_appearance(
+                "trust",
+                Adw.ResponseAppearance.SUGGESTED,
+            )
+            dialog.set_default_response("cancel")
+            dialog.set_close_response("cancel")
+
+            def response(_dialog: Adw.MessageDialog, response_id: str) -> None:
+                if response_id != "trust":
+                    return
+                self._run_task(
+                    lambda: trust_host_key(host_key),
+                    trusted,
+                    "Could not trust router SSH fingerprint",
+                )
+
+            dialog.connect("response", response)
+            dialog.present()
+
+        def trusted(host_key: Any) -> None:
+            self._set_router_client(self.controller.bind_trusted_router(host_key))
+            self.router_host_key_icon.set_from_icon_name("object-select-symbolic")
+            self.router_host_key_row.set_subtitle(
+                f"Trusted {host_key.key_type} · {host_key.fingerprint}"
+            )
+            self.toast("Router SSH fingerprint trusted")
+
+        self._run_task(
+            self.controller.inspect_router_host_key,
+            inspected,
+            "Could not inspect router SSH fingerprint",
+        )
+
     def check_router_environment(self, *, quiet: bool = True) -> None:
         def check() -> tuple[
             dict[str, Any],
@@ -2984,6 +3128,19 @@ class MainWindow(Adw.ApplicationWindow):
                 presence=snapshot.companion_presence,
                 status=snapshot.companion_status,
             )
+            if self.store.companion_enabled and companion.action == "none":
+                reconciled = self.controller.reconcile_status(
+                    presence=snapshot.companion_presence,
+                    companion_status=snapshot.companion_status,
+                    native_status=snapshot.native_status,
+                )
+                companion = CompanionCheck(
+                    action=companion.action,
+                    expected_version=companion.expected_version,
+                    installed_version=companion.installed_version,
+                    status=reconciled,
+                    reason=companion.reason,
+                )
             return snapshot.native_status, companion, snapshot.settings
 
         self._run_task(
@@ -3347,10 +3504,9 @@ class MainWindow(Adw.ApplicationWindow):
         def prepare_apply_launch() -> tuple[str, dict[str, Any]]:
             address = self.launcher.prepare(rule)
             self.store.save()
-            compilation = compile_rules(self.store.rules, self.catalog)
-            status = self.router.apply_rules(compilation.to_tsv())
+            deployment = self.controller.deploy_balanced_policy()
             self.launcher.launch(rule)
-            return address, status
+            return address, deployment.status
 
         def success(result: tuple[str, dict[str, Any]]) -> None:
             address, status = result

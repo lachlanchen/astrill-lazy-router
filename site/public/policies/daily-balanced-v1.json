@@ -1,0 +1,713 @@
+{
+  "bundle_id": "daily-balanced",
+  "catalog": "core-catalog",
+  "description": "Balanced daily routing: China-facing services use Direct while selected global services use the maintained Astrill region preference.",
+  "rules": [
+    {
+      "enabled": true,
+      "origin_id": "uu-remote-direct",
+      "priority": 100,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "uu-remote"
+    },
+    {
+      "enabled": true,
+      "origin_id": "wechat-direct",
+      "priority": 110,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "wechat"
+    },
+    {
+      "enabled": true,
+      "origin_id": "taobao-direct",
+      "priority": 120,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "taobao"
+    },
+    {
+      "enabled": true,
+      "origin_id": "meituan-direct",
+      "priority": 130,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "meituan"
+    },
+    {
+      "enabled": true,
+      "origin_id": "nutstore-direct",
+      "priority": 115,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "nutstore"
+    },
+    {
+      "enabled": true,
+      "origin_id": "alibaba-group-218b28de",
+      "priority": 230,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "alibaba"
+    },
+    {
+      "enabled": true,
+      "origin_id": "tencent-874db998",
+      "priority": 330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "tencent"
+    },
+    {
+      "enabled": true,
+      "origin_id": "bytedance-445a765c",
+      "priority": 430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "bytedance"
+    },
+    {
+      "enabled": true,
+      "origin_id": "baidu-e88afdab",
+      "priority": 530,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "baidu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "netease-aaffb29a",
+      "priority": 630,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "netease"
+    },
+    {
+      "enabled": true,
+      "origin_id": "xiaomi-51444e0d",
+      "priority": 730,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "xiaomi"
+    },
+    {
+      "enabled": true,
+      "origin_id": "qq-5c73b0f5",
+      "priority": 830,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "qq"
+    },
+    {
+      "enabled": true,
+      "origin_id": "wecom-82e9468d",
+      "priority": 930,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "wecom"
+    },
+    {
+      "enabled": true,
+      "origin_id": "xiaohongshu-820eb959",
+      "priority": 1030,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "xiaohongshu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "douyin-34e6e77f",
+      "priority": 1130,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "douyin"
+    },
+    {
+      "enabled": true,
+      "origin_id": "tiktok-7a703d88",
+      "priority": 1230,
+      "region": "singapore",
+      "route": "vpn",
+      "service_id": "tiktok"
+    },
+    {
+      "enabled": true,
+      "origin_id": "bilibili-a0ea71ef",
+      "priority": 1330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "bilibili"
+    },
+    {
+      "enabled": true,
+      "origin_id": "sohu-3112caae",
+      "priority": 1430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "sohu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "sina-d59e7f30",
+      "priority": 1530,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "sina"
+    },
+    {
+      "enabled": true,
+      "origin_id": "xiaoyunque-0a4521ba",
+      "priority": 1630,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "xiaoyunque"
+    },
+    {
+      "enabled": true,
+      "origin_id": "deepseek-d82482f3",
+      "priority": 1730,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "deepseek"
+    },
+    {
+      "enabled": true,
+      "origin_id": "doubao-4093ba78",
+      "priority": 1830,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "doubao"
+    },
+    {
+      "enabled": true,
+      "origin_id": "qwen-499617fd",
+      "priority": 1930,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "qwen"
+    },
+    {
+      "enabled": true,
+      "origin_id": "wenxin-03b97e1c",
+      "priority": 2030,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "wenxin"
+    },
+    {
+      "enabled": true,
+      "origin_id": "tencent-yuanbao-580cfff8",
+      "priority": 2130,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "yuanbao"
+    },
+    {
+      "enabled": true,
+      "origin_id": "kimi-c299b5f7",
+      "priority": 2230,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "kimi"
+    },
+    {
+      "enabled": true,
+      "origin_id": "zhipu-qingyan-01e2e905",
+      "priority": 2330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "zhipu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "hailuo-ai-6be89fc0",
+      "priority": 2430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "hailuo"
+    },
+    {
+      "enabled": true,
+      "origin_id": "kling-ai-83ac4845",
+      "priority": 2530,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "kling"
+    },
+    {
+      "enabled": true,
+      "origin_id": "iflytek-spark-1dadfd11",
+      "priority": 2630,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "iflytek-spark"
+    },
+    {
+      "enabled": true,
+      "origin_id": "coze-1178d0aa",
+      "priority": 2730,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "coze"
+    },
+    {
+      "enabled": true,
+      "origin_id": "baichuan-ai-f73b08e9",
+      "priority": 2830,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "baichuan"
+    },
+    {
+      "enabled": true,
+      "origin_id": "tiangong-ai-22ae4766",
+      "priority": 2930,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "tiangong"
+    },
+    {
+      "enabled": true,
+      "origin_id": "temu-0680a4ee",
+      "priority": 3030,
+      "region": "united-states",
+      "route": "vpn",
+      "service_id": "temu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "aliexpress-eb41498d",
+      "priority": 3130,
+      "region": "singapore",
+      "route": "vpn",
+      "service_id": "aliexpress"
+    },
+    {
+      "enabled": true,
+      "origin_id": "weibo-8428db5a",
+      "priority": 3230,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "weibo"
+    },
+    {
+      "enabled": true,
+      "origin_id": "zhihu-8221ba06",
+      "priority": 3330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "zhihu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "douban-85f972ed",
+      "priority": 3430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "douban"
+    },
+    {
+      "enabled": true,
+      "origin_id": "baidu-tieba-029d52dc",
+      "priority": 3530,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "baidu-tieba"
+    },
+    {
+      "enabled": true,
+      "origin_id": "toutiao-369ab518",
+      "priority": 3630,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "toutiao"
+    },
+    {
+      "enabled": true,
+      "origin_id": "kuaishou-2c52dc8f",
+      "priority": 3730,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "kuaishou"
+    },
+    {
+      "enabled": true,
+      "origin_id": "iqiyi-43cf563d",
+      "priority": 3830,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "iqiyi"
+    },
+    {
+      "enabled": true,
+      "origin_id": "tencent-video-ea7f1d4c",
+      "priority": 3930,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "tencent-video"
+    },
+    {
+      "enabled": true,
+      "origin_id": "youku-4fb2e820",
+      "priority": 4030,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "youku"
+    },
+    {
+      "enabled": true,
+      "origin_id": "mango-tv-784182c0",
+      "priority": 4130,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "mango-tv"
+    },
+    {
+      "enabled": true,
+      "origin_id": "xigua-video-99e42100",
+      "priority": 4230,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "xigua-video"
+    },
+    {
+      "enabled": true,
+      "origin_id": "huya-f8ce319f",
+      "priority": 4330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "huya"
+    },
+    {
+      "enabled": true,
+      "origin_id": "douyu-dd19c15e",
+      "priority": 4430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "douyu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "sohu-video-494338ef",
+      "priority": 4530,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "sohu-video"
+    },
+    {
+      "enabled": true,
+      "origin_id": "qq-music-d28be66a",
+      "priority": 4630,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "qq-music"
+    },
+    {
+      "enabled": true,
+      "origin_id": "netease-cloud-music-febcb063",
+      "priority": 4730,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "netease-cloud-music"
+    },
+    {
+      "enabled": true,
+      "origin_id": "kugou-music-86d8ba31",
+      "priority": 4830,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "kugou"
+    },
+    {
+      "enabled": true,
+      "origin_id": "kuwo-music-95ba1617",
+      "priority": 4930,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "kuwo"
+    },
+    {
+      "enabled": true,
+      "origin_id": "jd-com-f5ef703d",
+      "priority": 5030,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "jd"
+    },
+    {
+      "enabled": true,
+      "origin_id": "pinduoduo-18df0954",
+      "priority": 5130,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "pinduoduo"
+    },
+    {
+      "enabled": true,
+      "origin_id": "xianyu-471b4193",
+      "priority": 5230,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "xianyu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "vipshop-113ea84e",
+      "priority": 5330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "vipshop"
+    },
+    {
+      "enabled": true,
+      "origin_id": "suning-21075a6d",
+      "priority": 5430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "suning"
+    },
+    {
+      "enabled": true,
+      "origin_id": "alipay-3c839c9c",
+      "priority": 5530,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "alipay"
+    },
+    {
+      "enabled": true,
+      "origin_id": "ele-me-378da2bc",
+      "priority": 5630,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "eleme"
+    },
+    {
+      "enabled": true,
+      "origin_id": "didi-8904ac78",
+      "priority": 5730,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "didi"
+    },
+    {
+      "enabled": true,
+      "origin_id": "ctrip-trip-com-15ed0a22",
+      "priority": 5830,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "ctrip"
+    },
+    {
+      "enabled": true,
+      "origin_id": "qunar-e6b601f1",
+      "priority": 5930,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "qunar"
+    },
+    {
+      "enabled": true,
+      "origin_id": "fliggy-ad9ab8ee",
+      "priority": 6030,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "fliggy"
+    },
+    {
+      "enabled": true,
+      "origin_id": "amap-4143fccf",
+      "priority": 6130,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "amap"
+    },
+    {
+      "enabled": true,
+      "origin_id": "baidu-maps-5e4d4d72",
+      "priority": 6230,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "baidu-maps"
+    },
+    {
+      "enabled": true,
+      "origin_id": "china-railway-12306-087dca49",
+      "priority": 6330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "railway-12306"
+    },
+    {
+      "enabled": true,
+      "origin_id": "cainiao-8bd9ad2b",
+      "priority": 6430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "cainiao"
+    },
+    {
+      "enabled": true,
+      "origin_id": "sf-express-785cc43f",
+      "priority": 6530,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "sf-express"
+    },
+    {
+      "enabled": true,
+      "origin_id": "dingtalk-585f9cf3",
+      "priority": 6630,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "dingtalk"
+    },
+    {
+      "enabled": true,
+      "origin_id": "feishu-231e9737",
+      "priority": 6730,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "feishu"
+    },
+    {
+      "enabled": true,
+      "origin_id": "lark-5f5c7267",
+      "priority": 6830,
+      "region": "singapore",
+      "route": "vpn",
+      "service_id": "lark"
+    },
+    {
+      "enabled": true,
+      "origin_id": "wps-office-4381b7dd",
+      "priority": 6930,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "wps"
+    },
+    {
+      "enabled": true,
+      "origin_id": "tencent-meeting-3871c759",
+      "priority": 7030,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "tencent-meeting"
+    },
+    {
+      "enabled": true,
+      "origin_id": "baidu-netdisk-2dff2911",
+      "priority": 7130,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "baidu-netdisk"
+    },
+    {
+      "enabled": true,
+      "origin_id": "aliyun-drive-ada00bf9",
+      "priority": 7230,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "aliyun-drive"
+    },
+    {
+      "enabled": true,
+      "origin_id": "tencent-weiyun-961dcc55",
+      "priority": 7330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "weiyun"
+    },
+    {
+      "enabled": true,
+      "origin_id": "quark-cloud-drive-789aae4b",
+      "priority": 7430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "quark-cloud"
+    },
+    {
+      "enabled": true,
+      "origin_id": "sunlogin-d48c48fb",
+      "priority": 7530,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "sunlogin"
+    },
+    {
+      "enabled": true,
+      "origin_id": "todesk-9e217496",
+      "priority": 7630,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "todesk"
+    },
+    {
+      "enabled": true,
+      "origin_id": "tencent-games-7280c852",
+      "priority": 7730,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "tencent-games"
+    },
+    {
+      "enabled": true,
+      "origin_id": "netease-games-9c3c40e3",
+      "priority": 7830,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "netease-games"
+    },
+    {
+      "enabled": true,
+      "origin_id": "mihoyo-59b5a252",
+      "priority": 7930,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "mihoyo"
+    },
+    {
+      "enabled": true,
+      "origin_id": "hoyoverse-a89d488b",
+      "priority": 8030,
+      "region": "singapore",
+      "route": "vpn",
+      "service_id": "hoyoverse"
+    },
+    {
+      "enabled": true,
+      "origin_id": "taptap-15f7af1a",
+      "priority": 8130,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "taptap"
+    },
+    {
+      "enabled": true,
+      "origin_id": "sogou-57e349bf",
+      "priority": 8230,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "sogou"
+    },
+    {
+      "enabled": true,
+      "origin_id": "360-search-777d947c",
+      "priority": 8330,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "so360"
+    },
+    {
+      "enabled": true,
+      "origin_id": "uc-browser-1c4578a3",
+      "priority": 8430,
+      "region": "direct",
+      "route": "direct",
+      "service_id": "uc-browser"
+    }
+  ],
+  "schema_version": 1,
+  "version": "1.0.0"
+}

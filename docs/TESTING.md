@@ -11,8 +11,9 @@ Run from the repository:
 .venv/bin/python scripts/validate-catalog.py --dns
 shellcheck -x -s sh \
   scripts/*.sh helpers/astrill-lazy-netns helpers/astrill-lazy-profile-runner \
-  contrib/macos/*.sh \
-  router/alctl router/alapi router/alpage router/bootstrap.sh
+  contrib/macos/*.sh contrib/portable/*.sh \
+  router/alapi router/alpage router/alpage-ui router/bootstrap.sh
+shellcheck -e SC1090,SC2034,SC2015 -x -s sh router/alctl router/alhybrid
 desktop-file-validate data/*.desktop
 appstreamcli validate --no-net data/*.metainfo.xml
 ```
@@ -20,15 +21,15 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-433 tests passed, 5 skipped
+381 tests passed, 6 skipped
 Ruff lint and format: all checks passed
 Catalog: 261 profiles, 19 categories, 731 seeds / 652 unique
 ```
 
-The release pytest result was produced by the full Windows build virtual
-environment with `python -m pytest`. Two skips are Ubuntu-only provider tests;
-three parameterized integrity-probe cases require a `sh` executable on
-`PATH`. The router shell suites used Git's detected POSIX shell and passed.
+The Ubuntu release result uses Python 3.12. Its six skips are native Qt view
+suites because PySide6 is not installed in the GTK development environment.
+Those views retain their separate Windows build coverage. The router and
+portable shell suites passed with the local POSIX shell and ShellCheck.
 
 Tests cover:
 
@@ -87,7 +88,7 @@ Tests cover:
   and native/companion transactional controller paths;
 - seven-section Windows Astrill rendering, complete safe-key coverage, and
   section changes that preserve draft/dirty state;
-- companion `0.2.11` executable coverage for post-connect allocation,
+- companion `0.2.12` executable coverage for post-connect allocation,
   no-ratchet undercut handling, persistent table `212` blackhole fallback,
   exact owned-rule cleanup, bounded transient application source-port routes,
   upgrade-lock recovery, degraded-state reporting, corrupt-core recovery,
@@ -106,6 +107,15 @@ Tests cover:
   three-slot limits, Auto path health scoring, hold and hysteresis behavior,
   fallback safety, duplicate-key rejection, and country-prefix collapsing;
 - long-running router refresh timeouts and clean timeout errors.
+- catalog-only policy bundle schema, exact-hash apply, atomic replace/merge,
+  omission of private selectors, deterministic export, and HTTPS boundaries;
+- balanced persistent-core/RAM-overlay planning, token-free self-contained
+  agent packaging, sanitized provenance, and shared Ubuntu controller actions;
+- Python 3.9 portable-agent parsing, pinned-host/package/helper validation,
+  explicit source/MAC enrollment, one-attempt-per-epoch restoration, and
+  conservative owner-drift refusal;
+- public policy-site catalog parity, release SHA-256/byte metadata, sensitive
+  material scans, and hash-required bootstrap command;
 
 ## Live Router Verification
 

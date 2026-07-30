@@ -174,10 +174,8 @@ def test_installer_exposes_all_deployment_fingerprints() -> None:
     assert "md5sum" in STARTUP_LINE
     assert "uudecode -o -" in STARTUP_LINE
     assert "gzip -dc" in STARTUP_LINE
-    assert 'ASTRILL_LAZY_BOOTSTRAP_MD5="$astrill_lazy_bootstrap_digest"' in (
-        STARTUP_LINE
-    )
-    assert '/bin/sh -c "$astrill_lazy_bootstrap_script"' in STARTUP_LINE
+    assert 'ASTRILL_LAZY_BOOTSTRAP_MD5="$d" /bin/sh' in STARTUP_LINE
+    assert "printf '%s\\n' \"$b\"|md5sum" in STARTUP_LINE
 
 
 def test_hybrid_helper_deployment_is_bound_to_package_identity() -> None:

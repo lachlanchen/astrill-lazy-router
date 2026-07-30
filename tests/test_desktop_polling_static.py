@@ -10,10 +10,11 @@ UBUNTU_UI = (PROJECT_ROOT / "desktop" / "astrill_lazy" / "application.py").read_
 )
 
 
-def test_windows_desktop_has_no_recurring_router_status_timer() -> None:
+def test_windows_desktop_has_no_high_frequency_router_status_timer() -> None:
     assert "setInterval(60_000)" not in WINDOWS_UI
     assert "self.monitor.start()" not in WINDOWS_UI
-    assert "Status is not polled automatically." in WINDOWS_UI
+    assert "POLICY_VERIFY_INTERVAL_MS = 900_000" in WINDOWS_UI
+    assert "deployment.restore_overlay_after_reboot" in WINDOWS_UI
 
 
 def test_ubuntu_desktop_has_no_recurring_router_status_timer() -> None:

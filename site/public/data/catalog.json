@@ -1,0 +1,4685 @@
+{
+  "catalog": "core-catalog",
+  "schema_version": 1,
+  "services": [
+    {
+      "aliases": [
+        "UU Yuancheng",
+        "NetEase UU Remote"
+      ],
+      "category": "Remote access",
+      "company": "NetEase",
+      "default_route": "direct",
+      "domains": [
+        "uuyc.163.com",
+        "uuyc.webapp.163.com",
+        "api.nrd.nie.163.com",
+        "api-dcdn.nrd.nie.163.com",
+        "api-event.nrd.nie.163.com",
+        "api-ipv4.nrd.nie.163.com",
+        "sig-3303-d.nrd.nie.163.com",
+        "sig-dcdn-3303-d.nrd.nie.163.com",
+        "relay-mg-3303-d.nrd.nie.163.com",
+        "online-logger.webapp.163.com",
+        "fp.ps.netease.com",
+        "nrd-file.fp.ps.netease.com",
+        "nrd-ugc.fp.ps.netease.com",
+        "a56.gdl.netease.com",
+        "sentry.netease.com"
+      ],
+      "id": "uu-remote",
+      "name": "UU Remote",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Facebook",
+        "Instagram",
+        "Messenger",
+        "WhatsApp",
+        "Threads"
+      ],
+      "category": "Social",
+      "company": "Meta",
+      "default_route": "vpn",
+      "domains": [
+        "meta.com",
+        "facebook.com",
+        "fbcdn.net",
+        "messenger.com",
+        "instagram.com",
+        "whatsapp.com",
+        "whatsapp.net",
+        "threads.net"
+      ],
+      "id": "meta",
+      "name": "Meta",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Google Search",
+        "Google Workspace",
+        "Alphabet"
+      ],
+      "category": "Web",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "google.com",
+        "googleapis.com",
+        "gstatic.com",
+        "googleusercontent.com",
+        "googlevideo.com"
+      ],
+      "id": "google",
+      "name": "Google",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "iCloud",
+        "App Store",
+        "Apple ID"
+      ],
+      "category": "Cloud",
+      "company": "Apple",
+      "default_route": "direct",
+      "domains": [
+        "apple.com",
+        "icloud.com",
+        "icloud-content.com",
+        "mzstatic.com",
+        "apple-cloudkit.com"
+      ],
+      "id": "apple",
+      "name": "Apple",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Microsoft 365",
+        "Office",
+        "Windows",
+        "OneDrive",
+        "Teams"
+      ],
+      "category": "Work",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "microsoft.com",
+        "live.com",
+        "office.com",
+        "windows.net"
+      ],
+      "id": "microsoft",
+      "name": "Microsoft",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "AWS",
+        "Prime Video",
+        "Amazon Music"
+      ],
+      "category": "Commerce",
+      "company": "Amazon",
+      "default_route": "vpn",
+      "domains": [
+        "amazon.com",
+        "amazonaws.com",
+        "amazonvideo.com"
+      ],
+      "id": "amazon",
+      "name": "Amazon",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Aliyun",
+        "Alipay",
+        "Taobao",
+        "Tmall"
+      ],
+      "category": "Commerce",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "alibabagroup.com",
+        "alibaba.com",
+        "alibabacloud.com",
+        "aliyun.com",
+        "alipay.com",
+        "alicdn.com",
+        "alibabausercontent.com"
+      ],
+      "id": "alibaba",
+      "name": "Alibaba Group",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Tencent Cloud",
+        "WeChat",
+        "QQ"
+      ],
+      "category": "Cloud",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "tencent.com",
+        "qcloud.com",
+        "qq.com",
+        "qpic.cn"
+      ],
+      "id": "tencent",
+      "name": "Tencent",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Douyin",
+        "TikTok",
+        "Volcengine"
+      ],
+      "category": "Cloud",
+      "company": "ByteDance",
+      "default_route": "direct",
+      "domains": [
+        "bytedance.com",
+        "bytecdn.cn",
+        "volcengine.com",
+        "snssdk.com"
+      ],
+      "id": "bytedance",
+      "name": "ByteDance",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Baidu Search",
+        "Baidu Cloud"
+      ],
+      "category": "Web",
+      "company": "Baidu",
+      "default_route": "direct",
+      "domains": [
+        "baidu.com",
+        "baidu.cn",
+        "bdimg.com",
+        "bdstatic.com",
+        "baidupcs.com"
+      ],
+      "id": "baidu",
+      "name": "Baidu",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "163",
+        "NetEase Games",
+        "NetEase Cloud Music"
+      ],
+      "category": "Web",
+      "company": "NetEase",
+      "default_route": "direct",
+      "domains": [
+        "163.com",
+        "126.com",
+        "127.net",
+        "163yun.com",
+        "netease.com"
+      ],
+      "id": "netease",
+      "name": "NetEase",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Mi",
+        "MIUI",
+        "Mijia"
+      ],
+      "category": "Cloud",
+      "company": "Xiaomi",
+      "default_route": "direct",
+      "domains": [
+        "mi.com",
+        "xiaomi.com",
+        "miui.com"
+      ],
+      "id": "xiaomi",
+      "name": "Xiaomi",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "IG"
+      ],
+      "category": "Social",
+      "company": "Meta",
+      "default_route": "vpn",
+      "domains": [
+        "instagram.com",
+        "ig.me"
+      ],
+      "id": "instagram",
+      "name": "Instagram",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Twitter"
+      ],
+      "category": "Social",
+      "company": "X Corp.",
+      "default_route": "vpn",
+      "domains": [
+        "x.com",
+        "twitter.com",
+        "t.co"
+      ],
+      "id": "x",
+      "name": "X",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "YT"
+      ],
+      "category": "Video",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "youtube.com",
+        "youtu.be",
+        "googlevideo.com",
+        "youtube-nocookie.com"
+      ],
+      "id": "youtube",
+      "name": "YouTube",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Taobao",
+        "Tmall"
+      ],
+      "category": "Commerce",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "taobao.com",
+        "www.taobao.com",
+        "m.taobao.com",
+        "h5.m.taobao.com",
+        "acs.m.taobao.com",
+        "login.taobao.com",
+        "tmall.com",
+        "www.tmall.com",
+        "tbcdn.cn",
+        "alicdn.com",
+        "gw.alicdn.com",
+        "img.alicdn.com",
+        "g.alicdn.com"
+      ],
+      "id": "taobao",
+      "name": "Taobao & Tmall",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Weixin",
+        "WeChat Pay"
+      ],
+      "category": "Messaging",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "wechat.com",
+        "www.wechat.com",
+        "weixin.com",
+        "weixin.qq.com",
+        "wx.qq.com",
+        "res.wx.qq.com",
+        "login.weixin.qq.com",
+        "long.weixin.qq.com",
+        "short.weixin.qq.com",
+        "szshort.weixin.qq.com",
+        "extshort.weixin.qq.com",
+        "weixin110.qq.com",
+        "qpic.cn",
+        "wx.qlogo.cn"
+      ],
+      "id": "wechat",
+      "name": "WeChat",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Qzone"
+      ],
+      "category": "Messaging",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "qq.com",
+        "qzone.qq.com",
+        "qpic.cn"
+      ],
+      "id": "qq",
+      "name": "QQ",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "WeChat Work",
+        "Enterprise WeChat"
+      ],
+      "category": "Work",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "work.weixin.qq.com",
+        "wecom.work"
+      ],
+      "id": "wecom",
+      "name": "WeCom",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Dianping",
+        "Maoyan"
+      ],
+      "category": "Local services",
+      "company": "Meituan",
+      "default_route": "direct",
+      "domains": [
+        "meituan.com",
+        "www.meituan.com",
+        "i.meituan.com",
+        "api.meituan.com",
+        "passport.meituan.com",
+        "meituan.net",
+        "p0.meituan.net",
+        "p1.meituan.net",
+        "dianping.com",
+        "www.dianping.com",
+        "m.dianping.com",
+        "sankuai.com",
+        "maoyan.com"
+      ],
+      "id": "meituan",
+      "name": "Meituan & Dianping",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "RED",
+        "Little Red Book",
+        "XHS"
+      ],
+      "category": "Social",
+      "company": "Xingin",
+      "default_route": "direct",
+      "domains": [
+        "xiaohongshu.com",
+        "xhscdn.com"
+      ],
+      "id": "xiaohongshu",
+      "name": "Xiaohongshu",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Chinese TikTok"
+      ],
+      "category": "Video",
+      "company": "ByteDance",
+      "default_route": "direct",
+      "domains": [
+        "douyin.com",
+        "amemv.com",
+        "snssdk.com"
+      ],
+      "id": "douyin",
+      "name": "Douyin",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [],
+      "category": "Video",
+      "company": "ByteDance",
+      "default_route": "vpn",
+      "domains": [
+        "tiktok.com",
+        "tiktokv.com"
+      ],
+      "id": "tiktok",
+      "name": "TikTok",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "B Site"
+      ],
+      "category": "Video",
+      "company": "Bilibili",
+      "default_route": "direct",
+      "domains": [
+        "bilibili.com",
+        "biligame.com"
+      ],
+      "id": "bilibili",
+      "name": "Bilibili",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Sogou",
+        "Sohu News"
+      ],
+      "category": "News",
+      "company": "Sohu",
+      "default_route": "direct",
+      "domains": [
+        "sohu.com",
+        "sohucs.com",
+        "sogou.com",
+        "itc.cn"
+      ],
+      "id": "sohu",
+      "name": "Sohu",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Yahoo Mail",
+        "Yahoo Finance"
+      ],
+      "category": "Web",
+      "company": "Yahoo",
+      "default_route": "vpn",
+      "domains": [
+        "yahoo.com",
+        "yimg.com"
+      ],
+      "id": "yahoo",
+      "name": "Yahoo",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Sina News",
+        "Weibo"
+      ],
+      "category": "News",
+      "company": "Sina",
+      "default_route": "direct",
+      "domains": [
+        "sina.com.cn",
+        "sina.cn",
+        "sinaimg.cn",
+        "weibo.com",
+        "weibocdn.com"
+      ],
+      "id": "sina",
+      "name": "Sina",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Pippit",
+        "Little Skylark"
+      ],
+      "category": "AI",
+      "company": "ByteDance",
+      "default_route": "direct",
+      "domains": [
+        "xyq.jianying.com",
+        "jianying.com",
+        "pippit.ai",
+        "capcut.com"
+      ],
+      "id": "xiaoyunque",
+      "name": "Xiaoyunque",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "OpenAI API",
+        "GPT"
+      ],
+      "category": "AI",
+      "company": "OpenAI",
+      "default_route": "vpn",
+      "domains": [
+        "openai.com",
+        "oaistatic.com",
+        "oaistatsig.com"
+      ],
+      "id": "openai",
+      "name": "OpenAI",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "GPT",
+        "Chat GPT"
+      ],
+      "category": "AI",
+      "company": "OpenAI",
+      "default_route": "vpn",
+      "domains": [
+        "chatgpt.com",
+        "chat.com",
+        "openai.com",
+        "oaistatic.com"
+      ],
+      "id": "chatgpt",
+      "name": "ChatGPT",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "OpenAI Sora"
+      ],
+      "category": "AI",
+      "company": "OpenAI",
+      "default_route": "vpn",
+      "domains": [
+        "sora.com",
+        "openai.com",
+        "oaistatic.com"
+      ],
+      "id": "sora",
+      "name": "Sora",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Anthropic",
+        "Claude Code"
+      ],
+      "category": "AI",
+      "company": "Anthropic",
+      "default_route": "vpn",
+      "domains": [
+        "claude.ai",
+        "claude.com",
+        "anthropic.com",
+        "clau.de"
+      ],
+      "id": "claude",
+      "name": "Claude",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Google Gemini",
+        "Google AI"
+      ],
+      "category": "AI",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "gemini.google.com",
+        "deepmind.google",
+        "googleapis.com",
+        "gstatic.com",
+        "googleusercontent.com"
+      ],
+      "id": "gemini",
+      "name": "Gemini",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Copilot",
+        "Bing Copilot"
+      ],
+      "category": "AI",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "copilot.microsoft.com",
+        "copilot.com",
+        "bing.com",
+        "microsoft.com"
+      ],
+      "id": "copilot",
+      "name": "Microsoft Copilot",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Copilot Coding"
+      ],
+      "category": "AI",
+      "company": "GitHub",
+      "default_route": "vpn",
+      "domains": [
+        "githubcopilot.com",
+        "github.com"
+      ],
+      "id": "github-copilot",
+      "name": "GitHub Copilot",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Perplexity AI"
+      ],
+      "category": "AI",
+      "company": "Perplexity AI",
+      "default_route": "vpn",
+      "domains": [
+        "perplexity.ai",
+        "perplexity.com",
+        "pplx.ai"
+      ],
+      "id": "perplexity",
+      "name": "Perplexity",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Deep Seek"
+      ],
+      "category": "AI",
+      "company": "DeepSeek",
+      "default_route": "direct",
+      "domains": [
+        "deepseek.com"
+      ],
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "xAI"
+      ],
+      "category": "AI",
+      "company": "xAI",
+      "default_route": "vpn",
+      "domains": [
+        "grok.com",
+        "x.ai",
+        "grok.x.com"
+      ],
+      "id": "grok",
+      "name": "Grok",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Mistral",
+        "Mistral AI"
+      ],
+      "category": "AI",
+      "company": "Mistral AI",
+      "default_route": "vpn",
+      "domains": [
+        "mistral.ai"
+      ],
+      "id": "mistral",
+      "name": "Le Chat",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Poe AI"
+      ],
+      "category": "AI",
+      "company": "Quora",
+      "default_route": "vpn",
+      "domains": [
+        "poe.com"
+      ],
+      "id": "poe",
+      "name": "Poe",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "HuggingFace",
+        "HF"
+      ],
+      "category": "AI",
+      "company": "Hugging Face",
+      "default_route": "vpn",
+      "domains": [
+        "huggingface.co",
+        "hf.co",
+        "hf.space"
+      ],
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Mid Journey"
+      ],
+      "category": "AI",
+      "company": "Midjourney",
+      "default_route": "vpn",
+      "domains": [
+        "midjourney.com"
+      ],
+      "id": "midjourney",
+      "name": "Midjourney",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Runway ML"
+      ],
+      "category": "AI",
+      "company": "Runway AI",
+      "default_route": "vpn",
+      "domains": [
+        "runwayml.com"
+      ],
+      "id": "runway",
+      "name": "Runway",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Stable Diffusion",
+        "DreamStudio"
+      ],
+      "category": "AI",
+      "company": "Stability AI",
+      "default_route": "vpn",
+      "domains": [
+        "stability.ai",
+        "stabilityai.com"
+      ],
+      "id": "stability-ai",
+      "name": "Stability AI",
+      "preferred_region": "europe",
+      "profile_type": "company",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Llama"
+      ],
+      "category": "AI",
+      "company": "Meta",
+      "default_route": "vpn",
+      "domains": [
+        "meta.ai",
+        "meta.com",
+        "fbcdn.net"
+      ],
+      "id": "meta-ai",
+      "name": "Meta AI",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Notebook LM"
+      ],
+      "category": "AI",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "notebooklm.google.com",
+        "googleusercontent.com",
+        "gstatic.com"
+      ],
+      "id": "notebooklm",
+      "name": "NotebookLM",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Suno AI Music"
+      ],
+      "category": "AI",
+      "company": "Suno",
+      "default_route": "vpn",
+      "domains": [
+        "suno.com",
+        "suno.ai"
+      ],
+      "id": "suno",
+      "name": "Suno",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Manus AI"
+      ],
+      "category": "AI",
+      "company": "Manus",
+      "default_route": "vpn",
+      "domains": [
+        "manus.im"
+      ],
+      "id": "manus",
+      "name": "Manus",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Singapore"
+    },
+    {
+      "aliases": [
+        "Doubao AI"
+      ],
+      "category": "AI",
+      "company": "ByteDance",
+      "default_route": "direct",
+      "domains": [
+        "doubao.com"
+      ],
+      "id": "doubao",
+      "name": "Doubao",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Tongyi Qianwen",
+        "Alibaba Qwen"
+      ],
+      "category": "AI",
+      "company": "Alibaba Cloud",
+      "default_route": "direct",
+      "domains": [
+        "qwen.ai",
+        "qwenlm.ai",
+        "qianwen.com",
+        "tongyi.com",
+        "qianwen.aliyun.com"
+      ],
+      "id": "qwen",
+      "name": "Qwen",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "ERNIE Bot",
+        "Wenxin Yiyan"
+      ],
+      "category": "AI",
+      "company": "Baidu",
+      "default_route": "direct",
+      "domains": [
+        "yiyan.baidu.com",
+        "wenxin.baidu.com"
+      ],
+      "id": "wenxin",
+      "name": "Wenxin",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Yuanbao",
+        "Tencent Hunyuan"
+      ],
+      "category": "AI",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "yuanbao.tencent.com",
+        "hunyuan.tencent.com"
+      ],
+      "id": "yuanbao",
+      "name": "Tencent Yuanbao",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Kimi AI",
+        "Moonshot"
+      ],
+      "category": "AI",
+      "company": "Moonshot AI",
+      "default_route": "direct",
+      "domains": [
+        "kimi.com",
+        "moonshot.ai",
+        "moonshot.cn"
+      ],
+      "id": "kimi",
+      "name": "Kimi",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "ChatGLM",
+        "Z.ai",
+        "Zhipu AI"
+      ],
+      "category": "AI",
+      "company": "Zhipu AI",
+      "default_route": "direct",
+      "domains": [
+        "z.ai",
+        "zhipuai.cn",
+        "bigmodel.cn",
+        "chatglm.cn"
+      ],
+      "id": "zhipu",
+      "name": "Zhipu Qingyan",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "MiniMax",
+        "Hailuo"
+      ],
+      "category": "AI",
+      "company": "MiniMax",
+      "default_route": "direct",
+      "domains": [
+        "hailuoai.com",
+        "minimaxi.com",
+        "minimax.io"
+      ],
+      "id": "hailuo",
+      "name": "Hailuo AI",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Keling",
+        "Kuaishou AI"
+      ],
+      "category": "AI",
+      "company": "Kuaishou",
+      "default_route": "direct",
+      "domains": [
+        "klingai.com",
+        "kling-ai.com",
+        "kechuangai.com"
+      ],
+      "id": "kling",
+      "name": "Kling AI",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "SparkDesk",
+        "Xinghuo"
+      ],
+      "category": "AI",
+      "company": "iFlytek",
+      "default_route": "direct",
+      "domains": [
+        "xinghuo.xfyun.cn",
+        "xfyun.cn"
+      ],
+      "id": "iflytek-spark",
+      "name": "iFlytek Spark",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Coze AI"
+      ],
+      "category": "AI",
+      "company": "ByteDance",
+      "default_route": "direct",
+      "domains": [
+        "coze.cn",
+        "coze.com",
+        "cozecdn.com"
+      ],
+      "id": "coze",
+      "name": "Coze",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Baichuan Intelligence"
+      ],
+      "category": "AI",
+      "company": "Baichuan",
+      "default_route": "direct",
+      "domains": [
+        "baichuan-ai.com"
+      ],
+      "id": "baichuan",
+      "name": "Baichuan AI",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Skywork AI"
+      ],
+      "category": "AI",
+      "company": "Kunlun Tech",
+      "default_route": "direct",
+      "domains": [
+        "tiangong.cn"
+      ],
+      "id": "tiangong",
+      "name": "Tiangong AI",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Cursor AI"
+      ],
+      "category": "Development",
+      "company": "Anysphere",
+      "default_route": "vpn",
+      "domains": [
+        "cursor.com",
+        "cursor.sh",
+        "cursor-cdn.com"
+      ],
+      "id": "cursor",
+      "name": "Cursor",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Codeium"
+      ],
+      "category": "Development",
+      "company": "Windsurf",
+      "default_route": "vpn",
+      "domains": [
+        "windsurf.com",
+        "windsurf.build",
+        "codeium.com"
+      ],
+      "id": "windsurf",
+      "name": "Windsurf",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "GitHub Container Registry"
+      ],
+      "category": "Development",
+      "company": "GitHub",
+      "default_route": "vpn",
+      "domains": [
+        "github.com",
+        "github.io",
+        "ghcr.io"
+      ],
+      "id": "github",
+      "name": "GitHub",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "GitLab CI"
+      ],
+      "category": "Development",
+      "company": "GitLab",
+      "default_route": "vpn",
+      "domains": [
+        "gitlab.com",
+        "gitlab.io"
+      ],
+      "id": "gitlab",
+      "name": "GitLab",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Atlassian Bitbucket"
+      ],
+      "category": "Development",
+      "company": "Atlassian",
+      "default_route": "vpn",
+      "domains": [
+        "bitbucket.org",
+        "atlassian.com"
+      ],
+      "id": "bitbucket",
+      "name": "Bitbucket",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Australia"
+    },
+    {
+      "aliases": [
+        "StackExchange",
+        "SO"
+      ],
+      "category": "Development",
+      "company": "Stack Exchange",
+      "default_route": "vpn",
+      "domains": [
+        "stackoverflow.com",
+        "stackexchange.com",
+        "sstatic.net"
+      ],
+      "id": "stack-overflow",
+      "name": "Stack Overflow",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Node Package Manager"
+      ],
+      "category": "Development",
+      "company": "GitHub",
+      "default_route": "vpn",
+      "domains": [
+        "npmjs.com",
+        "npmjs.org"
+      ],
+      "id": "npm",
+      "name": "npm",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Python Package Index"
+      ],
+      "category": "Development",
+      "company": "Python Software Foundation",
+      "default_route": "vpn",
+      "domains": [
+        "pypi.org",
+        "pythonhosted.org",
+        "python.org"
+      ],
+      "id": "pypi",
+      "name": "PyPI",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Docker Hub"
+      ],
+      "category": "Development",
+      "company": "Docker",
+      "default_route": "vpn",
+      "domains": [
+        "docker.com",
+        "docker.io"
+      ],
+      "id": "docker",
+      "name": "Docker",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "AWS"
+      ],
+      "category": "Infrastructure",
+      "company": "Amazon",
+      "default_route": "vpn",
+      "domains": [
+        "aws.amazon.com",
+        "amazonaws.com"
+      ],
+      "id": "aws",
+      "name": "Amazon Web Services",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Azure"
+      ],
+      "category": "Infrastructure",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "azure.com",
+        "azure.net",
+        "windows.net"
+      ],
+      "id": "microsoft-azure",
+      "name": "Microsoft Azure",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "GCP"
+      ],
+      "category": "Infrastructure",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "cloud.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "id": "google-cloud",
+      "name": "Google Cloud",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "1.1.1.1",
+        "Cloudflare Workers"
+      ],
+      "category": "Infrastructure",
+      "company": "Cloudflare",
+      "default_route": "vpn",
+      "domains": [
+        "cloudflare.com",
+        "workers.dev",
+        "pages.dev"
+      ],
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "preferred_region": "singapore",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Next.js hosting"
+      ],
+      "category": "Development",
+      "company": "Vercel",
+      "default_route": "vpn",
+      "domains": [
+        "vercel.com",
+        "vercel.app",
+        "vercel-dns.com"
+      ],
+      "id": "vercel",
+      "name": "Vercel",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Netlify hosting"
+      ],
+      "category": "Development",
+      "company": "Netlify",
+      "default_route": "vpn",
+      "domains": [
+        "netlify.com",
+        "netlify.app",
+        "netlifyglobalcdn.com"
+      ],
+      "id": "netlify",
+      "name": "Netlify",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "DO",
+        "Droplets"
+      ],
+      "category": "Infrastructure",
+      "company": "DigitalOcean",
+      "default_route": "vpn",
+      "domains": [
+        "digitalocean.com",
+        "digitaloceanspaces.com"
+      ],
+      "id": "digitalocean",
+      "name": "DigitalOcean",
+      "preferred_region": "singapore",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "IntelliJ",
+        "PyCharm",
+        "WebStorm"
+      ],
+      "category": "Development",
+      "company": "JetBrains",
+      "default_route": "vpn",
+      "domains": [
+        "jetbrains.com",
+        "jetbrains.net"
+      ],
+      "id": "jetbrains",
+      "name": "JetBrains",
+      "preferred_region": "europe",
+      "profile_type": "company",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "VS Code Extensions",
+        "Visual Studio Code"
+      ],
+      "category": "Development",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "marketplace.visualstudio.com",
+        "visualstudio.com",
+        "vscode.dev"
+      ],
+      "id": "vscode-marketplace",
+      "name": "Visual Studio Marketplace",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Postman API"
+      ],
+      "category": "Development",
+      "company": "Postman",
+      "default_route": "vpn",
+      "domains": [
+        "postman.com",
+        "postman.co"
+      ],
+      "id": "postman",
+      "name": "Postman",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Tailnet"
+      ],
+      "category": "Remote access",
+      "company": "Tailscale",
+      "default_route": "vpn",
+      "domains": [
+        "tailscale.com"
+      ],
+      "id": "tailscale",
+      "name": "Tailscale",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Canada"
+    },
+    {
+      "aliases": [
+        "Repl.it"
+      ],
+      "category": "Development",
+      "company": "Replit",
+      "default_route": "vpn",
+      "domains": [
+        "replit.com",
+        "repl.co",
+        "replit.dev"
+      ],
+      "id": "replit",
+      "name": "Replit",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Heroku Cloud"
+      ],
+      "category": "Development",
+      "company": "Salesforce",
+      "default_route": "vpn",
+      "domains": [
+        "heroku.com",
+        "herokuapp.com"
+      ],
+      "id": "heroku",
+      "name": "Heroku",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Render Cloud"
+      ],
+      "category": "Development",
+      "company": "Render",
+      "default_route": "vpn",
+      "domains": [
+        "render.com",
+        "onrender.com"
+      ],
+      "id": "render",
+      "name": "Render",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Railway Cloud"
+      ],
+      "category": "Development",
+      "company": "Railway",
+      "default_route": "vpn",
+      "domains": [
+        "railway.com",
+        "railway.app"
+      ],
+      "id": "railway",
+      "name": "Railway",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "FB"
+      ],
+      "category": "Social",
+      "company": "Meta",
+      "default_route": "vpn",
+      "domains": [
+        "facebook.com",
+        "fb.com",
+        "fbcdn.net",
+        "fbsbx.com"
+      ],
+      "id": "facebook",
+      "name": "Facebook",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "WA"
+      ],
+      "category": "Messaging",
+      "company": "Meta",
+      "default_route": "vpn",
+      "domains": [
+        "whatsapp.com",
+        "whatsapp.net",
+        "wa.me"
+      ],
+      "id": "whatsapp",
+      "name": "WhatsApp",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Facebook Messenger"
+      ],
+      "category": "Messaging",
+      "company": "Meta",
+      "default_route": "vpn",
+      "domains": [
+        "messenger.com",
+        "m.me",
+        "fbmessenger.com",
+        "fbcdn.net"
+      ],
+      "id": "messenger",
+      "name": "Messenger",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Instagram Threads"
+      ],
+      "category": "Social",
+      "company": "Meta",
+      "default_route": "vpn",
+      "domains": [
+        "threads.net",
+        "threads.com",
+        "instagram.com"
+      ],
+      "id": "threads",
+      "name": "Threads",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Linked In"
+      ],
+      "category": "Social",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "linkedin.com",
+        "lnkd.in"
+      ],
+      "id": "linkedin",
+      "name": "LinkedIn",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Social",
+      "company": "Pinterest",
+      "default_route": "vpn",
+      "domains": [
+        "pinterest.com",
+        "pinimg.com",
+        "pin.it"
+      ],
+      "id": "pinterest",
+      "name": "Pinterest",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Snap"
+      ],
+      "category": "Social",
+      "company": "Snap",
+      "default_route": "vpn",
+      "domains": [
+        "snapchat.com",
+        "snap.com",
+        "snapkit.com"
+      ],
+      "id": "snapchat",
+      "name": "Snapchat",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Blue Sky",
+        "AT Protocol"
+      ],
+      "category": "Social",
+      "company": "Bluesky",
+      "default_route": "vpn",
+      "domains": [
+        "bsky.app",
+        "bsky.social",
+        "bsky.network"
+      ],
+      "id": "bluesky",
+      "name": "Bluesky",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Social",
+      "company": "Automattic",
+      "default_route": "vpn",
+      "domains": [
+        "tumblr.com",
+        "tumblr.co",
+        "tumblr.net"
+      ],
+      "id": "tumblr",
+      "name": "Tumblr",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Fediverse"
+      ],
+      "category": "Social",
+      "company": "Mastodon",
+      "default_route": "vpn",
+      "domains": [
+        "joinmastodon.org",
+        "mastodon.social"
+      ],
+      "id": "mastodon",
+      "name": "Mastodon",
+      "preferred_region": "europe",
+      "profile_type": "website",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [],
+      "category": "Social",
+      "company": "Reddit",
+      "default_route": "vpn",
+      "domains": [
+        "reddit.com",
+        "redd.it",
+        "redditmedia.com"
+      ],
+      "id": "reddit",
+      "name": "Reddit",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "TG"
+      ],
+      "category": "Messaging",
+      "company": "Telegram",
+      "default_route": "vpn",
+      "domains": [
+        "telegram.org",
+        "t.me",
+        "telegram.me",
+        "telegra.ph"
+      ],
+      "id": "telegram",
+      "name": "Telegram",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Other / Global"
+    },
+    {
+      "aliases": [
+        "Signal Messenger"
+      ],
+      "category": "Messaging",
+      "company": "Signal Foundation",
+      "default_route": "vpn",
+      "domains": [
+        "signal.org",
+        "signal.me",
+        "signal.group"
+      ],
+      "id": "signal",
+      "name": "Signal",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "LINE Messenger"
+      ],
+      "category": "Messaging",
+      "company": "LY Corporation",
+      "default_route": "vpn",
+      "domains": [
+        "line.me",
+        "liff.line.me",
+        "miniapp.line.me",
+        "lin.ee"
+      ],
+      "id": "line",
+      "name": "LINE",
+      "preferred_region": "japan",
+      "profile_type": "app",
+      "provider_country": "Japan"
+    },
+    {
+      "aliases": [
+        "Kakao Talk"
+      ],
+      "category": "Messaging",
+      "company": "Kakao",
+      "default_route": "vpn",
+      "domains": [
+        "kakao.com",
+        "kakaocorp.com"
+      ],
+      "id": "kakaotalk",
+      "name": "KakaoTalk",
+      "preferred_region": "south-korea",
+      "profile_type": "app",
+      "provider_country": "South Korea"
+    },
+    {
+      "aliases": [
+        "Rakuten Viber"
+      ],
+      "category": "Messaging",
+      "company": "Rakuten",
+      "default_route": "vpn",
+      "domains": [
+        "viber.com",
+        "viber.me"
+      ],
+      "id": "viber",
+      "name": "Viber",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Japan"
+    },
+    {
+      "aliases": [],
+      "category": "Messaging",
+      "company": "Discord",
+      "default_route": "vpn",
+      "domains": [
+        "discord.com",
+        "discordapp.com",
+        "discord.gg"
+      ],
+      "id": "discord",
+      "name": "Discord",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Google Mail"
+      ],
+      "category": "Work",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "gmail.com",
+        "googlemail.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "id": "gmail",
+      "name": "Gmail",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Google Docs",
+        "Google Sheets",
+        "Google Slides"
+      ],
+      "category": "Cloud",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "drive.google.com",
+        "docs.google.com",
+        "googleusercontent.com",
+        "googleapis.com"
+      ],
+      "id": "google-drive",
+      "name": "Google Drive",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Meet"
+      ],
+      "category": "Work",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "meet.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "id": "google-meet",
+      "name": "Google Meet",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "GCal"
+      ],
+      "category": "Work",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "calendar.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "id": "google-calendar",
+      "name": "Google Calendar",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Hotmail",
+        "Microsoft Mail"
+      ],
+      "category": "Work",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "outlook.com",
+        "outlook.office.com",
+        "live.com",
+        "office.com"
+      ],
+      "id": "outlook",
+      "name": "Outlook",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Teams"
+      ],
+      "category": "Work",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "teams.microsoft.com",
+        "teams.live.com",
+        "microsoft.com",
+        "office.com"
+      ],
+      "id": "teams",
+      "name": "Microsoft Teams",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Microsoft OneDrive"
+      ],
+      "category": "Cloud",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "onedrive.com",
+        "1drv.com",
+        "1drv.ms"
+      ],
+      "id": "onedrive",
+      "name": "OneDrive",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Work",
+      "company": "Salesforce",
+      "default_route": "vpn",
+      "domains": [
+        "slack.com",
+        "slack-imgs.com"
+      ],
+      "id": "slack",
+      "name": "Slack",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Zoom Meetings"
+      ],
+      "category": "Work",
+      "company": "Zoom",
+      "default_route": "vpn",
+      "domains": [
+        "zoom.us",
+        "zoom.com"
+      ],
+      "id": "zoom",
+      "name": "Zoom",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Notion AI"
+      ],
+      "category": "Work",
+      "company": "Notion",
+      "default_route": "vpn",
+      "domains": [
+        "notion.com",
+        "notion.so",
+        "notion.site"
+      ],
+      "id": "notion",
+      "name": "Notion",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Work",
+      "company": "Atlassian",
+      "default_route": "vpn",
+      "domains": [
+        "trello.com"
+      ],
+      "id": "trello",
+      "name": "Trello",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Australia"
+    },
+    {
+      "aliases": [],
+      "category": "Work",
+      "company": "Asana",
+      "default_route": "vpn",
+      "domains": [
+        "asana.com",
+        "asana.biz"
+      ],
+      "id": "asana",
+      "name": "Asana",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Monday Work Management"
+      ],
+      "category": "Work",
+      "company": "monday.com",
+      "default_route": "vpn",
+      "domains": [
+        "monday.com",
+        "monday.app"
+      ],
+      "id": "monday",
+      "name": "monday.com",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Other / Global"
+    },
+    {
+      "aliases": [],
+      "category": "Work",
+      "company": "Airtable",
+      "default_route": "vpn",
+      "domains": [
+        "airtable.com"
+      ],
+      "id": "airtable",
+      "name": "Airtable",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "FigJam"
+      ],
+      "category": "Work",
+      "company": "Figma",
+      "default_route": "vpn",
+      "domains": [
+        "figma.com"
+      ],
+      "id": "figma",
+      "name": "Figma",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Miro Whiteboard"
+      ],
+      "category": "Work",
+      "company": "Miro",
+      "default_route": "vpn",
+      "domains": [
+        "miro.com",
+        "mirostatic.com"
+      ],
+      "id": "miro",
+      "name": "Miro",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Cloud",
+      "company": "Dropbox",
+      "default_route": "vpn",
+      "domains": [
+        "dropbox.com",
+        "dropboxstatic.com"
+      ],
+      "id": "dropbox",
+      "name": "Dropbox",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Box Cloud"
+      ],
+      "category": "Cloud",
+      "company": "Box",
+      "default_route": "vpn",
+      "domains": [
+        "box.com",
+        "box.net"
+      ],
+      "id": "box",
+      "name": "Box",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Sales Cloud",
+        "CRM"
+      ],
+      "category": "Work",
+      "company": "Salesforce",
+      "default_route": "vpn",
+      "domains": [
+        "salesforce.com",
+        "force.com",
+        "salesforce-sites.com",
+        "documentforce.com"
+      ],
+      "id": "salesforce",
+      "name": "Salesforce",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Creative Cloud",
+        "Photoshop",
+        "Acrobat"
+      ],
+      "category": "Work",
+      "company": "Adobe",
+      "default_route": "vpn",
+      "domains": [
+        "adobe.com",
+        "adobe.io",
+        "creativecloud.com",
+        "adobelogin.com"
+      ],
+      "id": "adobe",
+      "name": "Adobe",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Canva Design"
+      ],
+      "category": "Work",
+      "company": "Canva",
+      "default_route": "vpn",
+      "domains": [
+        "canva.com",
+        "canvastatus.com"
+      ],
+      "id": "canva",
+      "name": "Canva",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Australia"
+    },
+    {
+      "aliases": [],
+      "category": "Video",
+      "company": "Netflix",
+      "default_route": "vpn",
+      "domains": [
+        "netflix.com",
+        "nflxvideo.net",
+        "nflxext.com"
+      ],
+      "id": "netflix",
+      "name": "Netflix",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Disney Plus"
+      ],
+      "category": "Video",
+      "company": "Disney",
+      "default_route": "vpn",
+      "domains": [
+        "disneyplus.com"
+      ],
+      "id": "disney-plus",
+      "name": "Disney+",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "HBO Max",
+        "HBO"
+      ],
+      "category": "Video",
+      "company": "Warner Bros. Discovery",
+      "default_route": "vpn",
+      "domains": [
+        "max.com",
+        "hbomax.com",
+        "hbo.com"
+      ],
+      "id": "max",
+      "name": "Max",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Video",
+      "company": "Disney",
+      "default_route": "vpn",
+      "domains": [
+        "hulu.com",
+        "hulu.tv"
+      ],
+      "id": "hulu",
+      "name": "Hulu",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Peacock TV"
+      ],
+      "category": "Video",
+      "company": "NBCUniversal",
+      "default_route": "vpn",
+      "domains": [
+        "peacocktv.com"
+      ],
+      "id": "peacock",
+      "name": "Peacock",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Paramount Plus"
+      ],
+      "category": "Video",
+      "company": "Paramount",
+      "default_route": "vpn",
+      "domains": [
+        "paramountplus.com",
+        "cbs.com",
+        "cbsi.com"
+      ],
+      "id": "paramount-plus",
+      "name": "Paramount+",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Amazon Prime Video"
+      ],
+      "category": "Video",
+      "company": "Amazon",
+      "default_route": "vpn",
+      "domains": [
+        "primevideo.com",
+        "amazonvideo.com"
+      ],
+      "id": "prime-video",
+      "name": "Prime Video",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Apple TV Plus"
+      ],
+      "category": "Video",
+      "company": "Apple",
+      "default_route": "vpn",
+      "domains": [
+        "tv.apple.com",
+        "itunes.apple.com",
+        "mzstatic.com"
+      ],
+      "id": "apple-tv-plus",
+      "name": "Apple TV+",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Video",
+      "company": "Amazon",
+      "default_route": "vpn",
+      "domains": [
+        "twitch.tv"
+      ],
+      "id": "twitch",
+      "name": "Twitch",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Video",
+      "company": "Vimeo",
+      "default_route": "vpn",
+      "domains": [
+        "vimeo.com",
+        "vimeocdn.com"
+      ],
+      "id": "vimeo",
+      "name": "Vimeo",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Daily Motion"
+      ],
+      "category": "Video",
+      "company": "Canal+",
+      "default_route": "vpn",
+      "domains": [
+        "dailymotion.com",
+        "dmcdn.net",
+        "dai.ly"
+      ],
+      "id": "dailymotion",
+      "name": "Dailymotion",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Crunchy Roll"
+      ],
+      "category": "Video",
+      "company": "Sony",
+      "default_route": "vpn",
+      "domains": [
+        "crunchyroll.com",
+        "vrv.co"
+      ],
+      "id": "crunchyroll",
+      "name": "Crunchyroll",
+      "preferred_region": "japan",
+      "profile_type": "app",
+      "provider_country": "Japan"
+    },
+    {
+      "aliases": [],
+      "category": "Music",
+      "company": "Spotify",
+      "default_route": "vpn",
+      "domains": [
+        "spotify.com"
+      ],
+      "id": "spotify",
+      "name": "Spotify",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "iTunes Music"
+      ],
+      "category": "Music",
+      "company": "Apple",
+      "default_route": "vpn",
+      "domains": [
+        "music.apple.com",
+        "applemusic.com",
+        "itunes.apple.com",
+        "mzstatic.com"
+      ],
+      "id": "apple-music",
+      "name": "Apple Music",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "YT Music"
+      ],
+      "category": "Music",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "music.youtube.com",
+        "googlevideo.com"
+      ],
+      "id": "youtube-music",
+      "name": "YouTube Music",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Sound Cloud"
+      ],
+      "category": "Music",
+      "company": "SoundCloud",
+      "default_route": "vpn",
+      "domains": [
+        "soundcloud.com",
+        "sndcdn.com"
+      ],
+      "id": "soundcloud",
+      "name": "SoundCloud",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Tidal Music"
+      ],
+      "category": "Music",
+      "company": "Block",
+      "default_route": "vpn",
+      "domains": [
+        "tidal.com",
+        "tidalhifi.com"
+      ],
+      "id": "tidal",
+      "name": "TIDAL",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Music",
+      "company": "Deezer",
+      "default_route": "vpn",
+      "domains": [
+        "deezer.com"
+      ],
+      "id": "deezer",
+      "name": "Deezer",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Pandora Radio"
+      ],
+      "category": "Music",
+      "company": "SiriusXM",
+      "default_route": "vpn",
+      "domains": [
+        "pandora.com"
+      ],
+      "id": "pandora",
+      "name": "Pandora",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Music",
+      "company": "Amazon",
+      "default_route": "vpn",
+      "domains": [
+        "music.amazon.com",
+        "amazon.com"
+      ],
+      "id": "amazon-music",
+      "name": "Amazon Music",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Music",
+      "company": "Apple",
+      "default_route": "vpn",
+      "domains": [
+        "shazam.com",
+        "apple.com"
+      ],
+      "id": "shazam",
+      "name": "Shazam",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Band Camp"
+      ],
+      "category": "Music",
+      "company": "Bandcamp",
+      "default_route": "vpn",
+      "domains": [
+        "bandcamp.com"
+      ],
+      "id": "bandcamp",
+      "name": "Bandcamp",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Commerce",
+      "company": "eBay",
+      "default_route": "vpn",
+      "domains": [
+        "ebay.com"
+      ],
+      "id": "ebay",
+      "name": "eBay",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Commerce",
+      "company": "Walmart",
+      "default_route": "vpn",
+      "domains": [
+        "walmart.com"
+      ],
+      "id": "walmart",
+      "name": "Walmart",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Commerce",
+      "company": "Etsy",
+      "default_route": "vpn",
+      "domains": [
+        "etsy.com"
+      ],
+      "id": "etsy",
+      "name": "Etsy",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Shop Pay"
+      ],
+      "category": "Commerce",
+      "company": "Shopify",
+      "default_route": "vpn",
+      "domains": [
+        "shopify.com",
+        "myshopify.com",
+        "shop.app"
+      ],
+      "id": "shopify",
+      "name": "Shopify",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "Canada"
+    },
+    {
+      "aliases": [],
+      "category": "Commerce",
+      "company": "PDD Holdings",
+      "default_route": "vpn",
+      "domains": [
+        "temu.com"
+      ],
+      "id": "temu",
+      "name": "Temu",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Shein"
+      ],
+      "category": "Commerce",
+      "company": "SHEIN",
+      "default_route": "vpn",
+      "domains": [
+        "shein.com"
+      ],
+      "id": "shein",
+      "name": "SHEIN",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Singapore"
+    },
+    {
+      "aliases": [
+        "Ali Express"
+      ],
+      "category": "Commerce",
+      "company": "Alibaba Group",
+      "default_route": "vpn",
+      "domains": [
+        "aliexpress.com",
+        "aliexpress.ru",
+        "alicdn.com"
+      ],
+      "id": "aliexpress",
+      "name": "AliExpress",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [],
+      "category": "Finance",
+      "company": "PayPal",
+      "default_route": "vpn",
+      "domains": [
+        "paypal.com",
+        "paypalobjects.com",
+        "paypal.me"
+      ],
+      "id": "paypal",
+      "name": "PayPal",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Stripe Payments"
+      ],
+      "category": "Finance",
+      "company": "Stripe",
+      "default_route": "vpn",
+      "domains": [
+        "stripe.com",
+        "stripe.network",
+        "stripecdn.com",
+        "link.com"
+      ],
+      "id": "stripe",
+      "name": "Stripe",
+      "preferred_region": "united-states",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "TransferWise"
+      ],
+      "category": "Finance",
+      "company": "Wise",
+      "default_route": "vpn",
+      "domains": [
+        "wise.com",
+        "transferwise.com"
+      ],
+      "id": "wise",
+      "name": "Wise",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [],
+      "category": "Finance",
+      "company": "Revolut",
+      "default_route": "vpn",
+      "domains": [
+        "revolut.com"
+      ],
+      "id": "revolut",
+      "name": "Revolut",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [],
+      "category": "Finance",
+      "company": "Coinbase",
+      "default_route": "vpn",
+      "domains": [
+        "coinbase.com"
+      ],
+      "id": "coinbase",
+      "name": "Coinbase",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Finance",
+      "company": "Binance",
+      "default_route": "vpn",
+      "domains": [
+        "binance.com",
+        "binance.me",
+        "binance.vision"
+      ],
+      "id": "binance",
+      "name": "Binance",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Other / Global"
+    },
+    {
+      "aliases": [],
+      "category": "Finance",
+      "company": "Kraken",
+      "default_route": "vpn",
+      "domains": [
+        "kraken.com",
+        "kraken.tech"
+      ],
+      "id": "kraken",
+      "name": "Kraken",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Maps"
+      ],
+      "category": "Local services",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "maps.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "id": "google-maps",
+      "name": "Google Maps",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Travel",
+      "company": "Airbnb",
+      "default_route": "vpn",
+      "domains": [
+        "airbnb.com"
+      ],
+      "id": "airbnb",
+      "name": "Airbnb",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Booking"
+      ],
+      "category": "Travel",
+      "company": "Booking Holdings",
+      "default_route": "vpn",
+      "domains": [
+        "booking.com",
+        "bstatic.com"
+      ],
+      "id": "booking",
+      "name": "Booking.com",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Hotels.com"
+      ],
+      "category": "Travel",
+      "company": "Expedia Group",
+      "default_route": "vpn",
+      "domains": [
+        "expedia.com",
+        "expediagroup.com"
+      ],
+      "id": "expedia",
+      "name": "Expedia",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Uber Eats"
+      ],
+      "category": "Local services",
+      "company": "Uber",
+      "default_route": "vpn",
+      "domains": [
+        "uber.com",
+        "uber-assets.com",
+        "ubereats.com"
+      ],
+      "id": "uber",
+      "name": "Uber",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Local services",
+      "company": "Lyft",
+      "default_route": "vpn",
+      "domains": [
+        "lyft.com"
+      ],
+      "id": "lyft",
+      "name": "Lyft",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Trip Advisor"
+      ],
+      "category": "Travel",
+      "company": "Tripadvisor",
+      "default_route": "vpn",
+      "domains": [
+        "tripadvisor.com"
+      ],
+      "id": "tripadvisor",
+      "name": "Tripadvisor",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Door Dash"
+      ],
+      "category": "Local services",
+      "company": "DoorDash",
+      "default_route": "vpn",
+      "domains": [
+        "doordash.com"
+      ],
+      "id": "doordash",
+      "name": "DoorDash",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "GrabFood"
+      ],
+      "category": "Local services",
+      "company": "Grab",
+      "default_route": "vpn",
+      "domains": [
+        "grab.com",
+        "grabtaxi.com"
+      ],
+      "id": "grab",
+      "name": "Grab",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Singapore"
+    },
+    {
+      "aliases": [],
+      "category": "Local services",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "waze.com",
+        "waze.co.il"
+      ],
+      "id": "waze",
+      "name": "Waze",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Local services",
+      "company": "DoorDash",
+      "default_route": "vpn",
+      "domains": [
+        "deliveroo.com",
+        "deliveroo.co.uk"
+      ],
+      "id": "deliveroo",
+      "name": "Deliveroo",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Wikimedia"
+      ],
+      "category": "Reference",
+      "company": "Wikimedia Foundation",
+      "default_route": "vpn",
+      "domains": [
+        "wikipedia.org",
+        "wikimedia.org",
+        "wikimediafoundation.org"
+      ],
+      "id": "wikipedia",
+      "name": "Wikipedia",
+      "preferred_region": "singapore",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Microsoft Bing"
+      ],
+      "category": "Web",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "bing.com",
+        "bing.net",
+        "msn.com"
+      ],
+      "id": "bing",
+      "name": "Bing",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "DDG"
+      ],
+      "category": "Web",
+      "company": "DuckDuckGo",
+      "default_route": "vpn",
+      "domains": [
+        "duckduckgo.com",
+        "duck.com",
+        "duck.ai",
+        "ddg.gg"
+      ],
+      "id": "duckduckgo",
+      "name": "DuckDuckGo",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "BBC News"
+      ],
+      "category": "News",
+      "company": "BBC",
+      "default_route": "vpn",
+      "domains": [
+        "bbc.com",
+        "bbc.co.uk",
+        "bbci.co.uk"
+      ],
+      "id": "bbc",
+      "name": "BBC",
+      "preferred_region": "europe",
+      "profile_type": "website",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "CNN News"
+      ],
+      "category": "News",
+      "company": "Warner Bros. Discovery",
+      "default_route": "vpn",
+      "domains": [
+        "cnn.com"
+      ],
+      "id": "cnn",
+      "name": "CNN",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "News",
+      "company": "Thomson Reuters",
+      "default_route": "vpn",
+      "domains": [
+        "reuters.com",
+        "reut.rs"
+      ],
+      "id": "reuters",
+      "name": "Reuters",
+      "preferred_region": "europe",
+      "profile_type": "website",
+      "provider_country": "Canada"
+    },
+    {
+      "aliases": [
+        "Associated Press"
+      ],
+      "category": "News",
+      "company": "Associated Press",
+      "default_route": "vpn",
+      "domains": [
+        "apnews.com",
+        "ap.org"
+      ],
+      "id": "ap-news",
+      "name": "AP News",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "NYT",
+        "New York Times"
+      ],
+      "category": "News",
+      "company": "The New York Times",
+      "default_route": "vpn",
+      "domains": [
+        "nytimes.com",
+        "nyt.com",
+        "nyt.net",
+        "nyti.ms"
+      ],
+      "id": "nytimes",
+      "name": "The New York Times",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Guardian"
+      ],
+      "category": "News",
+      "company": "Guardian Media Group",
+      "default_route": "vpn",
+      "domains": [
+        "theguardian.com"
+      ],
+      "id": "guardian",
+      "name": "The Guardian",
+      "preferred_region": "europe",
+      "profile_type": "website",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Bloomberg News"
+      ],
+      "category": "News",
+      "company": "Bloomberg",
+      "default_route": "vpn",
+      "domains": [
+        "bloomberg.com",
+        "bloomberg.net",
+        "bloombergmedia.com"
+      ],
+      "id": "bloomberg",
+      "name": "Bloomberg",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "WSJ",
+        "Wall Street Journal"
+      ],
+      "category": "News",
+      "company": "Dow Jones",
+      "default_route": "vpn",
+      "domains": [
+        "wsj.com",
+        "wsj.net"
+      ],
+      "id": "wsj",
+      "name": "The Wall Street Journal",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Medium.com"
+      ],
+      "category": "Reference",
+      "company": "Medium",
+      "default_route": "vpn",
+      "domains": [
+        "medium.com"
+      ],
+      "id": "medium",
+      "name": "Medium",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Reference",
+      "company": "Quora",
+      "default_route": "vpn",
+      "domains": [
+        "quora.com",
+        "quoracdn.net",
+        "qr.ae"
+      ],
+      "id": "quora",
+      "name": "Quora",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Duo"
+      ],
+      "category": "Education",
+      "company": "Duolingo",
+      "default_route": "vpn",
+      "domains": [
+        "duolingo.com"
+      ],
+      "id": "duolingo",
+      "name": "Duolingo",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Education",
+      "company": "Coursera",
+      "default_route": "vpn",
+      "domains": [
+        "coursera.org",
+        "coursera.help"
+      ],
+      "id": "coursera",
+      "name": "Coursera",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Education",
+      "company": "Udemy",
+      "default_route": "vpn",
+      "domains": [
+        "udemy.com",
+        "udemycdn.com"
+      ],
+      "id": "udemy",
+      "name": "Udemy",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Khan"
+      ],
+      "category": "Education",
+      "company": "Khan Academy",
+      "default_route": "vpn",
+      "domains": [
+        "khanacademy.org"
+      ],
+      "id": "khan-academy",
+      "name": "Khan Academy",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [],
+      "category": "Education",
+      "company": "Quizlet",
+      "default_route": "vpn",
+      "domains": [
+        "quizlet.com"
+      ],
+      "id": "quizlet",
+      "name": "Quizlet",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "EDX"
+      ],
+      "category": "Education",
+      "company": "2U",
+      "default_route": "vpn",
+      "domains": [
+        "edx.org",
+        "edx-cdn.org"
+      ],
+      "id": "edx",
+      "name": "edX",
+      "preferred_region": "united-states",
+      "profile_type": "website",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Classroom"
+      ],
+      "category": "Education",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "classroom.google.com",
+        "googleapis.com",
+        "gstatic.com"
+      ],
+      "id": "google-classroom",
+      "name": "Google Classroom",
+      "preferred_region": "united-states",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Valve"
+      ],
+      "category": "Gaming",
+      "company": "Valve",
+      "default_route": "vpn",
+      "domains": [
+        "steampowered.com",
+        "steamcommunity.com"
+      ],
+      "id": "steam",
+      "name": "Steam",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Epic Games Store",
+        "Fortnite"
+      ],
+      "category": "Gaming",
+      "company": "Epic Games",
+      "default_route": "vpn",
+      "domains": [
+        "epicgames.com",
+        "fortnite.com"
+      ],
+      "id": "epic-games",
+      "name": "Epic Games",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "PSN",
+        "PlayStation Network"
+      ],
+      "category": "Gaming",
+      "company": "Sony",
+      "default_route": "vpn",
+      "domains": [
+        "playstation.com",
+        "sonyentertainmentnetwork.com"
+      ],
+      "id": "playstation",
+      "name": "PlayStation",
+      "preferred_region": "japan",
+      "profile_type": "app",
+      "provider_country": "Japan"
+    },
+    {
+      "aliases": [
+        "Game Pass",
+        "Xbox Live"
+      ],
+      "category": "Gaming",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "xbox.com",
+        "xboxlive.com",
+        "gamepass.com"
+      ],
+      "id": "xbox",
+      "name": "Xbox",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Nintendo Switch"
+      ],
+      "category": "Gaming",
+      "company": "Nintendo",
+      "default_route": "vpn",
+      "domains": [
+        "nintendo.com",
+        "nintendo.co.jp"
+      ],
+      "id": "nintendo",
+      "name": "Nintendo",
+      "preferred_region": "japan",
+      "profile_type": "company",
+      "provider_country": "Japan"
+    },
+    {
+      "aliases": [
+        "Blizzard",
+        "Battle Net"
+      ],
+      "category": "Gaming",
+      "company": "Blizzard Entertainment",
+      "default_route": "vpn",
+      "domains": [
+        "battle.net",
+        "blizzard.com"
+      ],
+      "id": "battle-net",
+      "name": "Battle.net",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "League of Legends",
+        "Valorant"
+      ],
+      "category": "Gaming",
+      "company": "Riot Games",
+      "default_route": "vpn",
+      "domains": [
+        "riotgames.com",
+        "leagueoflegends.com",
+        "valorant.com"
+      ],
+      "id": "riot-games",
+      "name": "Riot Games",
+      "preferred_region": "singapore",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Electronic Arts",
+        "EA Sports",
+        "Origin"
+      ],
+      "category": "Gaming",
+      "company": "Electronic Arts",
+      "default_route": "vpn",
+      "domains": [
+        "ea.com",
+        "origin.com",
+        "eaassets-a.akamaihd.net"
+      ],
+      "id": "ea-games",
+      "name": "EA",
+      "preferred_region": "singapore",
+      "profile_type": "company",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Ubisoft Connect",
+        "Uplay"
+      ],
+      "category": "Gaming",
+      "company": "Ubisoft",
+      "default_route": "vpn",
+      "domains": [
+        "ubisoft.com",
+        "ubi.com",
+        "ubisoftconnect.com",
+        "uplay.com"
+      ],
+      "id": "ubisoft",
+      "name": "Ubisoft",
+      "preferred_region": "europe",
+      "profile_type": "company",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Good Old Games",
+        "GOG Galaxy"
+      ],
+      "category": "Gaming",
+      "company": "CD Projekt",
+      "default_route": "vpn",
+      "domains": [
+        "gog.com",
+        "gogalaxy.com"
+      ],
+      "id": "gog",
+      "name": "GOG",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [],
+      "category": "Gaming",
+      "company": "Roblox",
+      "default_route": "vpn",
+      "domains": [
+        "roblox.com",
+        "rbx.com"
+      ],
+      "id": "roblox",
+      "name": "Roblox",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Mojang"
+      ],
+      "category": "Gaming",
+      "company": "Microsoft",
+      "default_route": "vpn",
+      "domains": [
+        "minecraft.net",
+        "mojang.com"
+      ],
+      "id": "minecraft",
+      "name": "Minecraft",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Team Viewer"
+      ],
+      "category": "Remote access",
+      "company": "TeamViewer",
+      "default_route": "vpn",
+      "domains": [
+        "teamviewer.com",
+        "teamviewer.us"
+      ],
+      "id": "teamviewer",
+      "name": "TeamViewer",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Any Desk"
+      ],
+      "category": "Remote access",
+      "company": "AnyDesk",
+      "default_route": "vpn",
+      "domains": [
+        "anydesk.com"
+      ],
+      "id": "anydesk",
+      "name": "AnyDesk",
+      "preferred_region": "europe",
+      "profile_type": "app",
+      "provider_country": "Europe"
+    },
+    {
+      "aliases": [
+        "Rust Desk"
+      ],
+      "category": "Remote access",
+      "company": "RustDesk",
+      "default_route": "vpn",
+      "domains": [
+        "rustdesk.com"
+      ],
+      "id": "rustdesk",
+      "name": "RustDesk",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "Singapore"
+    },
+    {
+      "aliases": [
+        "CRD"
+      ],
+      "category": "Remote access",
+      "company": "Google",
+      "default_route": "vpn",
+      "domains": [
+        "remotedesktop.google.com",
+        "googleapis.com"
+      ],
+      "id": "chrome-remote-desktop",
+      "name": "Chrome Remote Desktop",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Parsec Gaming"
+      ],
+      "category": "Remote access",
+      "company": "Unity",
+      "default_route": "vpn",
+      "domains": [
+        "parsec.app",
+        "parsecgaming.com"
+      ],
+      "id": "parsec",
+      "name": "Parsec",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Splash Top"
+      ],
+      "category": "Remote access",
+      "company": "Splashtop",
+      "default_route": "vpn",
+      "domains": [
+        "splashtop.com",
+        "splashtop.eu"
+      ],
+      "id": "splashtop",
+      "name": "Splashtop",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "United States"
+    },
+    {
+      "aliases": [
+        "Sina Weibo"
+      ],
+      "category": "Social",
+      "company": "Sina",
+      "default_route": "direct",
+      "domains": [
+        "weibo.com",
+        "weibo.cn",
+        "weibocdn.com",
+        "sinaimg.cn"
+      ],
+      "id": "weibo",
+      "name": "Weibo",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Zhi Hu"
+      ],
+      "category": "Social",
+      "company": "Zhihu",
+      "default_route": "direct",
+      "domains": [
+        "zhihu.com",
+        "vzuu.com"
+      ],
+      "id": "zhihu",
+      "name": "Zhihu",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Douban Movies"
+      ],
+      "category": "Social",
+      "company": "Douban",
+      "default_route": "direct",
+      "domains": [
+        "douban.com"
+      ],
+      "id": "douban",
+      "name": "Douban",
+      "preferred_region": "direct",
+      "profile_type": "website",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Tieba"
+      ],
+      "category": "Social",
+      "company": "Baidu",
+      "default_route": "direct",
+      "domains": [
+        "tieba.baidu.com",
+        "bdimg.com",
+        "bdstatic.com"
+      ],
+      "id": "baidu-tieba",
+      "name": "Baidu Tieba",
+      "preferred_region": "direct",
+      "profile_type": "website",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Jinri Toutiao",
+        "Today's Headlines"
+      ],
+      "category": "News",
+      "company": "ByteDance",
+      "default_route": "direct",
+      "domains": [
+        "toutiao.com",
+        "snssdk.com"
+      ],
+      "id": "toutiao",
+      "name": "Toutiao",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Kwai"
+      ],
+      "category": "Video",
+      "company": "Kuaishou",
+      "default_route": "direct",
+      "domains": [
+        "kuaishou.com",
+        "gifshow.com",
+        "kwimgs.com",
+        "ksapisrv.com"
+      ],
+      "id": "kuaishou",
+      "name": "Kuaishou",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Qiyi",
+        "IQ"
+      ],
+      "category": "Video",
+      "company": "iQIYI",
+      "default_route": "direct",
+      "domains": [
+        "iqiyi.com",
+        "qiyi.com",
+        "iqiyipic.com",
+        "qiyipic.com",
+        "qy.net"
+      ],
+      "id": "iqiyi",
+      "name": "iQIYI",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "WeTV",
+        "QQ Video"
+      ],
+      "category": "Video",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "v.qq.com",
+        "video.qq.com",
+        "qpic.cn"
+      ],
+      "id": "tencent-video",
+      "name": "Tencent Video",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Tudou"
+      ],
+      "category": "Video",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "youku.com",
+        "ykimg.com",
+        "youku.tv",
+        "tudou.com"
+      ],
+      "id": "youku",
+      "name": "Youku",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "MGTV",
+        "MangoTV"
+      ],
+      "category": "Video",
+      "company": "Hunan Broadcasting System",
+      "default_route": "direct",
+      "domains": [
+        "mgtv.com",
+        "hunantv.com"
+      ],
+      "id": "mango-tv",
+      "name": "Mango TV",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Xigua"
+      ],
+      "category": "Video",
+      "company": "ByteDance",
+      "default_route": "direct",
+      "domains": [
+        "ixigua.com",
+        "snssdk.com"
+      ],
+      "id": "xigua-video",
+      "name": "Xigua Video",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Huya Live"
+      ],
+      "category": "Video",
+      "company": "Huya",
+      "default_route": "direct",
+      "domains": [
+        "huya.com",
+        "msstatic.com"
+      ],
+      "id": "huya",
+      "name": "Huya",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Douyu Live"
+      ],
+      "category": "Video",
+      "company": "Douyu",
+      "default_route": "direct",
+      "domains": [
+        "douyu.com",
+        "douyu.tv"
+      ],
+      "id": "douyu",
+      "name": "Douyu",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "56 Video"
+      ],
+      "category": "Video",
+      "company": "Sohu",
+      "default_route": "direct",
+      "domains": [
+        "tv.sohu.com",
+        "sohu.com",
+        "sohucs.com",
+        "56.com",
+        "56img.com"
+      ],
+      "id": "sohu-video",
+      "name": "Sohu Video",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "QQMusic"
+      ],
+      "category": "Music",
+      "company": "Tencent Music",
+      "default_route": "direct",
+      "domains": [
+        "y.qq.com",
+        "qqmusic.qq.com"
+      ],
+      "id": "qq-music",
+      "name": "QQ Music",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Cloud Music",
+        "Wangyi Music"
+      ],
+      "category": "Music",
+      "company": "NetEase",
+      "default_route": "direct",
+      "domains": [
+        "music.163.com",
+        "163yun.com"
+      ],
+      "id": "netease-cloud-music",
+      "name": "NetEase Cloud Music",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "KuGou"
+      ],
+      "category": "Music",
+      "company": "Tencent Music",
+      "default_route": "direct",
+      "domains": [
+        "kugou.com",
+        "kugou.net",
+        "kgimg.com",
+        "kugouaudio.com"
+      ],
+      "id": "kugou",
+      "name": "Kugou Music",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "KuWo"
+      ],
+      "category": "Music",
+      "company": "Tencent Music",
+      "default_route": "direct",
+      "domains": [
+        "kuwo.cn",
+        "koowo.com",
+        "koowo.cn"
+      ],
+      "id": "kuwo",
+      "name": "Kuwo Music",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Jingdong",
+        "JD"
+      ],
+      "category": "Commerce",
+      "company": "JD.com",
+      "default_route": "direct",
+      "domains": [
+        "jd.com",
+        "360buyimg.com",
+        "3.cn",
+        "jdcloud.com"
+      ],
+      "id": "jd",
+      "name": "JD.com",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "PDD"
+      ],
+      "category": "Commerce",
+      "company": "PDD Holdings",
+      "default_route": "direct",
+      "domains": [
+        "pinduoduo.com",
+        "pinduoduo.net",
+        "pddcdn.com",
+        "yangkeduo.com"
+      ],
+      "id": "pinduoduo",
+      "name": "Pinduoduo",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Goofish",
+        "Idle Fish"
+      ],
+      "category": "Commerce",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "2.taobao.com",
+        "goofish.com",
+        "alicdn.com"
+      ],
+      "id": "xianyu",
+      "name": "Xianyu",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "VIP.com"
+      ],
+      "category": "Commerce",
+      "company": "Vipshop",
+      "default_route": "direct",
+      "domains": [
+        "vip.com",
+        "vipstatic.com"
+      ],
+      "id": "vipshop",
+      "name": "Vipshop",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Suning.com"
+      ],
+      "category": "Commerce",
+      "company": "Suning",
+      "default_route": "direct",
+      "domains": [
+        "suning.com",
+        "suning.cn",
+        "cnsuning.com",
+        "suningcloud.com"
+      ],
+      "id": "suning",
+      "name": "Suning",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Zhifubao",
+        "Ant Financial"
+      ],
+      "category": "Finance",
+      "company": "Ant Group",
+      "default_route": "direct",
+      "domains": [
+        "alipay.com",
+        "alipayobjects.com",
+        "alipaydns.com",
+        "antgroup.com"
+      ],
+      "id": "alipay",
+      "name": "Alipay",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Eleme"
+      ],
+      "category": "Local services",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "ele.me",
+        "eleme.cn",
+        "elemecdn.com"
+      ],
+      "id": "eleme",
+      "name": "Ele.me",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Didi Chuxing"
+      ],
+      "category": "Local services",
+      "company": "DiDi",
+      "default_route": "direct",
+      "domains": [
+        "didi.cn",
+        "didichuxing.com",
+        "didistatic.com",
+        "xiaojukeji.com"
+      ],
+      "id": "didi",
+      "name": "DiDi",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Xiecheng",
+        "Trip.com"
+      ],
+      "category": "Travel",
+      "company": "Trip.com Group",
+      "default_route": "direct",
+      "domains": [
+        "ctrip.com",
+        "ctrip.cn",
+        "trip.com"
+      ],
+      "id": "ctrip",
+      "name": "Ctrip & Trip.com",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Qunar.com"
+      ],
+      "category": "Travel",
+      "company": "Trip.com Group",
+      "default_route": "direct",
+      "domains": [
+        "qunar.com",
+        "qunarzz.com"
+      ],
+      "id": "qunar",
+      "name": "Qunar",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Feizhu",
+        "AliTrip"
+      ],
+      "category": "Travel",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "fliggy.com",
+        "alitrip.com",
+        "alicdn.com"
+      ],
+      "id": "fliggy",
+      "name": "Fliggy",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Gaode Maps",
+        "AutoNavi"
+      ],
+      "category": "Local services",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "amap.com",
+        "amap.net",
+        "autonavi.com",
+        "gaode.com"
+      ],
+      "id": "amap",
+      "name": "Amap",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Baidu Map"
+      ],
+      "category": "Local services",
+      "company": "Baidu",
+      "default_route": "direct",
+      "domains": [
+        "map.baidu.com",
+        "bdimg.com"
+      ],
+      "id": "baidu-maps",
+      "name": "Baidu Maps",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "12306",
+        "China Railway"
+      ],
+      "category": "Travel",
+      "company": "China State Railway",
+      "default_route": "direct",
+      "domains": [
+        "12306.cn",
+        "95306.cn"
+      ],
+      "id": "railway-12306",
+      "name": "China Railway 12306",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Cainiao Post",
+        "Cainiao Guoguo"
+      ],
+      "category": "Local services",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "cainiao.com",
+        "cainiaoyizhan.com"
+      ],
+      "id": "cainiao",
+      "name": "Cainiao",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Shunfeng",
+        "SF"
+      ],
+      "category": "Local services",
+      "company": "SF Holding",
+      "default_route": "direct",
+      "domains": [
+        "sf.cn",
+        "sf-international.com",
+        "sf-cityrush.com"
+      ],
+      "id": "sf-express",
+      "name": "SF Express",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Ding Ding"
+      ],
+      "category": "Work",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "dingtalk.com",
+        "dingtalk.cn",
+        "dingtalkapps.com",
+        "ddurl.to"
+      ],
+      "id": "dingtalk",
+      "name": "DingTalk",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Fei Shu",
+        "China Lark"
+      ],
+      "category": "Work",
+      "company": "ByteDance",
+      "default_route": "direct",
+      "domains": [
+        "feishu.cn",
+        "feishuapp.cn"
+      ],
+      "id": "feishu",
+      "name": "Feishu",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Lark Suite",
+        "Global Feishu"
+      ],
+      "category": "Work",
+      "company": "ByteDance",
+      "default_route": "vpn",
+      "domains": [
+        "larksuite.com",
+        "larkoffice.com"
+      ],
+      "id": "lark",
+      "name": "Lark",
+      "preferred_region": "singapore",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Kingsoft Office",
+        "Jinshan Docs"
+      ],
+      "category": "Work",
+      "company": "Kingsoft",
+      "default_route": "direct",
+      "domains": [
+        "wps.cn",
+        "wps.com",
+        "wpscdn.cn",
+        "kdocs.cn"
+      ],
+      "id": "wps",
+      "name": "WPS Office",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "VooV Meeting"
+      ],
+      "category": "Work",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "meeting.tencent.com",
+        "voovmeeting.com",
+        "qq.com"
+      ],
+      "id": "tencent-meeting",
+      "name": "Tencent Meeting",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Baidu Pan",
+        "Baidu Wangpan"
+      ],
+      "category": "Cloud",
+      "company": "Baidu",
+      "default_route": "direct",
+      "domains": [
+        "pan.baidu.com",
+        "baidupcs.com"
+      ],
+      "id": "baidu-netdisk",
+      "name": "Baidu Netdisk",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Aliyun Pan",
+        "AliPan"
+      ],
+      "category": "Cloud",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "alipan.com",
+        "aliyundrive.com",
+        "aliyundrive.net"
+      ],
+      "id": "aliyun-drive",
+      "name": "Aliyun Drive",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Jianguoyun",
+        "Jian Guo Yun",
+        "Nutstore Cloud"
+      ],
+      "category": "Cloud",
+      "company": "Nutstore",
+      "default_route": "direct",
+      "domains": [
+        "jianguoyun.com",
+        "www.jianguoyun.com",
+        "app.jianguoyun.com",
+        "comet.jianguoyun.com",
+        "dav.jianguoyun.com",
+        "pkg-cdn.jianguoyun.com",
+        "nutstore.net"
+      ],
+      "id": "nutstore",
+      "name": "Nutstore (Jianguoyun)",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Weiyun Cloud"
+      ],
+      "category": "Cloud",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "weiyun.com",
+        "weiyun.qq.com",
+        "qpic.cn"
+      ],
+      "id": "weiyun",
+      "name": "Tencent Weiyun",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Quark Browser",
+        "Quark Pan"
+      ],
+      "category": "Cloud",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "quark.cn",
+        "myquark.cn",
+        "uc.cn"
+      ],
+      "id": "quark-cloud",
+      "name": "Quark Cloud Drive",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Sunflower Remote",
+        "Xiangrikui"
+      ],
+      "category": "Remote access",
+      "company": "Oray",
+      "default_route": "direct",
+      "domains": [
+        "sunlogin.oray.com",
+        "oray.com",
+        "oray.net"
+      ],
+      "id": "sunlogin",
+      "name": "Sunlogin",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "To Desk"
+      ],
+      "category": "Remote access",
+      "company": "ToDesk",
+      "default_route": "direct",
+      "domains": [
+        "todesk.com",
+        "todesk.com.cn"
+      ],
+      "id": "todesk",
+      "name": "ToDesk",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "WeGame"
+      ],
+      "category": "Gaming",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "game.qq.com"
+      ],
+      "id": "tencent-games",
+      "name": "Tencent Games",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Wangyi Games"
+      ],
+      "category": "Gaming",
+      "company": "NetEase",
+      "default_route": "direct",
+      "domains": [
+        "game.163.com",
+        "neteasegames.com",
+        "126.net",
+        "127.net"
+      ],
+      "id": "netease-games",
+      "name": "NetEase Games",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Genshin China",
+        "Yuan Shen"
+      ],
+      "category": "Gaming",
+      "company": "miHoYo",
+      "default_route": "direct",
+      "domains": [
+        "mihoyo.com",
+        "yuanshen.com",
+        "bh3.com",
+        "miyoushe.com"
+      ],
+      "id": "mihoyo",
+      "name": "miHoYo",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Genshin Impact",
+        "Honkai Star Rail",
+        "Zenless Zone Zero"
+      ],
+      "category": "Gaming",
+      "company": "miHoYo",
+      "default_route": "vpn",
+      "domains": [
+        "hoyoverse.com",
+        "hoyolab.com",
+        "genshinimpact.com",
+        "honkaistarrail.com",
+        "zenlesszonezero.com"
+      ],
+      "id": "hoyoverse",
+      "name": "HoYoverse",
+      "preferred_region": "singapore",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Tap Tap"
+      ],
+      "category": "Gaming",
+      "company": "XD",
+      "default_route": "direct",
+      "domains": [
+        "taptap.cn",
+        "taptap.com",
+        "taptap.io"
+      ],
+      "id": "taptap",
+      "name": "TapTap",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Sogou Search",
+        "Sogou Input"
+      ],
+      "category": "Web",
+      "company": "Tencent",
+      "default_route": "direct",
+      "domains": [
+        "sogou.com",
+        "sogou.cn",
+        "sogoucdn.com",
+        "pinyin.cn"
+      ],
+      "id": "sogou",
+      "name": "Sogou",
+      "preferred_region": "direct",
+      "profile_type": "company",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "Haosou",
+        "Qihoo Search"
+      ],
+      "category": "Web",
+      "company": "Qihoo 360",
+      "default_route": "direct",
+      "domains": [
+        "so.com",
+        "360.cn",
+        "360.com"
+      ],
+      "id": "so360",
+      "name": "360 Search",
+      "preferred_region": "direct",
+      "profile_type": "website",
+      "provider_country": "China"
+    },
+    {
+      "aliases": [
+        "UC"
+      ],
+      "category": "Web",
+      "company": "Alibaba Group",
+      "default_route": "direct",
+      "domains": [
+        "uc.cn",
+        "ucweb.com",
+        "open-uc.cn"
+      ],
+      "id": "uc-browser",
+      "name": "UC Browser",
+      "preferred_region": "direct",
+      "profile_type": "app",
+      "provider_country": "China"
+    }
+  ]
+}

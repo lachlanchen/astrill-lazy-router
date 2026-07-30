@@ -3,10 +3,12 @@
 ## Trust Boundaries
 
 - The router controller runs as DD-WRT root.
-- The desktop app runs as the logged-in Ubuntu or Windows user.
+- The desktop app or portable agent runs as the logged-in computer user.
 - Only the application namespace helper runs through Polkit.
 - Astrill remains an independent privileged applet.
 - Catalog extensions are data-only and are not executed.
+- Public policy bundles are untrusted catalog references validated on the
+  computer; the router never downloads or executes them.
 
 ## Router Access
 
@@ -49,7 +51,7 @@ an already-confirmed, fingerprint-matched package from router NVRAM after
 reboot, but it never silently installs or persistently rewrites a missing,
 stale, or inconsistent package.
 
-The Windows hybrid deployment manifest contains no secret. It records a
+The hybrid deployment manifest contains no secret. It records a
 random controller ID, confirmed router host-key fingerprint, companion
 version and exact package MD5, expected core and owner-overlay generations and
 document MD5 hashes, the allowed source address/MAC binding, the most recently
@@ -57,6 +59,13 @@ observed runtime epoch, and the last one-shot restore attempt. A router,
 version, package, source, MAC, hash, or generation mismatch blocks silent
 replacement and requires explicit review. The SSH private key remains the
 authentication boundary.
+
+The portable manifest additionally pins the helper and overlay digests. Its
+bundle contains a single known-host line but no private key. First enrollment
+must run from the target computer and records the router-observed source/MAC
+binding. Login startup is enabled only after that explicit enrollment.
+Upgrades retain enrollment only when immutable router, package, owner, helper,
+source, and overlay identity matches.
 
 A fresh configuration is native-only and read-only. The GUI and CLI block
 policy apply/rollback/refresh, endpoint switching, connection changes, and
@@ -127,6 +136,14 @@ The DD-WRT page permits only fixed command names and validated IDs. Arbitrary
 website text is edited over SSH in the native app, not interpolated into
 `apply.cgi`.
 
+Policy bundle schema version 1 permits only catalog service IDs, origin IDs,
+Direct/Astrill route, maintained region ID, enabled state, and bounded
+priority. Remote fetch requires HTTPS, redirects must remain HTTPS, apply
+requires an exact SHA-256, and documents are bounded to 128 KiB and 320 rules.
+Unknown fields, services, regions, duplicate origins, and duplicate services
+are rejected. Replace/merge updates one atomic local configuration and never
+writes the router.
+
 ## Routing Safety
 
 - Private/local destinations return before policy marking.
@@ -170,6 +187,9 @@ website text is edited over SSH in the native app, not interpolated into
   MD5, and RAM-helper MD5. `alctl` verifies the running and stored base identity
   plus the helper executable under the controller lock before sourcing helper
   code or changing policy state.
+- Portable staging can write only the fixed RAM helper and read-only policy
+  page targets. It verifies payload digests, package identity, NVRAM package
+  metadata, and the shared controller lock before atomic replacement.
 - The watchdog checks applet/firewall restarts every 60 seconds. Its 30-cycle
   DNS rebuild is core-only and runs only while no RAM overlay is active.
 - `alctl stop` removes only plugin-owned objects.
@@ -234,8 +254,10 @@ The repository contains a public encryption certificate and encrypted CMS
 backup only. The decryption key, SSH key, Astrill account values, generated VPN
 configuration, and account-specific installer URL remain outside Git.
 
-Before release, the publishable tree is scanned for the known installer account
-and token values.
+Before release, the publishable tree is scanned for the known installer
+account and token values. The separate public policy repository is also
+scanned for private IPv4 addresses, MAC addresses, local host paths, private
+keys, and Astrill installer material.
 
 ## Upstream Risk
 

@@ -8,7 +8,7 @@ MAX_OVERLAY_BYTES=32768
 MAX_OVERLAY_ROWS=320
 MAX_OVERLAYS=8
 MAX_EFFECTIVE_BYTES=131072
-MAX_EFFECTIVE_ROWS=512
+MAX_EFFECTIVE_ROWS=640
 MAX_GENERATED_MATCHES=1536
 MIN_POLICY_FREE_KIB=8192
 MAX_POLICY_APPLY_SECONDS=240
@@ -241,6 +241,7 @@ append_compiled_rule() {
     old_ifs=$IFS
     IFS=,
     set -f
+    # shellcheck disable=SC2086
     set -- $ports
     set +f
     IFS=$old_ifs
@@ -494,6 +495,7 @@ hybrid_plan_compiled_rule() {
     hybrid_compiled_ifs=$IFS
     IFS=,
     set -f
+    # shellcheck disable=SC2086
     set -- $hybrid_compiled_ports
     set +f
     IFS=$hybrid_compiled_ifs
@@ -777,6 +779,8 @@ build_chain() {
             return 1
         }
         hybrid_generated=0
+        # Failure exits the function immediately after removing the plan.
+        # shellcheck disable=SC2094
         while IFS="$TAB" read -r \
             hybrid_build_kind hybrid_build_selector hybrid_build_target \
             hybrid_build_protocol hybrid_build_port hybrid_build_source \
@@ -916,6 +920,7 @@ hybrid_normalize_source() {
     hybrid_requested=$1
     hybrid_mac=-
     if [ "$hybrid_requested" = auto ]; then
+        # shellcheck disable=SC2086
         set -- ${SSH_CONNECTION:-}
         [ "$#" -eq 4 ] || {
             printf 'auto source requires SSH connection identity\n' >&2

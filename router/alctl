@@ -2425,44 +2425,13 @@ set_astrill_connection() {
 usage() {
     cat <<'EOF'
 Usage: alctl COMMAND
-
-  status [--json]
-  rules
-  validate-persisted-core [--json]
-                        Independently validate the next boot's stored core
-  apply VERSION PACKAGE_MD5 HELPER_MD5 FILE|-
-                        Administrative core apply without generation CAS
-  core-apply VERSION PACKAGE_MD5 HELPER_MD5 GENERATION FILE|-
-                        Apply persistent core if its generation still matches
-  refresh [--json]      Re-resolve domains and rebuild the active policy
-  rollback VERSION PACKAGE_MD5 HELPER_MD5 [--json]
-                        Administrative rollback without generation CAS
-  core-rollback VERSION PACKAGE_MD5 HELPER_MD5 GENERATION [--json]
-                        Restore previous core if its generation still matches
-  overlay-put VERSION PACKAGE_MD5 HELPER_MD5 OWNER GENERATION SOURCE EXPECTED_SOURCE EXPECTED_MAC FILE|-
-                        Replace one RAM overlay; use - for no binding precondition
-  overlay-remove VERSION PACKAGE_MD5 HELPER_MD5 OWNER GENERATION
-                        Remove one owner overlay if its generation still matches
-  overlay-list [--json] Show RAM overlays and effective layered status
-  effective-status [--json]
-                        Show persistent core, overlays, and effective status
-  toggle-origin VERSION PACKAGE_MD5 HELPER_MD5 ID
-                        Enable or disable all compiled rules for an origin
-  route-origin VERSION PACKAGE_MD5 HELPER_MD5 ID ROUTE
-                        Set an origin to direct or vpn
-  app-flow list         Show transient application source-port routes
-  app-flow set ID SOURCE PROTOCOL PORTS ROUTE
-                        Set one transient application source-port route
-  app-flow delete ID    Delete one transient application source-port route
-  clients [--json]      List DHCP clients
-  astrill-switch ...    Transactionally switch Astrill server settings
-  astrill-connect       Connect using Astrill's current native settings
-  astrill-disconnect    Disconnect Astrill and preserve its current settings
-  ensure                Repair policy routes and hooks
-  start                 Start policy routing and the watchdog
-  stop                  Stop the watchdog and remove only this plugin's policy
-  logs                  Show recent controller log entries
-  version               Print the installed version
+status rules validate-persisted-core effective-status apply core-apply rollback
+core-rollback refresh overlay-put overlay-remove overlay-list toggle-origin
+route-origin app-flow clients astrill-switch astrill-connect astrill-disconnect
+ensure start stop logs version
+Writes require package/helper identity and generation; use the desktop app.
+core-apply VERSION PACKAGE_MD5 HELPER_MD5 GENERATION FILE|-
+overlay-put VERSION PACKAGE_MD5 HELPER_MD5 OWNER GENERATION SOURCE EXPECTED_SOURCE EXPECTED_MAC FILE|-
 EOF
 }
 

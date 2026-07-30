@@ -1,5 +1,36 @@
 # Backup And Restore
 
+## Pre-0.2.12 Upgrade Snapshot
+
+The live router was captured immediately before the planned companion
+`0.2.10` to `0.2.12` upgrade:
+
+```text
+.private-backups/20260731-013246-pre-0.2.12
+backups/astrill-router-backup-20260731-013246-pre-0.2.12.cms
+```
+
+The private snapshot contains complete NVRAM, the existing companion and
+Astrill runtime archive, controller status, the 5,959-byte effective rule
+document, firewall/routing/interface/process/memory/DNS state, Ubuntu
+configuration, router public key, and Ubuntu/macOS connectivity baselines.
+The installed `0.2.10` companion does not implement `effective-status`; its
+ordinary status, rule document, runtime files, and NVRAM policy were captured
+instead.
+
+The snapshot has 15 archive entries. Its verified identities are:
+
+```text
+plaintext bytes: 113260
+plaintext SHA-256: 9462bcc4064eaee74d04e18cd8e5b11c7f922f9602d20289e191b407525d8d65
+ciphertext bytes: 113822
+ciphertext SHA-256: ab9c28f67521c5d4afdb0f64d15ff66d41d56d69061a815ffd0a9bd0155d98c9
+```
+
+CMS decryption was tested with the existing mode `0600` private key and the
+result compared byte-for-byte with the Git-ignored plaintext archive. The
+temporary decrypted copy was removed after verification.
+
 ## Private DHCP Change Record
 
 The current static DHCP migration is intentionally not committed because it
