@@ -8,7 +8,12 @@ from .models import Compilation, CompiledRule, MatchKind, Rule
 MAX_COMPILED_BYTES = 6144
 
 
-def compile_rules(rules: list[Rule], catalog: Catalog) -> Compilation:
+def compile_rules(
+    rules: list[Rule],
+    catalog: Catalog,
+    *,
+    max_bytes: int | None = MAX_COMPILED_BYTES,
+) -> Compilation:
     services = catalog.services_by_id
     regions = catalog.regions_by_id
     compiled: list[CompiledRule] = []
@@ -103,10 +108,10 @@ def compile_rules(rules: list[Rule], catalog: Catalog) -> Compilation:
 
     compilation = Compilation(tuple(compiled), tuple(warnings))
     compiled_bytes = len(compilation.to_tsv().encode("ascii"))
-    if compiled_bytes > MAX_COMPILED_BYTES:
+    if max_bytes is not None and compiled_bytes > max_bytes:
         raise ValueError(
             f"compiled policy is {compiled_bytes:,} bytes; the router limit is "
-            f"{MAX_COMPILED_BYTES:,}. Use narrower app profiles or remove policies."
+            f"{max_bytes:,}. Use narrower app profiles or remove policies."
         )
     return compilation
 

@@ -18,6 +18,7 @@ from typing import Any
 from .router import RouterClient, RouterError
 
 PACKAGE_FILES = ("alctl", "alapi", "alpage", "VERSION")
+HYBRID_HELPER_FILE = "alhybrid"
 CHUNK_SIZE = 1800
 STARTUP_LINE = "nvram get astrill_lazy_bootstrap | sh;"
 PAGE_COMMANDS = (
@@ -56,6 +57,13 @@ class CompanionCheck:
     reason: str
 
 
+@dataclass(frozen=True)
+class HybridHelperResult:
+    action: str
+    helper_bytes: int
+    helper_md5: str
+
+
 class RouterInstaller:
     def __init__(self, client: RouterClient) -> None:
         self.client = client
@@ -69,6 +77,21 @@ class RouterInstaller:
     def expected_package_md5(self) -> str:
         archive = build_router_package(self.router_root)
         return hashlib.md5(archive, usedforsecurity=False).hexdigest()
+
+    def ensure_hybrid_helper(self) -> HybridHelperResult:
+        """Stage the optional overlay engine in RAM without touching NVRAM."""
+
+        helper = self.router_root / HYBRID_HELPER_FILE
+        if not helper.is_file():
+            raise FileNotFoundError(f"router hybrid helper was not found: {helper}")
+        payload = helper.read_bytes()
+        digest = hashlib.md5(payload, usedforsecurity=False).hexdigest()
+        action = self.client.ensure_hybrid_helper(payload, digest)
+        return HybridHelperResult(
+            action=action,
+            helper_bytes=len(payload),
+            helper_md5=digest,
+        )
 
     def check(
         self,

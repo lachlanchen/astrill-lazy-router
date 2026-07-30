@@ -24,6 +24,9 @@ from .native_settings import (
 from .subprocess_support import background_process_options
 
 DOMAIN_REFRESH_TIMEOUT = 180
+OVERLAY_OWNER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+MD5_RE = re.compile(r"^[0-9a-f]{32}$")
+HYBRID_HELPER_PATH = "/tmp/astrill-lazy/alhybrid"
 
 
 class RouterError(RuntimeError):
@@ -150,6 +153,138 @@ class RouterClient:
             raise RouterError(
                 f"router returned invalid application flow result: {exc}"
             ) from exc
+
+    def core_apply(self, rules_tsv: str) -> dict[str, Any]:
+        """Persist and activate the core layer without changing RAM overlays."""
+
+        result = self._run_alctl(
+            ["core-apply", "-"],
+            input_bytes=rules_tsv.encode("ascii"),
+            timeout=120,
+        )
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid core apply result",
+        )
+
+    def core_rollback(self) -> dict[str, Any]:
+        result = self._run_alctl(["core-rollback", "--json"], timeout=120)
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid core rollback result",
+        )
+
+    def overlay_put(
+        self,
+        owner: str,
+        expected_generation: int,
+        source: str,
+        rules_tsv: str,
+    ) -> dict[str, Any]:
+        normalized_owner = _validate_overlay_owner(owner)
+        generation = _validate_generation(expected_generation)
+        normalized_source = str(source).strip()
+        if not normalized_source:
+            raise ValueError("overlay source cannot be empty")
+        result = self._run_alctl(
+            [
+                "overlay-put",
+                normalized_owner,
+                str(generation),
+                normalized_source,
+                "-",
+            ],
+            input_bytes=rules_tsv.encode("ascii"),
+            timeout=120,
+        )
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid overlay apply result",
+        )
+
+    def overlay_remove(
+        self,
+        owner: str,
+        expected_generation: int,
+    ) -> dict[str, Any]:
+        result = self._run_alctl(
+            [
+                "overlay-remove",
+                _validate_overlay_owner(owner),
+                str(_validate_generation(expected_generation)),
+            ],
+            timeout=120,
+        )
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid overlay remove result",
+        )
+
+    def overlay_list(self) -> dict[str, Any]:
+        result = self._run_alctl(["overlay-list", "--json"])
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid overlay list",
+        )
+
+    def effective_status(self) -> dict[str, Any]:
+        """Return layered policy status from a hybrid-capable companion."""
+
+        result = self._run_alctl(["effective-status", "--json"])
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid layered policy status",
+        )
+
+    def ensure_hybrid_helper(
+        self,
+        payload: bytes,
+        expected_md5: str,
+    ) -> str:
+        """Atomically stage the desktop-shipped overlay helper in router RAM."""
+
+        normalized_md5 = str(expected_md5).strip().casefold()
+        if not MD5_RE.fullmatch(normalized_md5):
+            raise ValueError("hybrid helper MD5 is invalid")
+        if not payload:
+            raise ValueError("hybrid helper payload cannot be empty")
+        script = f"""
+set -e
+target={shlex.quote(HYBRID_HELPER_PATH)}
+expected={shlex.quote(normalized_md5)}
+[ -d /tmp/astrill-lazy ] || {{
+    printf '%s\\n' 'companion runtime directory is missing' >&2
+    exit 1
+}}
+if [ -f "$target" ] && [ -x "$target" ] &&
+   [ "$(md5sum "$target" | awk '{{print $1}}')" = "$expected" ]; then
+    cat >/dev/null
+    printf current
+    exit 0
+fi
+temporary="$target.$$"
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+umask 077
+cat > "$temporary"
+actual=$(md5sum "$temporary" | awk '{{print $1}}')
+[ "$actual" = "$expected" ] || {{
+    printf '%s\\n' 'hybrid helper upload failed MD5 verification' >&2
+    exit 1
+}}
+chmod 700 "$temporary"
+mv -f "$temporary" "$target"
+[ -x "$target" ]
+printf installed
+"""
+        result = self._run_remote(
+            ["/bin/sh", "-c", script],
+            input_bytes=payload,
+            timeout=60,
+        )
+        action = result.stdout.strip()
+        if action not in {"current", "installed"}:
+            raise RouterError("router omitted the hybrid helper install result")
+        return action
 
     def rollback(self) -> dict[str, Any]:
         result = self._run_alctl(["rollback", "--json"])
@@ -734,6 +869,19 @@ def _openssh_config_path(value: str | Path) -> str:
     """Encode a path embedded in an OpenSSH ``-o`` configuration value."""
     normalized = Path(value).expanduser().as_posix()
     return "".join(f"\\{char}" if char in {" ", "\t"} else char for char in normalized)
+
+
+def _validate_overlay_owner(value: str) -> str:
+    normalized = str(value).strip().casefold()
+    if not OVERLAY_OWNER_RE.fullmatch(normalized):
+        raise ValueError("overlay owner ID is invalid")
+    return normalized
+
+
+def _validate_generation(value: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("overlay generation must be a non-negative integer")
+    return value
 
 
 def _last_json_line(output: str) -> str:

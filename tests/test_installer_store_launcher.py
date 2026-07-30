@@ -526,6 +526,8 @@ def test_router_uninstall_audits_cleanup_and_preserves_native_state() -> None:
     assert "astrill_lazy_pkg_1" in client.script
     assert "astrill_lazy_rules_gz" in client.script
     assert "astrill_lazy_rules_previous_gz" in client.script
+    assert "nvram unset astrill_lazy_rules" in client.script
+    assert "nvram unset astrill_lazy_rules_previous" in client.script
     assert "rm -rf /tmp/astrill-lazy" in client.script
     assert "iptables -w 10 -t mangle -S" in client.script
     assert "iptables -w 10 -t filter -S" in client.script

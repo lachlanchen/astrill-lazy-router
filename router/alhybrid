@@ -1,0 +1,668 @@
+#!/bin/sh
+
+# RAM-only hybrid policy extension. This file is sourced by alctl.
+
+GENERATED_MATCHES_FILE=$BASE/generated-matches
+MAX_OVERLAY_BYTES=32768
+MAX_OVERLAY_ROWS=320
+MAX_OVERLAYS=8
+MAX_EFFECTIVE_BYTES=131072
+MAX_EFFECTIVE_ROWS=512
+MAX_GENERATED_MATCHES=1536
+MIN_POLICY_FREE_KIB=8192
+MAX_POLICY_APPLY_SECONDS=30
+HYBRID_MEMINFO_FILE=${ASTRILL_LAZY_MEMINFO_FILE:-/proc/meminfo}
+
+hybrid_validate_rules() {
+    hybrid_saved_limit=$MAX_RULE_BYTES
+    MAX_RULE_BYTES=$MAX_OVERLAY_BYTES
+    validate_rules "$1"
+    hybrid_valid=$?
+    MAX_RULE_BYTES=$hybrid_saved_limit
+    [ "$hybrid_valid" -eq 0 ] || return 1
+    awk -F '\t' '
+        $0 !~ /^#/ {
+            if ($4 == "device" || seen[$1]++) exit 1
+        }
+    ' "$1"
+}
+
+append_rule_pair() {
+    chain=$1
+    kind=$2
+    selector=$3
+    target=$4
+    protocol=$5
+    port=$6
+    scope_source=${7:--}
+    scope_mac=${8:--}
+    [ "$target" = direct ] && mark=$DIRECT_MARK || mark=$VPN_MARK
+    set -- iptables -w 10 -t mangle -A "$chain"
+    if [ "$scope_source" != - ]; then
+        set -- "$@" -s "$scope_source"
+        [ "$scope_mac" = - ] ||
+            set -- "$@" -m mac --mac-source "$scope_mac"
+    fi
+    case $kind in
+        destination) set -- "$@" -d "$selector" ;;
+        source) set -- "$@" -s "$selector" ;;
+        *) return 1 ;;
+    esac
+    [ "$protocol" = any ] || set -- "$@" -p "$protocol"
+    [ "$port" = - ] || set -- "$@" --dport "$port"
+    hybrid_generated=$((hybrid_generated + 1))
+    [ "$hybrid_generated" -le "$MAX_GENERATED_MATCHES" ] || return 1
+    "$@" -j MARK --set-xmark "$mark/$MARK_MASK" &&
+        "$@" -j RETURN
+}
+
+append_compiled_rule() {
+    chain=$1
+    kind=$2
+    selector=$3
+    target=$4
+    protocol=$5
+    ports=$6
+    source_scope=${7:--}
+    scope_mac=${8:--}
+    if [ "$ports" = - ]; then
+        append_rule_pair "$chain" "$kind" "$selector" "$target" "$protocol" \
+            - "$source_scope" "$scope_mac"
+        return
+    fi
+    old_ifs=$IFS
+    IFS=,
+    set -f
+    set -- $ports
+    set +f
+    IFS=$old_ifs
+    for port in "$@"; do
+        append_rule_pair "$chain" "$kind" "$selector" "$target" "$protocol" \
+            "$port" "$source_scope" "$scope_mac" || return 1
+    done
+}
+
+hybrid_policy_free_kib() {
+    awk '
+        $1 == "MemAvailable:" { available = $2 }
+        $1 == "MemFree:" { free = $2 }
+        $1 == "Buffers:" { buffers = $2 }
+        $1 == "Cached:" { cached = $2 }
+        END {
+            reclaimable = free + buffers + cached
+            print (available > reclaimable ? available : reclaimable)
+        }
+    ' "$HYBRID_MEMINFO_FILE" 2>/dev/null
+}
+
+build_chain() {
+    chain=$1
+    file=$2
+    refresh_mode=${3:-0}
+    hybrid_free=$(hybrid_policy_free_kib)
+    is_uint "$hybrid_free" &&
+        [ "$hybrid_free" -ge "$MIN_POLICY_FREE_KIB" ] || return 1
+    hybrid_generated=0
+    hybrid_started=$(date +%s)
+    new_resolved=$BASE/resolved.new.tsv
+    : > "$new_resolved"
+    : > "$UNRESOLVED"
+    ensure_chain_shell "$chain" || return 1
+    while IFS="$TAB" read -r id enabled priority kind selector target \
+        protocol ports label origin source_scope scope_mac; do
+        case $id in ''|\#*) continue ;; esac
+        [ "$enabled" = 1 ] || continue
+        [ -n "$source_scope" ] || source_scope=-
+        [ -n "$scope_mac" ] || scope_mac=-
+        case $kind in
+            domain)
+                addresses=$(
+                    domain_addresses "$selector" "$new_resolved" "$refresh_mode"
+                )
+                if [ -z "$addresses" ]; then
+                    printf '%s\n' "$selector" >> "$UNRESOLVED"
+                    continue
+                fi
+                for address in $addresses; do
+                    append_compiled_rule \
+                        "$chain" destination "$address/32" "$target" \
+                        "$protocol" "$ports" "$source_scope" "$scope_mac" ||
+                        return 1
+                done
+                ;;
+            cidr)
+                append_compiled_rule \
+                    "$chain" destination "$selector" "$target" "$protocol" \
+                    "$ports" "$source_scope" "$scope_mac" || return 1
+                ;;
+            device)
+                [ "$source_scope" = - ] || return 1
+                append_compiled_rule \
+                    "$chain" source "$selector" "$target" "$protocol" \
+                    "$ports" - - || return 1
+                ;;
+        esac
+    done < "$file"
+    iptables -w 10 -t mangle -A "$chain" -j RETURN || return 1
+    hybrid_free=$(hybrid_policy_free_kib)
+    is_uint "$hybrid_free" &&
+        [ "$hybrid_free" -ge "$MIN_POLICY_FREE_KIB" ] || return 1
+    [ $(( $(date +%s) - hybrid_started )) \
+        -le "$MAX_POLICY_APPLY_SECONDS" ] || return 1
+    printf '%s\n' "$hybrid_generated" > "$GENERATED_MATCHES_FILE"
+    mv "$new_resolved" "$RESOLVED"
+}
+
+hybrid_ipv4_number() {
+    printf '%s\n' "${1%/*}" | awk -F. '
+        NF != 4 { exit 1 }
+        {
+            for (i = 1; i <= 4; i++)
+                if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
+            printf "%.0f\n", (($1 * 256 + $2) * 256 + $3) * 256 + $4
+        }
+    '
+}
+
+hybrid_network_bounds() {
+    hybrid_network=$1
+    valid_ipv4_network "$hybrid_network" || return 1
+    hybrid_address=${hybrid_network%/*}
+    [ "$hybrid_address" != "$hybrid_network" ] ||
+        hybrid_network=$hybrid_network/32
+    hybrid_prefix=${hybrid_network##*/}
+    hybrid_number=$(hybrid_ipv4_number "$hybrid_address") || return 1
+    awk -v address="$hybrid_number" -v prefix="$hybrid_prefix" '
+        BEGIN {
+            size = 2 ^ (32 - prefix)
+            first = int(address / size) * size
+            printf "%.0f\t%.0f\n", first, first + size - 1
+        }
+    '
+}
+
+hybrid_networks_overlap() {
+    hybrid_left=$(hybrid_network_bounds "$1") || return 1
+    hybrid_right=$(hybrid_network_bounds "$2") || return 1
+    hybrid_lf=${hybrid_left%%"$TAB"*}
+    hybrid_ll=${hybrid_left#*"$TAB"}
+    hybrid_rf=${hybrid_right%%"$TAB"*}
+    hybrid_rl=${hybrid_right#*"$TAB"}
+    awk -v lf="$hybrid_lf" -v ll="$hybrid_ll" \
+        -v rf="$hybrid_rf" -v rl="$hybrid_rl" \
+        'BEGIN { exit !(lf <= rl && rf <= ll) }'
+}
+
+hybrid_lan_contains() {
+    hybrid_source_bounds=$(hybrid_network_bounds "$1") || return 1
+    hybrid_source_first=${hybrid_source_bounds%%"$TAB"*}
+    hybrid_source_last=${hybrid_source_bounds#*"$TAB"}
+    hybrid_lan_ip=$(hybrid_ipv4_number "$(nvram get lan_ipaddr)") || return 1
+    hybrid_lan_mask=$(hybrid_ipv4_number "$(nvram get lan_netmask)") ||
+        return 1
+    hybrid_lan_bounds=$(
+        awk -v address="$hybrid_lan_ip" -v mask="$hybrid_lan_mask" '
+            function band(a, b, result, bit) {
+                result = 0
+                bit = 1
+                while (a > 0 || b > 0) {
+                    if (a % 2 >= 1 && b % 2 >= 1) result += bit
+                    a = int(a / 2)
+                    b = int(b / 2)
+                    bit *= 2
+                }
+                return result
+            }
+            BEGIN {
+                first = band(address, mask)
+                printf "%.0f\t%.0f\n", first, first + 4294967295 - mask
+            }
+        '
+    ) || return 1
+    hybrid_lan_first=${hybrid_lan_bounds%%"$TAB"*}
+    hybrid_lan_last=${hybrid_lan_bounds#*"$TAB"}
+    awk -v sf="$hybrid_source_first" -v sl="$hybrid_source_last" \
+        -v lf="$hybrid_lan_first" -v ll="$hybrid_lan_last" \
+        'BEGIN { exit !(sf >= lf && sl <= ll) }'
+}
+
+hybrid_arp_mac() {
+    hybrid_arp_ip=$1
+    hybrid_lan_interface=$(nvram get lan_ifname)
+    [ -n "$hybrid_lan_interface" ] || hybrid_lan_interface=br0
+    awk -v address="$hybrid_arp_ip" -v interface="$hybrid_lan_interface" '
+        NR > 1 && $1 == address &&
+            ($3 == "0x2" || $3 == "0X2") && $6 == interface {
+            print tolower($4)
+            exit
+        }
+    ' "$ARP_FILE" 2>/dev/null
+}
+
+hybrid_normalize_source() {
+    hybrid_requested=$1
+    hybrid_mac=-
+    if [ "$hybrid_requested" = auto ]; then
+        set -- ${SSH_CONNECTION:-}
+        [ "$#" -eq 4 ] || {
+            printf 'auto source requires SSH connection identity\n' >&2
+            return 1
+        }
+        hybrid_requested=$1
+        case $hybrid_requested in */*) return 1 ;; esac
+        hybrid_mac=$(hybrid_arp_mac "$hybrid_requested")
+        valid_mac "$hybrid_mac" || {
+            printf 'SSH source is not resolved on the LAN bridge\n' >&2
+            return 1
+        }
+    fi
+    valid_ipv4_network "$hybrid_requested" || {
+        printf 'overlay source must be an IPv4 host or CIDR\n' >&2
+        return 1
+    }
+    case $hybrid_requested in
+        */*) hybrid_source=$hybrid_requested ;;
+        *) hybrid_source=$hybrid_requested/32 ;;
+    esac
+    hybrid_lan_contains "$hybrid_source" || {
+        printf 'overlay source must stay inside the router LAN\n' >&2
+        return 1
+    }
+    if [ "$hybrid_mac" = - ] &&
+       [ "${hybrid_source##*/}" = 32 ]; then
+        hybrid_discovered=$(hybrid_arp_mac "${hybrid_source%/*}")
+        valid_mac "$hybrid_discovered" && hybrid_mac=$hybrid_discovered
+    fi
+    printf '%s\t%s\n' "$hybrid_source" "$hybrid_mac"
+}
+
+hybrid_meta_path() {
+    printf '%s/%s.meta\n' "$OVERLAY_DIR" "$1"
+}
+
+hybrid_load_meta() {
+    hybrid_owner=$1
+    valid_id "$hybrid_owner" || return 1
+    hybrid_meta=$(hybrid_meta_path "$hybrid_owner")
+    [ -f "$hybrid_meta" ] || return 1
+    IFS="$TAB" read -r \
+        hybrid_generation hybrid_source hybrid_mac hybrid_hash \
+        hybrid_origins hybrid_rows hybrid_bytes hybrid_updated \
+        < "$hybrid_meta" || return 1
+    is_uint "$hybrid_generation" && [ "$hybrid_generation" -gt 0 ] ||
+        return 1
+    valid_ipv4_network "$hybrid_source" || return 1
+    [ "$hybrid_mac" = - ] || valid_mac "$hybrid_mac" || return 1
+    printf '%s\n' "$hybrid_hash" |
+        grep -Eq '^md5:[[:xdigit:]]{32}$' || return 1
+    for hybrid_value in \
+        "$hybrid_origins" "$hybrid_rows" "$hybrid_bytes" "$hybrid_updated"; do
+        is_uint "$hybrid_value" || return 1
+    done
+    hybrid_document=$OVERLAY_DIR/$hybrid_owner.$hybrid_generation.tsv
+    [ -f "$hybrid_document" ] &&
+        hybrid_validate_rules "$hybrid_document" &&
+        [ "$(document_hash "$hybrid_document")" = "$hybrid_hash" ]
+}
+
+hybrid_owners() {
+    for hybrid_meta_file in "$OVERLAY_DIR"/*.meta; do
+        [ -f "$hybrid_meta_file" ] || continue
+        hybrid_name=${hybrid_meta_file##*/}
+        hybrid_name=${hybrid_name%.meta}
+        hybrid_load_meta "$hybrid_name" || continue
+        printf '%s\n' "$hybrid_name"
+    done | sort -u
+}
+
+hybrid_overlay_count() {
+    hybrid_owners | awk 'NF { count++ } END { print count + 0 }'
+}
+
+hybrid_documents_share_origin() {
+    awk -F '\t' '
+        FNR == NR {
+            if ($0 !~ /^#/ && NF == 10) left[$10] = 1
+            next
+        }
+        $0 !~ /^#/ && NF == 10 && ($10 in left) { found = 1 }
+        END { exit !found }
+    ' "$1" "$2"
+}
+
+hybrid_core_has_collision() {
+    for hybrid_collision_owner in $(hybrid_owners); do
+        hybrid_load_meta "$hybrid_collision_owner" || return 0
+        hybrid_documents_share_origin "$1" "$hybrid_document" && return 0
+    done
+    return 1
+}
+
+hybrid_source_conflicts() {
+    hybrid_candidate_owner=$1
+    hybrid_candidate_source=$2
+    for hybrid_source_owner in $(hybrid_owners); do
+        [ "$hybrid_source_owner" = "$hybrid_candidate_owner" ] && continue
+        hybrid_load_meta "$hybrid_source_owner" || return 0
+        hybrid_networks_overlap "$hybrid_candidate_source" "$hybrid_source" &&
+            return 0
+    done
+    return 1
+}
+
+hybrid_validate_effective() {
+    hybrid_effective=$1
+    [ "$(wc -c < "$hybrid_effective")" -le "$MAX_EFFECTIVE_BYTES" ] ||
+        return 1
+    [ "$(sed -n '1p' "$hybrid_effective")" = \
+        "# astrill-lazy-effective-v1" ] || return 1
+    hybrid_count=$(
+        awk -F '\t' '
+            NR > 1 && $0 !~ /^#/ {
+                if (NF != 12) exit 2
+                count++
+            }
+            END { print count + 0 }
+        ' "$hybrid_effective"
+    ) || return 1
+    is_uint "$hybrid_count" &&
+        [ "$hybrid_count" -le "$MAX_EFFECTIVE_ROWS" ] || return 1
+    while IFS="$TAB" read -r \
+        hybrid_id _ _ hybrid_kind _ _ _ _ _ _ \
+        hybrid_scope hybrid_scope_mac; do
+        case $hybrid_id in ''|\#*) continue ;; esac
+        if [ "$hybrid_scope" = - ]; then
+            [ "$hybrid_scope_mac" = - ] || return 1
+        else
+            valid_ipv4_network "$hybrid_scope" &&
+                [ "$hybrid_kind" != device ] || return 1
+            [ "$hybrid_scope_mac" = - ] ||
+                valid_mac "$hybrid_scope_mac" || return 1
+        fi
+    done < "$hybrid_effective"
+}
+
+hybrid_compose_effective() {
+    hybrid_core=$1
+    hybrid_target=$2
+    hybrid_replacement=${3:-}
+    hybrid_replacement_document=${4:-}
+    hybrid_replacement_source=${5:-}
+    hybrid_replacement_mac=${6:-}
+    hybrid_removed=${7:-}
+    printf '# astrill-lazy-effective-v1\n' > "$hybrid_target" || return 1
+    awk -F '\t' -v OFS='\t' '
+        $0 !~ /^#/ && NF == 10 { print $0, "-", "-" }
+    ' "$hybrid_core" >> "$hybrid_target" || return 1
+    hybrid_list=$BASE/hybrid-owners.$$
+    hybrid_owners > "$hybrid_list"
+    [ -z "$hybrid_replacement" ] ||
+        printf '%s\n' "$hybrid_replacement" >> "$hybrid_list"
+    sort -u "$hybrid_list" > "$hybrid_list.sorted" || return 1
+    while IFS= read -r hybrid_compose_owner; do
+        [ -n "$hybrid_compose_owner" ] || continue
+        [ "$hybrid_compose_owner" = "$hybrid_removed" ] && continue
+        if [ "$hybrid_compose_owner" = "$hybrid_replacement" ]; then
+            hybrid_compose_document=$hybrid_replacement_document
+            hybrid_compose_source=$hybrid_replacement_source
+            hybrid_compose_mac=$hybrid_replacement_mac
+        else
+            hybrid_load_meta "$hybrid_compose_owner" || return 1
+            hybrid_compose_document=$hybrid_document
+            hybrid_compose_source=$hybrid_source
+            hybrid_compose_mac=$hybrid_mac
+        fi
+        awk -F '\t' -v OFS='\t' \
+            -v source="$hybrid_compose_source" \
+            -v mac="$hybrid_compose_mac" '
+            $0 !~ /^#/ && NF == 10 { print $0, source, mac }
+        ' "$hybrid_compose_document" >> "$hybrid_target" || return 1
+    done < "$hybrid_list.sorted"
+    rm -f "$hybrid_list" "$hybrid_list.sorted"
+    hybrid_validate_effective "$hybrid_target"
+}
+
+hybrid_write_meta() {
+    hybrid_meta_target=$1
+    hybrid_meta_generation=$2
+    hybrid_meta_source=$3
+    hybrid_meta_mac=$4
+    hybrid_meta_document=$5
+    hybrid_meta_hash=$(document_hash "$hybrid_meta_document") || return 1
+    hybrid_meta_origins=$(
+        awk -F '\t' '
+            $0 !~ /^#/ && NF == 10 && !seen[$10]++ { count++ }
+            END { print count + 0 }
+        ' "$hybrid_meta_document"
+    )
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$hybrid_meta_generation" "$hybrid_meta_source" "$hybrid_meta_mac" \
+        "$hybrid_meta_hash" "$hybrid_meta_origins" \
+        "$(rule_row_count "$hybrid_meta_document")" \
+        "$(wc -c < "$hybrid_meta_document")" "$(date +%s)" \
+        > "$hybrid_meta_target"
+}
+
+hybrid_restore_transaction() {
+    hybrid_restore_meta=$1
+    hybrid_restore_backup=$2
+    hybrid_restore_chain=$3
+    hybrid_restore_effective=$4
+    if [ -f "$hybrid_restore_backup" ]; then
+        cp "$hybrid_restore_backup" "$hybrid_restore_meta" || true
+    else
+        rm -f "$hybrid_restore_meta"
+    fi
+    if [ -f "$hybrid_restore_effective" ]; then
+        cp "$hybrid_restore_effective" "$EFFECTIVE" || true
+    else
+        rm -f "$EFFECTIVE"
+    fi
+    activate_chain "$hybrid_restore_chain" >/dev/null 2>&1 || true
+}
+
+hybrid_put_overlay() {
+    hybrid_put_owner=$1
+    hybrid_put_expected=$2
+    hybrid_put_requested=$3
+    hybrid_put_candidate=$4
+    valid_id "$hybrid_put_owner" && is_uint "$hybrid_put_expected" ||
+        return 1
+    hybrid_validate_rules "$hybrid_put_candidate" ||
+        return 1
+    hybrid_put_rows=$(rule_row_count "$hybrid_put_candidate")
+    [ "$hybrid_put_rows" -le "$MAX_OVERLAY_ROWS" ] || {
+        printf 'overlay exceeds %s rows\n' "$MAX_OVERLAY_ROWS" >&2
+        return 1
+    }
+    hybrid_put_meta=$(hybrid_meta_path "$hybrid_put_owner")
+    hybrid_put_current=0
+    if [ -f "$hybrid_put_meta" ]; then
+        hybrid_load_meta "$hybrid_put_owner" || return 1
+        hybrid_put_current=$hybrid_generation
+    fi
+    [ "$hybrid_put_expected" = "$hybrid_put_current" ] || {
+        printf 'overlay generation conflict: expected %s, current %s\n' \
+            "$hybrid_put_expected" "$hybrid_put_current" >&2
+        return 1
+    }
+    hybrid_put_binding=$(hybrid_normalize_source "$hybrid_put_requested") ||
+        return 1
+    hybrid_put_source=${hybrid_put_binding%%"$TAB"*}
+    hybrid_put_mac=${hybrid_put_binding#*"$TAB"}
+    hybrid_source_conflicts "$hybrid_put_owner" "$hybrid_put_source" && {
+        printf 'overlay source overlaps another owner\n' >&2
+        return 1
+    }
+    hybrid_documents_share_origin "$CURRENT" "$hybrid_put_candidate" && {
+        printf 'overlay origin collides with persistent core\n' >&2
+        return 1
+    }
+    if [ "$hybrid_put_current" -eq 0 ] &&
+       [ "$(hybrid_overlay_count)" -ge "$MAX_OVERLAYS" ]; then
+        printf 'maximum overlay count reached\n' >&2
+        return 1
+    fi
+    hybrid_put_generation=$((hybrid_put_current + 1))
+    hybrid_put_document=$OVERLAY_DIR/$hybrid_put_owner.$hybrid_put_generation.tsv
+    cp "$hybrid_put_candidate" "$hybrid_put_document" || return 1
+    hybrid_put_effective=$BASE/effective.put.$$.tsv
+    hybrid_compose_effective \
+        "$CURRENT" "$hybrid_put_effective" "$hybrid_put_owner" \
+        "$hybrid_put_document" "$hybrid_put_source" "$hybrid_put_mac" ||
+        return 1
+    hybrid_put_new_meta=$OVERLAY_DIR/$hybrid_put_owner.meta.new.$$
+    hybrid_write_meta \
+        "$hybrid_put_new_meta" "$hybrid_put_generation" \
+        "$hybrid_put_source" "$hybrid_put_mac" "$hybrid_put_document" ||
+        return 1
+    hybrid_put_backup=$OVERLAY_DIR/$hybrid_put_owner.meta.tx.$$
+    rm -f "$hybrid_put_backup"
+    [ ! -f "$hybrid_put_meta" ] ||
+        cp "$hybrid_put_meta" "$hybrid_put_backup" || return 1
+    hybrid_put_effective_backup=$BASE/effective.tx.$$
+    rm -f "$hybrid_put_effective_backup"
+    [ ! -f "$EFFECTIVE" ] ||
+        cp "$EFFECTIVE" "$hybrid_put_effective_backup" || return 1
+    hybrid_put_chain=$(active_chain)
+    apply_runtime "$hybrid_put_effective" || {
+        rm -f "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_backup" "$hybrid_put_effective_backup" \
+            "$hybrid_put_effective"
+        return 1
+    }
+    if ! mv "$hybrid_put_new_meta" "$hybrid_put_meta" ||
+       ! mv "$hybrid_put_effective" "$EFFECTIVE"; then
+        hybrid_restore_transaction \
+            "$hybrid_put_meta" "$hybrid_put_backup" "$hybrid_put_chain" \
+            "$hybrid_put_effective_backup"
+        rm -f "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_effective"
+        return 1
+    fi
+    rm -f "$hybrid_put_backup" "$hybrid_put_effective_backup"
+    for hybrid_stale in "$OVERLAY_DIR/$hybrid_put_owner".*.tsv; do
+        [ "$hybrid_stale" = "$hybrid_put_document" ] ||
+            rm -f "$hybrid_stale"
+    done
+    log_message INFO \
+        "loaded RAM overlay $hybrid_put_owner generation $hybrid_put_generation"
+}
+
+hybrid_remove_overlay() {
+    hybrid_remove_owner=$1
+    hybrid_remove_expected=$2
+    valid_id "$hybrid_remove_owner" &&
+        is_uint "$hybrid_remove_expected" || return 1
+    hybrid_remove_meta=$(hybrid_meta_path "$hybrid_remove_owner")
+    if [ ! -f "$hybrid_remove_meta" ]; then
+        [ "$hybrid_remove_expected" = 0 ] || {
+            printf 'overlay generation conflict: expected %s, current 0\n' \
+                "$hybrid_remove_expected" >&2
+            return 1
+        }
+        return 0
+    fi
+    hybrid_load_meta "$hybrid_remove_owner" || return 1
+    [ "$hybrid_remove_expected" = "$hybrid_generation" ] || {
+        printf 'overlay generation conflict: expected %s, current %s\n' \
+            "$hybrid_remove_expected" "$hybrid_generation" >&2
+        return 1
+    }
+    hybrid_remove_document=$hybrid_document
+    hybrid_remove_effective=$BASE/effective.remove.$$.tsv
+    hybrid_compose_effective \
+        "$CURRENT" "$hybrid_remove_effective" "" "" "" "" \
+        "$hybrid_remove_owner" || return 1
+    hybrid_remove_backup=$OVERLAY_DIR/$hybrid_remove_owner.meta.tx.$$
+    cp "$hybrid_remove_meta" "$hybrid_remove_backup" || return 1
+    hybrid_remove_effective_backup=$BASE/effective.tx.$$
+    rm -f "$hybrid_remove_effective_backup"
+    [ ! -f "$EFFECTIVE" ] ||
+        cp "$EFFECTIVE" "$hybrid_remove_effective_backup" || return 1
+    hybrid_remove_chain=$(active_chain)
+    apply_runtime "$hybrid_remove_effective" || {
+        rm -f "$hybrid_remove_backup" "$hybrid_remove_effective_backup" \
+            "$hybrid_remove_effective"
+        return 1
+    }
+    if ! rm -f "$hybrid_remove_meta" ||
+       ! mv "$hybrid_remove_effective" "$EFFECTIVE"; then
+        hybrid_restore_transaction \
+            "$hybrid_remove_meta" "$hybrid_remove_backup" \
+            "$hybrid_remove_chain" "$hybrid_remove_effective_backup"
+        return 1
+    fi
+    rm -f "$hybrid_remove_backup" "$hybrid_remove_document" \
+        "$hybrid_remove_effective_backup"
+    log_message INFO "removed RAM overlay $hybrid_remove_owner"
+}
+
+hybrid_print_overlays_json() {
+    printf '['
+    hybrid_status_first=true
+    for hybrid_status_owner in $(hybrid_owners); do
+        hybrid_load_meta "$hybrid_status_owner" || continue
+        [ "$hybrid_status_first" = true ] || printf ','
+        hybrid_status_first=false
+        printf '{"owner":"%s","generation":%s' \
+            "$(json_escape "$hybrid_status_owner")" "$hybrid_generation"
+        printf ',"hash":"%s","source":"%s","mac":"%s"' \
+            "$hybrid_hash" "$hybrid_source" "$hybrid_mac"
+        printf ',"origins":%s,"rows":%s,"bytes":%s,"origin_ids":' \
+            "$hybrid_origins" "$hybrid_rows" "$hybrid_bytes"
+        hybrid_origin_ids_json "$hybrid_document"
+        printf '}'
+    done
+    printf ']'
+}
+
+hybrid_origin_ids_json() {
+    printf '['
+    hybrid_origin_first=true
+    awk -F '\t' '$0 !~ /^#/ && NF == 10 && !seen[$10]++ { print $10 }' "$1" |
+        while IFS= read -r hybrid_origin; do
+            [ "$hybrid_origin_first" = true ] || printf ','
+            hybrid_origin_first=false
+            printf '"%s"' "$(json_escape "$hybrid_origin")"
+        done
+    printf ']'
+}
+
+hybrid_print_layered_status() {
+    hybrid_runtime=$(current_runtime_document) || return 1
+    hybrid_core_hash=$(document_hash "$CURRENT") || return 1
+    hybrid_effective_hash=$(document_hash "$hybrid_runtime") || return 1
+    hybrid_core_rows=$(rule_row_count "$CURRENT")
+    hybrid_core_origins=$(awk -F '\t' \
+        '$0 !~ /^#/ && NF == 10 && !seen[$10]++ { n++ } END { print n + 0 }' \
+        "$CURRENT")
+    hybrid_effective_rows=$(awk -F '\t' \
+        '$0 !~ /^#/ && (NF == 10 || NF == 12) { n++ } END { print n + 0 }' \
+        "$hybrid_runtime")
+    hybrid_storage=plain-nvram
+    [ -z "$(nvram get "$CURRENT_RULES_GZ_KEY")" ] ||
+        hybrid_storage=compressed-nvram
+    hybrid_generated=$(cat "$GENERATED_MATCHES_FILE" 2>/dev/null || true)
+    hybrid_generated_json=null
+    is_uint "$hybrid_generated" &&
+        hybrid_generated_json=$hybrid_generated
+    printf ',"runtime_epoch":"%s"' "$(cat "$RUNTIME_EPOCH_FILE")"
+    printf ',"core":{"generation":%s,"hash":"%s","storage":"%s"' \
+        "$(cat "$CORE_GENERATION_FILE")" "$hybrid_core_hash" "$hybrid_storage"
+    printf ',"origins":%s,"rows":%s,"bytes":%s,"origin_ids":' \
+        "$hybrid_core_origins" "$hybrid_core_rows" "$(wc -c < "$CURRENT")"
+    hybrid_origin_ids_json "$CURRENT"
+    printf '},"overlays":'
+    hybrid_print_overlays_json
+    printf ',"effective":{"hash":"%s","rows":%s,"bytes":%s' \
+        "$hybrid_effective_hash" "$hybrid_effective_rows" \
+        "$(wc -c < "$hybrid_runtime")"
+    printf ',"generated_matches":%s}' "$hybrid_generated_json"
+    printf ',"policy_limits":{"core_bytes":%s,"overlay_bytes":%s' \
+        "$MAX_RULE_BYTES" "$MAX_OVERLAY_BYTES"
+    printf ',"overlay_rows":%s,"overlays":%s,"effective_bytes":%s' \
+        "$MAX_OVERLAY_ROWS" "$MAX_OVERLAYS" "$MAX_EFFECTIVE_BYTES"
+    printf ',"effective_rows":%s,"generated_matches":%s}' \
+        "$MAX_EFFECTIVE_ROWS" "$MAX_GENERATED_MATCHES"
+}

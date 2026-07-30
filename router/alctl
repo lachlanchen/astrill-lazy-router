@@ -7,6 +7,12 @@ set -u
 BASE=${ASTRILL_LAZY_BASE:-/tmp/astrill-lazy}
 CURRENT=$BASE/rules.tsv
 PREVIOUS=$BASE/rules.previous.tsv
+EFFECTIVE=$BASE/effective.tsv
+EFFECTIVE_PREVIOUS=$BASE/effective.previous.tsv
+OVERLAY_DIR=$BASE/overlays
+RUNTIME_EPOCH_FILE=$BASE/runtime-epoch
+CORE_GENERATION_FILE=$BASE/core-generation
+HYBRID_HELPER=${ASTRILL_LAZY_HYBRID_HELPER:-$BASE/alhybrid}
 RESOLVED=$BASE/resolved.tsv
 UNRESOLVED=$BASE/unresolved.txt
 ACTIVE_FILE=$BASE/active-chain
@@ -49,8 +55,16 @@ CURRENT_RULES_GZ_KEY=astrill_lazy_rules_gz
 PREVIOUS_RULES_GZ_KEY=astrill_lazy_rules_previous_gz
 TAB="$(printf '\t')"
 policy_routes_changed=false
+hybrid_loaded=false
 
-mkdir -p "$BASE"
+mkdir -p "$BASE" "$OVERLAY_DIR"
+
+load_hybrid_helper() {
+    [ "$hybrid_loaded" = true ] && return 0
+    [ -r "$HYBRID_HELPER" ] || return 1
+    . "$HYBRID_HELPER" || return 1
+    hybrid_loaded=true
+}
 
 log_message() {
     level=$1
@@ -176,7 +190,6 @@ validate_rules() {
         printf 'every rule must contain exactly 10 tab-separated fields\n' >&2
         return 1
     }
-
     line_number=0
     while IFS="$TAB" read -r id enabled priority kind selector target protocol ports label origin; do
         line_number=$((line_number + 1))
@@ -206,6 +219,19 @@ validate_rules() {
         case $label in *[!A-Za-z0-9%._~-]*) return 1 ;; esac
     done < "$file"
     return 0
+}
+
+rule_row_count() {
+    awk -F '\t' '
+        $0 !~ /^#/ && NF == 10 { count++ }
+        END { print count + 0 }
+    ' "$1"
+}
+
+document_hash() {
+    document_md5=$(md5sum "$1" 2>/dev/null | awk '{ print $1 }')
+    [ -n "$document_md5" ] || return 1
+    printf 'md5:%s\n' "$document_md5"
 }
 
 validate_app_flows() {
@@ -355,7 +381,19 @@ persist_rule_document() {
     fi
 }
 
+ensure_runtime_epoch() {
+    [ -s "$RUNTIME_EPOCH_FILE" ] && return 0
+    {
+        cat /proc/sys/kernel/random/uuid 2>/dev/null ||
+            printf '%s-%s\n' "$(date +%s)" "$$"
+    } | md5sum | awk '{ print $1 }' > "$RUNTIME_EPOCH_FILE.new" ||
+        return 1
+    mv "$RUNTIME_EPOCH_FILE.new" "$RUNTIME_EPOCH_FILE"
+}
+
 initialize_rules() {
+    ensure_runtime_epoch || return 1
+    [ -s "$CORE_GENERATION_FILE" ] || printf '1\n' > "$CORE_GENERATION_FILE"
     [ -f "$CURRENT" ] && return 0
     if ! restore_rule_document \
         "$CURRENT" "$CURRENT_RULES_GZ_KEY" "$CURRENT_RULES_KEY"; then
@@ -473,7 +511,8 @@ append_compiled_rule() {
     set +f
     IFS=$old_ifs
     for port in "$@"; do
-        append_rule_pair "$chain" "$kind" "$selector" "$target" "$protocol" "$port" || return 1
+        append_rule_pair "$chain" "$kind" "$selector" "$target" "$protocol" \
+            "$port" || return 1
     done
 }
 
@@ -534,7 +573,8 @@ build_chain() {
     : > "$UNRESOLVED"
     ensure_chain_shell "$chain" || return 1
 
-    while IFS="$TAB" read -r id enabled priority kind selector target protocol ports label origin; do
+    while IFS="$TAB" read -r id enabled priority kind selector target \
+        protocol ports label origin; do
         case $id in ''|\#*) continue ;; esac
         [ "$enabled" = 1 ] || continue
         case $kind in
@@ -545,14 +585,17 @@ build_chain() {
                     continue
                 fi
                 for address in $addresses; do
-                    append_compiled_rule "$chain" destination "$address/32" "$target" "$protocol" "$ports" || return 1
+                    append_compiled_rule "$chain" destination "$address/32" \
+                        "$target" "$protocol" "$ports" || return 1
                 done
                 ;;
             cidr)
-                append_compiled_rule "$chain" destination "$selector" "$target" "$protocol" "$ports" || return 1
+                append_compiled_rule "$chain" destination "$selector" \
+                    "$target" "$protocol" "$ports" || return 1
                 ;;
             device)
-                append_compiled_rule "$chain" source "$selector" "$target" "$protocol" "$ports" || return 1
+                append_compiled_rule "$chain" source "$selector" "$target" \
+                    "$protocol" "$ports" || return 1
                 ;;
         esac
     done < "$file"
@@ -1272,6 +1315,37 @@ ensure_routes() {
     return 1
 }
 
+runtime_policy_validate() {
+    if [ "$(sed -n '1p' "$1")" = "# astrill-lazy-rules-v1" ]; then
+        validate_rules "$1"
+    else
+        load_hybrid_helper && hybrid_validate_effective "$1"
+    fi
+}
+
+compose_runtime_policy() {
+    if load_hybrid_helper && [ "$(hybrid_overlay_count)" -gt 0 ]; then
+        hybrid_compose_effective "$1" "$2"
+    else
+        cp "$1" "$2"
+    fi
+}
+
+current_runtime_document() {
+    initialize_rules || return 1
+    if load_hybrid_helper && [ "$(hybrid_overlay_count)" -gt 0 ]; then
+        if [ ! -f "$EFFECTIVE" ] ||
+           ! hybrid_validate_effective "$EFFECTIVE"; then
+            hybrid_compose_effective "$CURRENT" "$EFFECTIVE.new" ||
+                return 1
+            mv "$EFFECTIVE.new" "$EFFECTIVE" || return 1
+        fi
+        printf '%s\n' "$EFFECTIVE"
+    else
+        printf '%s\n' "$CURRENT"
+    fi
+}
+
 apply_runtime() {
     file=$1
     refresh_mode=${2:-0}
@@ -1336,25 +1410,77 @@ check_persistence_capacity() {
         "NVRAM headroom permits active rules only; rollback remains available until reboot"
 }
 
+restore_core_transaction() {
+    rollback_chain=$1
+    rollback_failed=false
+    cp "$BASE/core.tx.current" "$CURRENT" || rollback_failed=true
+    if [ -f "$BASE/core.tx.previous" ]; then
+        cp "$BASE/core.tx.previous" "$PREVIOUS" || rollback_failed=true
+    else
+        rm -f "$PREVIOUS"
+    fi
+    PERSIST_PREVIOUS=1
+    persist_rules >/dev/null 2>&1 || true
+    activate_chain "$rollback_chain" >/dev/null 2>&1 ||
+        rollback_failed=true
+    [ "$rollback_failed" = false ]
+}
+
 apply_file() {
     candidate=$1
-    validate_rules "$candidate" || return 1
-    check_persistence_capacity "$candidate" || return 1
-    apply_runtime "$candidate" || return 1
-    [ ! -f "$CURRENT" ] || cp "$CURRENT" "$PREVIOUS"
-    cp "$candidate" "$CURRENT"
-    persist_rules || return 1
+    validate_rules "$candidate" &&
+        check_persistence_capacity "$candidate" || return 1
+    if load_hybrid_helper && hybrid_core_has_collision "$candidate"; then
+        printf 'core/overlay origin collision\n' >&2
+        return 1
+    fi
+    runtime_candidate=$BASE/effective.core.$$.tsv
+    compose_runtime_policy "$candidate" "$runtime_candidate" || return 1
+    cp "$CURRENT" "$BASE/core.tx.current" || return 1
+    cp "$CURRENT" "$BASE/core.tx.next-previous" || return 1
+    cp "$candidate" "$BASE/core.tx.next-current" || return 1
+    if [ -f "$PREVIOUS" ]; then
+        cp "$PREVIOUS" "$BASE/core.tx.previous" || return 1
+    else
+        rm -f "$BASE/core.tx.previous"
+    fi
+    generation=$(cat "$CORE_GENERATION_FILE" 2>/dev/null || printf 1)
+    is_uint "$generation" || generation=1
+    printf '%s\n' $((generation + 1)) > "$BASE/core.tx.generation" ||
+        return 1
+    previous_chain=$(active_chain)
+    apply_runtime "$runtime_candidate" || return 1
+    if ! mv "$BASE/core.tx.next-previous" "$PREVIOUS" ||
+       ! mv "$BASE/core.tx.next-current" "$CURRENT" ||
+       ! persist_rules; then
+        restore_core_transaction "$previous_chain" || true
+        rm -f "$runtime_candidate" "$BASE/core.tx."*
+        return 1
+    fi
+    if [ "$(sed -n '1p' "$runtime_candidate")" = \
+        "# astrill-lazy-effective-v1" ]; then
+        if ! mv "$runtime_candidate" "$EFFECTIVE"; then
+            restore_core_transaction "$previous_chain" || true
+            rm -f "$BASE/core.tx."*
+            return 1
+        fi
+    else
+        rm -f "$runtime_candidate" "$EFFECTIVE"
+    fi
+    mv "$BASE/core.tx.generation" "$CORE_GENERATION_FILE" || true
+    rm -f "$BASE/core.tx."*
     unresolved_count=$(wc -l < "$UNRESOLVED" 2>/dev/null || printf 0)
     log_message INFO "applied policy document; unresolved domains: $unresolved_count"
 }
 
 ensure_runtime() {
     initialize_rules
-    validate_rules "$CURRENT" || return 1
+    runtime_document=$(current_runtime_document) || return 1
+    runtime_policy_validate "$runtime_document" || return 1
     ensure_routes || return 1
     active=$(active_chain)
     if ! chain_exists "$active"; then
-        apply_runtime "$CURRENT" || return 1
+        apply_runtime "$runtime_document" || return 1
         active=$(active_chain)
     fi
     first_jump=$(iptables -w 10 -t mangle -S PREROUTING 2>/dev/null | sed -n '2p')
@@ -1530,9 +1656,10 @@ watchdog_loop() {
             ensure_runtime >/dev/null 2>&1 || true
             cycles=$((cycles + 1))
             if [ "$cycles" -ge "$WATCHDOG_REFRESH_CYCLES" ]; then
-                initialize_rules
-                if validate_rules "$CURRENT" &&
-                   apply_runtime "$CURRENT" 1; then
+                refresh_document=$(current_runtime_document)
+                if [ -n "$refresh_document" ] &&
+                   runtime_policy_validate "$refresh_document" &&
+                   apply_runtime "$refresh_document" 1; then
                     log_message INFO \
                         "watchdog refreshed resolved domains and policy routes"
                 else
@@ -1556,6 +1683,24 @@ watchdog_loop() {
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]/?/g'
+}
+
+print_layered_status() {
+    if load_hybrid_helper; then
+        hybrid_print_layered_status
+        return
+    fi
+    core_hash=$(document_hash "$CURRENT") || return 1
+    core_bytes=$(wc -c < "$CURRENT")
+    printf ',"runtime_epoch":"%s"' "$(cat "$RUNTIME_EPOCH_FILE")"
+    printf ',"core":{"generation":%s,"hash":"%s"' \
+        "$(cat "$CORE_GENERATION_FILE" 2>/dev/null || printf 1)" "$core_hash"
+    printf ',"origins":%s,"rows":%s,"bytes":%s}' \
+        "$origin_count" "$compiled_count" "$core_bytes"
+    printf ',"overlays":[]'
+    printf ',"effective":{"hash":"%s","rows":%s,"bytes":%s' \
+        "$core_hash" "$compiled_count" "$core_bytes"
+    printf ',"generated_matches":null}'
 }
 
 app_flows_json() {
@@ -1691,6 +1836,7 @@ status_json() {
     printf ',"direct_rules":%s,"vpn_rules":%s' "$direct_count" "$vpn_count"
     printf ',"resolved_addresses":%s,"unresolved_domains":%s' "$resolved_count" "$unresolved_count"
     printf ',"last_apply":%s' "$last_apply"
+    print_layered_status || fail "status failed"
     printf ',"rules":['
     first=true
     while IFS="$TAB" read -r id enabled priority kind selector target protocol ports label origin; do
@@ -2074,9 +2220,9 @@ usage() {
     cat <<'EOF'
 Usage: alctl COMMAND
 
-  status [--json]       Show controller, policy, and tunnel status
-  rules                 Print the active compiled rule document
-  apply FILE|-          Validate and atomically apply a rule document
+  status [--json]
+  rules
+  apply FILE|-
   refresh [--json]      Re-resolve domains and rebuild the active policy
   rollback [--json]     Restore the previous rule document
   toggle-origin ID      Enable or disable all compiled rules for an origin
@@ -2106,9 +2252,9 @@ case $command in
         initialize_rules
         cat "$CURRENT"
         ;;
-    apply)
+    apply|core-apply)
         source=${2:--}
-        candidate=$BASE/rules.candidate.tsv
+        candidate=$BASE/core.candidate.tsv
         if [ "$source" = "-" ]; then
             cat > "$candidate"
         else
@@ -2123,13 +2269,15 @@ case $command in
         ;;
     refresh)
         acquire_lock
-        initialize_rules
-        validate_rules "$CURRENT" || fail "stored rules are invalid"
-        apply_runtime "$CURRENT" 1 || fail "could not refresh policy"
+        refresh_document=$(current_runtime_document) ||
+            fail "invalid policy"
+        runtime_policy_validate "$refresh_document" ||
+            fail "invalid effective policy"
+        apply_runtime "$refresh_document" 1 || fail "could not refresh policy"
         log_message INFO "refreshed resolved domains and policy routes"
         status_json
         ;;
-    rollback)
+    rollback|core-rollback)
         acquire_lock
         initialize_rules
         [ -f "$PREVIOUS" ] || fail "no previous rule document is available"
@@ -2137,6 +2285,41 @@ case $command in
         cp "$PREVIOUS" "$candidate"
         apply_file "$candidate" || fail "could not roll back rules"
         rm -f "$candidate"
+        status_json
+        ;;
+    overlay-put)
+        owner=${2:-}
+        expected=${3:-}
+        source_scope=${4:-auto}
+        overlay_source=${5:--}
+        overlay_candidate=$BASE/overlay.candidate.$$.tsv
+        if [ "$overlay_source" = "-" ]; then
+            cat > "$overlay_candidate"
+        else
+            [ -f "$overlay_source" ] ||
+                fail "overlay file was not found: $overlay_source"
+            cp "$overlay_source" "$overlay_candidate"
+        fi
+        acquire_lock
+        initialize_rules
+        load_hybrid_helper ||
+            fail "helper missing"
+        hybrid_put_overlay \
+            "$owner" "$expected" "$source_scope" "$overlay_candidate" ||
+            fail "overlay apply failed"
+        rm -f "$overlay_candidate"
+        status_json
+        ;;
+    overlay-remove)
+        acquire_lock
+        initialize_rules
+        load_hybrid_helper ||
+            fail "helper missing"
+        hybrid_remove_overlay "${2:-}" "${3:-}" ||
+            fail "overlay remove failed"
+        status_json
+        ;;
+    overlay-list|effective-status)
         status_json
         ;;
     toggle-origin)

@@ -50,6 +50,7 @@ where = ["desktop"]
   "router/alctl",
   "router/alapi",
   "router/alpage",
+  "router/alhybrid",
   "router/bootstrap.sh",
   "router/VERSION"
 ]

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ctypes
+import ipaddress
 import json
+import socket
 import sys
 from collections.abc import Callable, Sequence
 from datetime import datetime
@@ -21,6 +23,7 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QColor, QFont, QMouseEvent
+from PySide6.QtNetwork import QNetworkInformation
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -81,6 +84,8 @@ from .router import AstrillConnectionResult, _openssh_config_path
 from .service_policy import ServiceRouteMode
 from .windows_connection_page import ConnectionDraft, WindowsConnectionPage
 from .windows_controller import (
+    ControllerError,
+    HybridPolicyComparison,
     PolicyCompilationSummary,
     PolicyRuntimeSummary,
     ServerCatalog,
@@ -132,6 +137,25 @@ ENDPOINT_HEADER_DEFAULT_DESCENDING = {
     ENDPOINT_LATENCY_COLUMN: False,
     ENDPOINT_REACH_COLUMN: False,
     ENDPOINT_TESTED_COLUMN: True,
+}
+
+HYBRID_POLICY_CAPABILITIES = frozenset(
+    {
+        "hybrid-policy-storage",
+        "policy-storage-v2",
+        "policy.core",
+        "policy.overlays",
+        "policy_storage.hybrid",
+        "policy_storage.hybrid_v1",
+    }
+)
+
+HYBRID_CONTROLLER_METHODS = {
+    "pin": ("apply_persistent_core",),
+    "load": ("load_ram_overlay",),
+    "restore": ("restore_ram_overlay_now",),
+    "remove": ("remove_ram_overlay",),
+    "auto_restore": ("set_overlay_restore_enabled",),
 }
 
 
@@ -268,6 +292,34 @@ QFrame#metric_endpoint {{
 QFrame#metric_rules {{
     border-top: 4px solid #10b981;
 }}
+QGroupBox#policyStorageGroup {{
+    margin-top: 8px;
+    padding: 10px;
+}}
+QLabel.storageLayerTitle {{
+    color: {COLORS["muted"]};
+    font-size: 8.5pt;
+    font-weight: 700;
+}}
+QLabel.storageLayerValue {{
+    font-size: 9.5pt;
+    font-weight: 700;
+}}
+QLabel[storageTone="neutral"] {{
+    color: {COLORS["muted"]};
+}}
+QLabel[storageTone="green"] {{
+    color: {COLORS["green"]};
+}}
+QLabel[storageTone="amber"] {{
+    color: {COLORS["orange"]};
+}}
+QLabel[storageTone="red"] {{
+    color: {COLORS["red"]};
+}}
+QLabel#overlaySourceState {{
+    font-size: 8.5pt;
+}}
 QFrame#latencyCard {{
     background: #ecfeff;
     border: 1px solid #67e8f9;
@@ -350,6 +402,10 @@ QLabel.metricValue {{
 QLabel.metricCaption {{
     color: {COLORS["muted"]};
     font-size: 9pt;
+}}
+QLabel.sectionTitle {{
+    font-size: 12pt;
+    font-weight: 800;
 }}
 QLabel#accessBanner {{
     background: #ffedd5;
@@ -741,6 +797,14 @@ class MainWindow(QMainWindow):
         self.busy_count = 0
         self.router_status: dict[str, Any] = {}
         self.policy_preflight: PolicyCompilationSummary | None = None
+        self._syncing_policy_storage = False
+        self._overlay_source_user_edited = False
+        self._network_information: QNetworkInformation | None = None
+        self._network_was_offline = False
+        self._network_recovery_scheduled = False
+        self._network_recovery_pending = False
+        self._network_recovery_used = False
+        self._network_recovery_generation = 0
         self.clients: list[dict[str, Any]] = []
         self._selected_service_ids: set[str] = set()
         self._syncing_service_selection = False
@@ -790,6 +854,7 @@ class MainWindow(QMainWindow):
         self._build_pages()
         self._render_all_local()
         self._select_page(0)
+        self._setup_network_recovery_hook()
         self._refresh_status(quiet=True)
 
     def _build_shell(self) -> None:
@@ -957,8 +1022,12 @@ class MainWindow(QMainWindow):
             self.metric_labels[key] = value
         layout.addLayout(metrics)
 
+        self.policy_storage_group = self._build_policy_storage_panel()
+
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("Traffic policies"))
+        policy_heading = QLabel("Traffic Policies")
+        policy_heading.setProperty("class", "sectionTitle")
+        toolbar.addWidget(policy_heading)
         self.apply_selected_button = QPushButton("Apply selected")
         self.apply_selected_button.setToolTip(
             "Install only the selected policy rows on this router. Other policies "
@@ -989,6 +1058,7 @@ class MainWindow(QMainWindow):
         delete.clicked.connect(self._delete_policy)
         toolbar.addWidget(delete)
         layout.addLayout(toolbar)
+        layout.addWidget(self.policy_storage_group)
 
         self.policy_empty_note = QLabel(
             "No local policies are saved yet. Select services, choose a route, "
@@ -1025,6 +1095,120 @@ class MainWindow(QMainWindow):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.policy_tree, 1)
         return page
+
+    def _build_policy_storage_panel(self) -> QGroupBox:
+        group = QGroupBox("Router policy storage")
+        group.setObjectName("policyStorageGroup")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(10, 10, 10, 8)
+        layout.setSpacing(7)
+
+        status_grid = QGridLayout()
+        status_grid.setContentsMargins(0, 0, 0, 0)
+        status_grid.setHorizontalSpacing(10)
+        status_grid.setVerticalSpacing(2)
+        self.policy_storage_cells: dict[str, QLabel] = {}
+        for column, (key, title) in enumerate(
+            (
+                ("local", "Local library"),
+                ("core", "Persistent core"),
+                ("this_overlay", "This computer RAM overlay"),
+                ("other_overlays", "Other overlays"),
+                ("effective", "Effective router"),
+            )
+        ):
+            heading = QLabel(title)
+            heading.setProperty("class", "storageLayerTitle")
+            heading.setWordWrap(True)
+            value = QLabel("Not reported")
+            value.setProperty("class", "storageLayerValue")
+            value.setProperty("storageTone", "neutral")
+            value.setWordWrap(True)
+            status_grid.addWidget(heading, 0, column)
+            status_grid.addWidget(value, 1, column)
+            status_grid.setColumnStretch(column, 1)
+            self.policy_storage_cells[key] = value
+        layout.addLayout(status_grid)
+
+        source_grid = QGridLayout()
+        source_grid.setContentsMargins(0, 0, 0, 0)
+        source_grid.setHorizontalSpacing(8)
+        source_grid.addWidget(QLabel("RAM source"), 0, 0)
+        self.policy_overlay_source = QLineEdit()
+        self.policy_overlay_source.setPlaceholderText(
+            "This computer's IPv4 host/CIDR, for example 192.168.1.166/32"
+        )
+        self.policy_overlay_source.setMaximumWidth(360)
+        self.policy_overlay_source.textEdited.connect(
+            self._policy_overlay_source_edited
+        )
+        self.policy_overlay_source.textChanged.connect(
+            self._policy_overlay_source_changed
+        )
+        self.policy_overlay_source.editingFinished.connect(
+            self._normalize_policy_overlay_source
+        )
+        source_grid.addWidget(self.policy_overlay_source, 0, 1)
+        source_grid.setColumnStretch(1, 1)
+        self.policy_overlay_source_state = QLabel(
+            "A source binding is required for RAM actions."
+        )
+        self.policy_overlay_source_state.setObjectName("overlaySourceState")
+        self.policy_overlay_source_state.setProperty("storageTone", "red")
+        self.policy_overlay_source_state.setWordWrap(True)
+        source_grid.addWidget(self.policy_overlay_source_state, 1, 1, 1, 2)
+        self.policy_auto_restore_check = QCheckBox("Auto-restore after router reboot")
+        self.policy_auto_restore_check.setToolTip(
+            "Explicit opt-in: after a new router runtime is observed, restore "
+            "only this computer's source-bound overlay once. No periodic polling."
+        )
+        self.policy_auto_restore_check.toggled.connect(
+            self._policy_auto_restore_toggled
+        )
+        source_grid.addWidget(self.policy_auto_restore_check, 0, 2)
+        layout.addLayout(source_grid)
+
+        actions = QGridLayout()
+        actions.setHorizontalSpacing(7)
+        actions.setVerticalSpacing(5)
+        core_action_label = QLabel("Persistent core")
+        core_action_label.setProperty("class", "storageLayerTitle")
+        actions.addWidget(core_action_label, 0, 0)
+        self.pin_core_button = QPushButton("Pin selected to core")
+        self.pin_core_button.setToolTip(
+            "Persist the selected policies in router NVRAM so they survive reboot."
+        )
+        self.pin_core_button.clicked.connect(self._pin_selected_to_core)
+        actions.addWidget(self.pin_core_button, 0, 1)
+        actions.setColumnStretch(4, 1)
+        ram_action_label = QLabel("This computer RAM overlay")
+        ram_action_label.setProperty("class", "storageLayerTitle")
+        actions.addWidget(ram_action_label, 1, 0)
+        self.load_ram_button = QPushButton("Load selected into RAM")
+        self.load_ram_button.setObjectName("primary")
+        self.load_ram_button.setToolTip(
+            "Load the selected policies into this computer's volatile, "
+            "source-bound router overlay without an NVRAM commit."
+        )
+        self.load_ram_button.clicked.connect(self._load_selected_into_ram)
+        actions.addWidget(self.load_ram_button, 1, 1)
+        self.restore_ram_button = QPushButton("Restore RAM overlay now")
+        self.restore_ram_button.clicked.connect(self._restore_ram_overlay_now)
+        actions.addWidget(self.restore_ram_button, 1, 2)
+        self.remove_overlay_button = QPushButton("Remove this overlay")
+        self.remove_overlay_button.setObjectName("danger")
+        self.remove_overlay_button.clicked.connect(self._remove_this_overlay)
+        actions.addWidget(self.remove_overlay_button, 1, 3)
+        layout.addLayout(actions)
+        self.policy_storage_legend = QLabel(
+            "Neutral = intentionally local · Amber = RAM restore needed · "
+            "Red = router protection missing or failed"
+        )
+        self.policy_storage_legend.setProperty("class", "muted")
+        layout.addWidget(self.policy_storage_legend)
+
+        group.hide()
+        return group
 
     def _build_services_page(self) -> QWidget:
         page = QWidget()
@@ -1800,6 +1984,83 @@ class MainWindow(QMainWindow):
             if candidate == page_id
         )
 
+    def _setup_network_recovery_hook(self) -> None:
+        """Reconcile once when Windows networking returns after going offline."""
+        try:
+            QNetworkInformation.loadDefaultBackend()
+            information = QNetworkInformation.instance()
+        except (AttributeError, RuntimeError):
+            return
+        if information is None:
+            return
+        self._network_information = information
+        reachability = information.reachability()
+        self._network_was_offline = (
+            reachability == QNetworkInformation.Reachability.Disconnected
+        )
+        information.reachabilityChanged.connect(self._network_reachability_changed)
+
+    def _network_reachability_changed(
+        self,
+        reachability: QNetworkInformation.Reachability,
+    ) -> None:
+        if reachability == QNetworkInformation.Reachability.Disconnected:
+            if not self._network_was_offline:
+                self._network_recovery_generation += 1
+            self._network_recovery_used = False
+            self._network_recovery_scheduled = False
+            self._network_recovery_pending = False
+            self._network_was_offline = True
+            return
+        online_states = {
+            QNetworkInformation.Reachability.Local,
+            QNetworkInformation.Reachability.Site,
+            QNetworkInformation.Reachability.Online,
+        }
+        if (
+            reachability not in online_states
+            or not self._network_was_offline
+            or self._network_recovery_used
+            or self._network_recovery_scheduled
+        ):
+            return
+        self._network_recovery_scheduled = True
+        self._network_was_offline = False
+        generation = self._network_recovery_generation
+        QTimer.singleShot(
+            1500,
+            lambda: self._run_network_recovery(generation),
+        )
+
+    def _run_network_recovery(self, generation: int | None = None) -> None:
+        if generation is not None and generation != self._network_recovery_generation:
+            return
+        self._network_recovery_scheduled = False
+        if self.busy_count:
+            self._network_recovery_pending = True
+            return
+        self._network_recovery_used = True
+        self._network_was_offline = False
+        self._network_recovery_pending = False
+        self._refresh_status(quiet=True)
+
+    def _resume_pending_network_recovery(self) -> None:
+        if (
+            not self._network_recovery_pending
+            or self.busy_count
+            or self._network_recovery_used
+            or self._network_was_offline
+            or self._network_recovery_scheduled
+        ):
+            return
+        self._network_recovery_pending = False
+        self._network_recovery_scheduled = True
+        generation = self._network_recovery_generation
+        QTimer.singleShot(
+            0,
+            lambda: self._run_network_recovery(generation),
+        )
+
     def _run_task(
         self,
         label: str,
@@ -1808,6 +2069,7 @@ class MainWindow(QMainWindow):
         *,
         quiet: bool = False,
         finished_callback: Callable[[], None] | None = None,
+        failure: Callable[[str], None] | None = None,
         router_related: bool = True,
     ) -> None:
         task = BackgroundTask(function)
@@ -1826,6 +2088,8 @@ class MainWindow(QMainWindow):
                 label, message, quiet, router_related=router_related
             )
         )
+        if failure is not None:
+            task.signals.failed.connect(failure)
 
         def finished() -> None:
             self.busy_count = max(0, self.busy_count - 1)
@@ -1835,6 +2099,8 @@ class MainWindow(QMainWindow):
             if finished_callback is not None:
                 finished_callback()
             self._sync_access_ui()
+            if self.busy_count == 0:
+                self._resume_pending_network_recovery()
 
         task.signals.finished.connect(finished)
         self.thread_pool.start(task)
@@ -1854,6 +2120,9 @@ class MainWindow(QMainWindow):
             self.endpoint_favorite_status.setText(
                 f"Favorite change failed · sync and retry: {message}"
             )
+        if "RAM overlay" in label or "persistent core" in label:
+            self.policy_sync_state.setText(f"{label} failed: {message}")
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['red']};")
         if "Astrill connection" in label or label in {
             "Connecting Astrill",
             "Reconnecting Astrill",
@@ -1917,7 +2186,422 @@ class MainWindow(QMainWindow):
             )
             self.policy_empty_note.show()
 
+    def _hybrid_policy_storage(self) -> dict[str, Any] | None:
+        status = self.router_status
+        storage: dict[str, Any] = {}
+        for key in ("policy_layers", "layered_policy", "policy_storage"):
+            nested = status.get(key)
+            if isinstance(nested, dict) and isinstance(nested.get("core"), dict):
+                storage = dict(nested)
+                break
+
+        raw_capabilities = status.get("capabilities", ())
+        capabilities: set[str] = set()
+        if isinstance(raw_capabilities, dict):
+            capabilities.update(
+                str(key) for key, enabled in raw_capabilities.items() if bool(enabled)
+            )
+            mode = raw_capabilities.get("policy_storage")
+            if isinstance(mode, str):
+                capabilities.add(f"policy_storage.{mode}")
+        elif isinstance(raw_capabilities, (list, tuple, set, frozenset)):
+            capabilities.update(str(item) for item in raw_capabilities)
+        elif isinstance(raw_capabilities, str):
+            capabilities.add(raw_capabilities)
+
+        nested_mode = str(storage.get("mode", "")).strip().casefold()
+        capability_present = bool(capabilities & HYBRID_POLICY_CAPABILITIES)
+        capability_present = capability_present or nested_mode in {
+            "hybrid",
+            "core-overlays",
+            "core+overlays",
+        }
+        top_level_shape = (
+            isinstance(status.get("core"), dict)
+            and isinstance(status.get("effective"), dict)
+            and isinstance(status.get("overlays"), list)
+        )
+        if not storage and top_level_shape:
+            storage = dict(status)
+        nested_shape = bool(
+            storage
+            and any(
+                key in storage
+                for key in ("core", "effective", "overlays", "this_overlay")
+            )
+        )
+        if not (capability_present or top_level_shape or nested_shape):
+            return None
+
+        if not storage:
+            return None
+
+        comparison: HybridPolicyComparison | None = None
+        comparison_method = getattr(self.controller, "hybrid_policy_status", None)
+        if callable(comparison_method):
+            try:
+                candidate = comparison_method(status)
+            except (ControllerError, TypeError, ValueError) as exc:
+                storage["_comparison_error"] = str(exc)
+            else:
+                if isinstance(candidate, HybridPolicyComparison):
+                    comparison = candidate
+        manifest = comparison.manifest if comparison is not None else None
+        if comparison is not None:
+            storage["runtime_epoch"] = comparison.runtime_epoch
+            storage["restore_needed"] = comparison.restore_needed
+            storage["overlay_present"] = comparison.overlay_present
+            storage["core_matches"] = comparison.core_matches
+            storage["overlay_matches"] = comparison.overlay_matches
+        if manifest is not None:
+            storage["controller_id"] = manifest.controller_id
+            storage["expected_core_hash"] = manifest.core_hash
+            storage["expected_overlay_hash"] = manifest.overlay_hash
+            storage["source_binding"] = manifest.resolved_source or (
+                manifest.source if manifest.source != "auto" else ""
+            )
+            storage["auto_restore"] = manifest.restore_overlay_after_reboot
+            storage["_manifest"] = manifest
+        else:
+            storage.setdefault(
+                "controller_id",
+                str(getattr(self.controller.store, "controller_id", "")),
+            )
+        for key in ("last_error", "overlay_restore_error"):
+            if key not in storage and key in status:
+                storage[key] = status[key]
+        storage["_capabilities"] = capabilities
+        storage["_comparison"] = comparison
+        return storage
+
+    @staticmethod
+    def _storage_record(value: object) -> dict[str, Any]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _storage_integer(record: dict[str, Any], *keys: str) -> int | None:
+        for key in keys:
+            value = record.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+            if isinstance(value, str) and value.strip().isdigit():
+                return int(value)
+        return None
+
+    @classmethod
+    def _storage_origin_count(cls, record: dict[str, Any]) -> int | None:
+        origins = cls._storage_integer(record, "origins", "origin_count")
+        if origins is not None:
+            return origins
+        origin_ids = record.get("origin_ids")
+        return len(origin_ids) if isinstance(origin_ids, list) else None
+
+    @classmethod
+    def _storage_record_summary(
+        cls,
+        record: dict[str, Any],
+        *,
+        empty: str,
+    ) -> str:
+        origins = cls._storage_origin_count(record)
+        rows = cls._storage_integer(record, "rows", "rules_count")
+        size = cls._storage_integer(record, "bytes", "compiled_bytes")
+        parts: list[str] = []
+        if origins is not None:
+            parts.append(f"{origins} origin{'' if origins == 1 else 's'}")
+        if rows is not None:
+            parts.append(f"{rows:,} rows")
+        if size is not None:
+            parts.append(f"{size:,} B")
+        if parts:
+            return " · ".join(parts)
+        return "Active" if record else empty
+
+    def _this_policy_overlay(
+        self,
+        storage: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        controller_id = str(storage.get("controller_id", "")).strip()
+        this_overlay = self._storage_record(storage.get("this_overlay"))
+        overlays_value = storage.get("overlays", [])
+        overlays = (
+            [dict(item) for item in overlays_value if isinstance(item, dict)]
+            if isinstance(overlays_value, list)
+            else []
+        )
+        if not this_overlay and controller_id:
+            this_overlay = next(
+                (
+                    item
+                    for item in overlays
+                    if str(item.get("owner", "")).strip() == controller_id
+                ),
+                {},
+            )
+        other_overlays = [
+            item
+            for item in overlays
+            if not this_overlay
+            or item is not this_overlay
+            and (
+                not controller_id or str(item.get("owner", "")).strip() != controller_id
+            )
+        ]
+        return this_overlay, other_overlays
+
+    @staticmethod
+    def _policy_storage_state(record: dict[str, Any]) -> str:
+        return str(record.get("state", record.get("status", ""))).strip().casefold()
+
+    @staticmethod
+    def _hash_value(record: dict[str, Any]) -> str:
+        return str(record.get("hash", "")).strip()
+
+    def _policy_storage_tones(
+        self,
+        storage: dict[str, Any],
+        this_overlay: dict[str, Any],
+    ) -> dict[str, str]:
+        core = self._storage_record(storage.get("core"))
+        effective = self._storage_record(storage.get("effective"))
+        core_state = self._policy_storage_state(core)
+        overlay_state = self._policy_storage_state(this_overlay)
+        expected_core = str(storage.get("expected_core_hash", "")).strip()
+        expected_overlay = str(storage.get("expected_overlay_hash", "")).strip()
+        actual_core = self._hash_value(core)
+        actual_overlay = self._hash_value(this_overlay)
+        expected_source = self._saved_policy_overlay_source(storage)
+        active_source = self._active_policy_overlay_source(this_overlay)
+        source_protection_failed = bool(
+            expected_overlay
+            and this_overlay
+            and (
+                expected_source is None
+                or active_source is None
+                or active_source != expected_source
+            )
+        )
+        storage_error = str(
+            storage.get("last_error")
+            or storage.get("overlay_restore_error")
+            or storage.get("_comparison_error")
+            or self.router_status.get("last_reconcile_error")
+            or ""
+        ).strip()
+
+        core_tone = "green"
+        if (
+            not core
+            or core_state in {"missing", "corrupt", "error", "failed", "degraded"}
+            or storage.get("core_matches") is False
+            or expected_core
+            and actual_core != expected_core
+        ):
+            core_tone = "red"
+
+        overlay_tone = "neutral"
+        if (
+            storage_error
+            or source_protection_failed
+            or overlay_state in {"error", "failed", "degraded"}
+        ):
+            overlay_tone = "red"
+        elif expected_overlay and (
+            not this_overlay
+            or actual_overlay != expected_overlay
+            or storage.get("overlay_matches") is False
+            or bool(storage.get("restore_needed"))
+            or overlay_state in {"missing", "stale", "pending"}
+        ):
+            overlay_tone = "amber"
+        elif this_overlay:
+            overlay_tone = "green"
+
+        policy_health = str(self.router_status.get("policy_health", "")).casefold()
+        effective_state = self._policy_storage_state(effective)
+        if (
+            policy_health == "degraded"
+            or storage_error
+            or effective_state in {"missing", "corrupt", "error", "failed", "degraded"}
+            or core_tone == "red"
+            or overlay_tone == "red"
+        ):
+            effective_tone = "red"
+        elif overlay_tone == "amber":
+            effective_tone = "amber"
+        elif effective:
+            effective_tone = "green"
+        else:
+            effective_tone = "red"
+        return {
+            "local": "neutral",
+            "core": core_tone,
+            "this_overlay": overlay_tone,
+            "other_overlays": "neutral",
+            "effective": effective_tone,
+        }
+
+    def _set_policy_storage_cell(
+        self,
+        key: str,
+        text: str,
+        tone: str,
+        *,
+        tooltip: str = "",
+    ) -> None:
+        label = self.policy_storage_cells[key]
+        label.setText(text)
+        label.setToolTip(tooltip)
+        label.setProperty("storageTone", tone)
+        label.style().unpolish(label)
+        label.style().polish(label)
+
+    def _render_hybrid_policy_storage(self, storage: dict[str, Any]) -> None:
+        self.policy_storage_group.show()
+        self.apply_button.hide()
+        self.apply_selected_button.hide()
+
+        local_total = len(self.controller.store.rules)
+        local_enabled = sum(rule.enabled for rule in self.controller.store.rules)
+        core = self._storage_record(storage.get("core"))
+        effective = self._storage_record(storage.get("effective"))
+        this_overlay, other_overlays = self._this_policy_overlay(storage)
+        tones = self._policy_storage_tones(storage, this_overlay)
+
+        self._set_policy_storage_cell(
+            "local",
+            f"{local_enabled} enabled · {local_total} saved",
+            tones["local"],
+            tooltip="The authoritative editable library stored on this computer.",
+        )
+        self._set_policy_storage_cell(
+            "core",
+            self._storage_record_summary(core, empty="Missing"),
+            tones["core"],
+            tooltip="Persistent NVRAM policy available before any computer signs in.",
+        )
+        overlay_empty = (
+            "Not restored"
+            if str(storage.get("expected_overlay_hash", "")).strip()
+            else "Not loaded"
+        )
+        self._set_policy_storage_cell(
+            "this_overlay",
+            self._storage_record_summary(this_overlay, empty=overlay_empty),
+            tones["this_overlay"],
+            tooltip=(
+                "Volatile policy owned by this controller and limited to the "
+                "displayed IPv4 source binding."
+            ),
+        )
+        other_origins = sum(
+            self._storage_origin_count(item) or 0 for item in other_overlays
+        )
+        other_text = f"{len(other_overlays)} owner"
+        if len(other_overlays) != 1:
+            other_text += "s"
+        if other_origins:
+            other_text += f" · {other_origins} origins"
+        self._set_policy_storage_cell(
+            "other_overlays",
+            other_text,
+            tones["other_overlays"],
+            tooltip="RAM overlays restored by other paired controllers.",
+        )
+        self._set_policy_storage_cell(
+            "effective",
+            self._storage_record_summary(effective, empty="Unavailable"),
+            tones["effective"],
+            tooltip="The composed core plus all active overlays enforced by DD-WRT.",
+        )
+
+        suggested_source = self._suggest_policy_overlay_source(storage, this_overlay)
+        if (
+            suggested_source
+            and not self._overlay_source_user_edited
+            and self.policy_overlay_source.text().strip() != suggested_source
+        ):
+            self._syncing_policy_storage = True
+            self.policy_overlay_source.setText(suggested_source)
+            self._syncing_policy_storage = False
+        self._render_policy_overlay_source_state(storage)
+
+        auto_restore = storage.get("auto_restore")
+        if not isinstance(auto_restore, bool):
+            auto_restore = bool(
+                getattr(
+                    self.controller.store,
+                    "policy_overlay_auto_restore",
+                    False,
+                )
+            )
+        self._syncing_policy_storage = True
+        self.policy_auto_restore_check.setChecked(auto_restore)
+        self._syncing_policy_storage = False
+
+        effective_origins = self._storage_origin_count(effective)
+        if effective_origins is None:
+            effective_origins = (
+                (self._storage_origin_count(core) or 0)
+                + (self._storage_origin_count(this_overlay) or 0)
+                + other_origins
+            )
+        self.metric_labels["rules"].setText(f"{local_enabled} / {effective_origins}")
+        self.metric_labels["rules"].setToolTip(
+            f"{local_enabled} enabled in this computer's library; "
+            f"{effective_origins} origins in the effective router policy."
+        )
+
+        storage_error = str(
+            storage.get("last_error")
+            or storage.get("overlay_restore_error")
+            or storage.get("_comparison_error")
+            or self.router_status.get("last_reconcile_error")
+            or ""
+        ).strip()
+        local_outside = max(0, local_enabled - effective_origins)
+        if tones["effective"] == "red":
+            detail = f": {storage_error}" if storage_error else ""
+            self.policy_sync_state.setText(
+                "Router policy needs attention"
+                f"{detail}. The effective policy is not fully verified."
+            )
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['red']};")
+        elif tones["this_overlay"] == "amber":
+            self.policy_sync_state.setText(
+                "Router core is active. This computer's volatile RAM overlay "
+                "needs restore; restore it now or explicitly enable reboot "
+                "auto-restore."
+            )
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['orange']};")
+        elif local_outside:
+            self.policy_sync_state.setText(
+                f"Router policy is up to date. {local_outside} enabled local "
+                f"polic{'y is' if local_outside == 1 else 'ies are'} deliberately "
+                "outside the effective router profile."
+            )
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['muted']};")
+        else:
+            self.policy_sync_state.setText(
+                "Router policy is up to date. Persistent core and this computer's "
+                "RAM overlay match the saved deployment."
+            )
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['green']};")
+        self._sync_policy_apply_ui()
+
+    def _render_legacy_policy_storage(self) -> None:
+        self.policy_storage_group.hide()
+        self.apply_button.show()
+        self.apply_selected_button.show()
+
     def _update_policy_metric(self) -> None:
+        storage = self._hybrid_policy_storage()
+        if storage is not None:
+            self.policy_preflight = self.controller.policy_preflight()
+            self._render_policy_capacity(self.policy_preflight)
+            self._render_hybrid_policy_storage(storage)
+            return
+        self._render_legacy_policy_storage()
         comparison = self.controller.policy_origin_comparison(self.router_status)
         local_count = len(comparison.local_enabled_ids)
         self.policy_preflight = self.controller.policy_preflight()
@@ -2075,6 +2759,406 @@ class MainWindow(QMainWindow):
             detail = "\n".join((detail, *summary.warnings)).strip()
         self.policy_capacity_state.setToolTip(detail)
 
+    def _suggest_policy_overlay_source(
+        self,
+        storage: dict[str, Any],
+        this_overlay: dict[str, Any],
+    ) -> str:
+        candidates = (
+            this_overlay.get("source"),
+            this_overlay.get("source_binding"),
+            storage.get("source"),
+            storage.get("source_binding"),
+            self.router_status.get("controller_source"),
+            self.router_status.get("client_ip"),
+            getattr(self.controller.store, "policy_overlay_source", ""),
+            getattr(self.controller, "policy_overlay_source", ""),
+        )
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if not value:
+                continue
+            try:
+                return self._normalized_policy_overlay_source(value)
+            except ValueError:
+                continue
+
+        router_host = str(self.controller.store.router_host).strip()
+        if not router_host:
+            return ""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.connect(
+                    (
+                        router_host,
+                        int(self.controller.store.router_port),
+                    )
+                )
+                local_address = str(probe.getsockname()[0])
+            return self._normalized_policy_overlay_source(local_address)
+        except (OSError, TypeError, ValueError):
+            return ""
+
+    @staticmethod
+    def _normalized_policy_overlay_source(value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError(
+                "Enter this computer's IPv4 host or a dedicated source CIDR."
+            )
+        candidate = stripped if "/" in stripped else f"{stripped}/32"
+        try:
+            network = ipaddress.ip_network(candidate, strict=False)
+        except ValueError as exc:
+            raise ValueError(
+                "The RAM overlay source must be a valid IPv4 CIDR."
+            ) from exc
+        if network.version != 4:
+            raise ValueError("The RAM overlay source must use IPv4.")
+        if (
+            network.prefixlen == 0
+            or network.is_unspecified
+            or network.is_loopback
+            or network.is_multicast
+            or network.network_address == ipaddress.IPv4Address("255.255.255.255")
+        ):
+            raise ValueError(
+                "Choose one LAN host or a dedicated source subnet, not a global "
+                "or special-use range."
+            )
+        return str(network)
+
+    def _policy_overlay_source_edited(self, _value: str) -> None:
+        if not self._syncing_policy_storage:
+            self._overlay_source_user_edited = True
+
+    def _policy_overlay_source_changed(self, _value: str) -> None:
+        if self._syncing_policy_storage:
+            return
+        self._render_policy_overlay_source_state(self._hybrid_policy_storage())
+        self._sync_policy_apply_ui()
+
+    def _normalize_policy_overlay_source(self) -> None:
+        value = self.policy_overlay_source.text()
+        try:
+            normalized = self._normalized_policy_overlay_source(value)
+        except ValueError:
+            self._render_policy_overlay_source_state(self._hybrid_policy_storage())
+            return
+        if normalized != value:
+            self._syncing_policy_storage = True
+            self.policy_overlay_source.setText(normalized)
+            self._syncing_policy_storage = False
+        self._render_policy_overlay_source_state(self._hybrid_policy_storage())
+        self._sync_policy_apply_ui()
+
+    def _policy_overlay_source_value(self) -> str | None:
+        try:
+            return self._normalized_policy_overlay_source(
+                self.policy_overlay_source.text()
+            )
+        except ValueError:
+            return None
+
+    def _saved_policy_overlay_source(
+        self,
+        storage: dict[str, Any],
+    ) -> str | None:
+        manifest = storage.get("_manifest")
+        if manifest is None:
+            return None
+        configured_source = str(getattr(manifest, "source", "") or "").strip()
+        candidates = (
+            getattr(manifest, "resolved_source", None),
+            configured_source if configured_source.casefold() != "auto" else None,
+            storage.get("source_binding"),
+        )
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if not value:
+                continue
+            try:
+                return self._normalized_policy_overlay_source(value)
+            except ValueError:
+                continue
+        return None
+
+    def _active_policy_overlay_source(
+        self,
+        overlay: dict[str, Any],
+    ) -> str | None:
+        for key in ("source", "source_binding", "resolved_source"):
+            value = str(overlay.get(key, "") or "").strip()
+            if not value:
+                continue
+            try:
+                return self._normalized_policy_overlay_source(value)
+            except ValueError:
+                continue
+        return None
+
+    def _render_policy_overlay_source_state(
+        self,
+        storage: dict[str, Any] | None = None,
+    ) -> None:
+        text = self.policy_overlay_source.text()
+        try:
+            normalized = self._normalized_policy_overlay_source(text)
+            network = ipaddress.ip_network(normalized, strict=False)
+        except ValueError as exc:
+            self.policy_overlay_source_state.setText(str(exc))
+            tone = "red"
+        else:
+            saved_source = (
+                self._saved_policy_overlay_source(storage)
+                if storage is not None
+                else None
+            )
+            this_overlay, _other_overlays = (
+                self._this_policy_overlay(storage) if storage is not None else ({}, [])
+            )
+            active_source = self._active_policy_overlay_source(this_overlay)
+            if (
+                saved_source is not None
+                and this_overlay
+                and active_source != saved_source
+            ):
+                reported = active_source or "no valid source"
+                self.policy_overlay_source_state.setText(
+                    f"Router reports {reported}; saved binding is {saved_source}. "
+                    "Restore the RAM overlay before trusting it."
+                )
+                tone = "red"
+            elif saved_source is not None and normalized != saved_source:
+                self.policy_overlay_source_state.setText(
+                    f"Edited binding differs from saved overlay {saved_source}. "
+                    "Load a selection to replace it."
+                )
+                tone = "amber"
+            elif network.prefixlen == 32:
+                self.policy_overlay_source_state.setText("Bound to one IPv4 host.")
+                tone = "green"
+            else:
+                self.policy_overlay_source_state.setText(
+                    f"CIDR binds {network.num_addresses:,} addresses; use only a "
+                    "dedicated source subnet."
+                )
+                tone = "amber"
+        self.policy_overlay_source_state.setProperty("storageTone", tone)
+        self.policy_overlay_source_state.style().unpolish(
+            self.policy_overlay_source_state
+        )
+        self.policy_overlay_source_state.style().polish(
+            self.policy_overlay_source_state
+        )
+
+    def _require_saved_policy_overlay_source(
+        self,
+        title: str,
+        storage: dict[str, Any],
+    ) -> str | None:
+        visible_source = self._require_policy_overlay_source(title)
+        if visible_source is None:
+            return None
+        saved_source = self._saved_policy_overlay_source(storage)
+        if saved_source is None:
+            QMessageBox.warning(
+                self,
+                title,
+                "This deployment has no verified IPv4 binding for its saved RAM "
+                "overlay. Select the intended policies and use Load selected into "
+                "RAM first.",
+            )
+            return None
+        if visible_source != saved_source:
+            QMessageBox.warning(
+                self,
+                title,
+                f"The visible binding ({visible_source}) differs from the saved "
+                f"overlay binding ({saved_source}). Load the intended selection "
+                "into RAM to change its source before restoring it.",
+            )
+            return None
+        return saved_source
+
+    def _policy_storage_method(self, action: str) -> Callable[..., Any] | None:
+        for name in HYBRID_CONTROLLER_METHODS[action]:
+            method = getattr(self.controller, name, None)
+            if callable(method):
+                return method
+        return None
+
+    def _require_policy_overlay_source(self, title: str) -> str | None:
+        try:
+            return self._normalized_policy_overlay_source(
+                self.policy_overlay_source.text()
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                title,
+                f"{exc}\n\nRAM overlay actions refuse an unscoped, LAN-global policy.",
+            )
+            self.policy_overlay_source.setFocus()
+            return None
+
+    def _sync_hybrid_policy_ui(self, storage: dict[str, Any]) -> None:
+        writable = (
+            not self.controller.store.read_only
+            and self.controller.store.companion_enabled
+            and self.busy_count == 0
+        )
+        selected_count = len(self._selected_policy_ids())
+        visible_source = self._policy_overlay_source_value()
+        source_ready = visible_source is not None
+        saved_source = self._saved_policy_overlay_source(storage)
+        source_matches = (
+            visible_source is not None
+            and saved_source is not None
+            and visible_source == saved_source
+        )
+        manifest = storage.get("_manifest")
+        saved_overlay = bool(
+            manifest is not None
+            and tuple(getattr(manifest, "overlay_rule_ids", ()) or ())
+            and getattr(manifest, "overlay_hash", None)
+        )
+        this_overlay, _other_overlays = self._this_policy_overlay(storage)
+
+        methods = {
+            action: self._policy_storage_method(action)
+            for action in HYBRID_CONTROLLER_METHODS
+        }
+        configure_available = callable(
+            getattr(self.controller, "configure_policy_deployment", None)
+        )
+        comparison_available = callable(
+            getattr(self.controller, "hybrid_policy_status", None)
+        )
+        deployment_ready = manifest is not None or (
+            configure_available and comparison_available
+        )
+        self.pin_core_button.setEnabled(
+            writable
+            and deployment_ready
+            and selected_count > 0
+            and methods["pin"] is not None
+        )
+        self.load_ram_button.setEnabled(
+            writable
+            and deployment_ready
+            and selected_count > 0
+            and source_ready
+            and methods["load"] is not None
+        )
+        self.restore_ram_button.setEnabled(
+            writable
+            and saved_overlay
+            and source_matches
+            and methods["restore"] is not None
+        )
+        self.remove_overlay_button.setEnabled(
+            writable
+            and manifest is not None
+            and bool(this_overlay)
+            and methods["remove"] is not None
+        )
+        self.policy_auto_restore_check.setEnabled(
+            writable
+            and methods["auto_restore"] is not None
+            and (
+                self.policy_auto_restore_check.isChecked()
+                or saved_overlay
+                and source_matches
+            )
+        )
+        self.policy_overlay_source.setEnabled(self.busy_count == 0)
+
+        self.pin_core_button.setText("Pin selected to core")
+        self.load_ram_button.setText("Load selected into RAM")
+        unavailable = "Requires the hybrid policy-storage controller API."
+        if methods["pin"] is None or not deployment_ready:
+            self.pin_core_button.setToolTip(unavailable)
+        elif not selected_count:
+            self.pin_core_button.setToolTip(
+                "Select one or more policy rows to persist in router NVRAM."
+            )
+        else:
+            self.pin_core_button.setToolTip(
+                f"Persist {selected_count} selected "
+                f"polic{'y' if selected_count == 1 else 'ies'} in router NVRAM "
+                "so they survive reboot. This is a global router policy."
+            )
+        if methods["load"] is None or not deployment_ready:
+            self.load_ram_button.setToolTip(unavailable)
+        elif not selected_count:
+            self.load_ram_button.setToolTip(
+                "Select one or more policy rows to load into this computer's RAM "
+                "overlay."
+            )
+        elif not source_ready:
+            self.load_ram_button.setToolTip(
+                "Enter a valid IPv4 source binding before loading a RAM overlay."
+            )
+        else:
+            self.load_ram_button.setToolTip(
+                f"Load {selected_count} selected "
+                f"polic{'y' if selected_count == 1 else 'ies'} into this "
+                "computer's volatile, source-bound overlay without an NVRAM "
+                "commit."
+            )
+        if methods["restore"] is None:
+            self.restore_ram_button.setToolTip(unavailable)
+        elif not saved_overlay:
+            self.restore_ram_button.setToolTip(
+                "Load a selected, source-bound RAM overlay before restoring it."
+            )
+        elif not source_ready:
+            self.restore_ram_button.setToolTip(
+                "Enter a valid IPv4 source binding before restoring the overlay."
+            )
+        elif not source_matches:
+            self.restore_ram_button.setToolTip(
+                "The visible source must match the saved overlay binding. Use Load "
+                "selected into RAM to change it."
+            )
+        else:
+            self.restore_ram_button.setToolTip(
+                "Reconcile this controller's expected overlay once. Other owners "
+                "are left unchanged."
+            )
+        if methods["remove"] is None:
+            self.remove_overlay_button.setToolTip(unavailable)
+        elif manifest is None:
+            self.remove_overlay_button.setToolTip(
+                "A trusted local deployment manifest is required to identify and "
+                "remove this controller's overlay."
+            )
+        elif not this_overlay:
+            self.remove_overlay_button.setToolTip(
+                "This computer does not currently have an active RAM overlay."
+            )
+        else:
+            self.remove_overlay_button.setToolTip(
+                "Remove only this controller's RAM overlay. Other owners and the "
+                "persistent core remain active."
+            )
+        if methods["auto_restore"] is None:
+            self.policy_auto_restore_check.setToolTip(unavailable)
+        elif not saved_overlay:
+            self.policy_auto_restore_check.setToolTip(
+                "Load a source-bound RAM overlay before opting into reboot restore."
+            )
+        elif not source_matches:
+            self.policy_auto_restore_check.setToolTip(
+                "The visible IPv4 source must match the saved overlay binding."
+            )
+        else:
+            self.policy_auto_restore_check.setToolTip(
+                "Explicit opt-in: after a new router runtime is observed, the "
+                "controller makes at most one restore attempt. No periodic polling."
+            )
+
     def _selected_policy_ids(self) -> tuple[str, ...]:
         return tuple(
             str(item.data(0, Qt.ItemDataRole.UserRole))
@@ -2087,6 +3171,14 @@ class MainWindow(QMainWindow):
     def _sync_policy_apply_ui(self) -> None:
         if not hasattr(self, "apply_selected_button"):
             return
+        storage = self._hybrid_policy_storage()
+        if storage is not None:
+            self.apply_button.hide()
+            self.apply_selected_button.hide()
+            self.policy_storage_group.show()
+            self._sync_hybrid_policy_ui(storage)
+            return
+        self._render_legacy_policy_storage()
         summary = self.policy_preflight or self.controller.policy_preflight()
         self.policy_preflight = summary
         writable = (
@@ -4453,6 +5545,376 @@ class MainWindow(QMainWindow):
             "Astrill disconnected, but policy fail-closed is degraded"
             f"{suffix}. The tunnel is down; VPN-targeted traffic may not be "
             "blocked as intended."
+        )
+
+    def _hybrid_policy_action_completed(self, result: object) -> None:
+        status: object | None = None
+        if isinstance(result, dict):
+            nested = result.get("status")
+            status = nested if isinstance(nested, dict) else result
+        else:
+            candidate = getattr(result, "status", None)
+            if isinstance(candidate, dict):
+                status = candidate
+        if isinstance(status, dict):
+            self._status_loaded(status)
+        else:
+            QTimer.singleShot(0, lambda: self._refresh_status(quiet=True))
+
+    def _policy_layer_preflight(
+        self,
+        rule_ids: tuple[str, ...],
+        *,
+        layer: str,
+        title: str,
+    ) -> PolicyCompilationSummary | None:
+        preflight_method = getattr(
+            self.controller,
+            "policy_layer_preflight",
+            None,
+        )
+        if callable(preflight_method):
+            summary = preflight_method(rule_ids, layer=layer)
+        else:
+            summary = self.controller.policy_preflight(rule_ids)
+        if summary.can_apply:
+            return summary
+        QMessageBox.warning(
+            self,
+            title,
+            summary.error or f"The selected {layer} policies cannot be compiled.",
+        )
+        return None
+
+    @staticmethod
+    def _policy_layer_size_text(summary: PolicyCompilationSummary) -> str:
+        parts = [f"{summary.compiled_rows:,} compiled rows"]
+        if summary.compiled_bytes is not None:
+            if summary.limit_bytes is None:
+                parts.append(f"{summary.compiled_bytes:,} bytes")
+            else:
+                parts.append(
+                    f"{summary.compiled_bytes:,} / {summary.limit_bytes:,} bytes"
+                )
+        return " · ".join(parts)
+
+    def _configure_policy_deployment_if_missing(
+        self,
+        *,
+        layer: str,
+        rule_ids: tuple[str, ...],
+        source: str,
+        status: dict[str, Any],
+    ) -> None:
+        comparison_method = getattr(
+            self.controller,
+            "hybrid_policy_status",
+            None,
+        )
+        configure_method = getattr(
+            self.controller,
+            "configure_policy_deployment",
+            None,
+        )
+        if not callable(comparison_method) or not callable(configure_method):
+            raise ControllerError(
+                "the installed controller cannot bind hybrid policy storage "
+                "to this router version"
+            )
+        comparison = comparison_method(status)
+        if getattr(comparison, "manifest", None) is not None:
+            return
+        configure_method(
+            core_rule_ids=rule_ids if layer == "core" else (),
+            overlay_rule_ids=rule_ids if layer == "overlay" else (),
+            source=source,
+            restore_overlay_after_reboot=False,
+            status=status,
+            host_key=None,
+        )
+
+    def _pin_selected_to_core(self) -> None:
+        selected_ids = self._selected_policy_ids()
+        if not selected_ids:
+            self._select_something(
+                "Select one or more policies to pin to the persistent core."
+            )
+            return
+        storage = self._hybrid_policy_storage()
+        method = self._policy_storage_method("pin")
+        configure_method = getattr(
+            self.controller,
+            "configure_policy_deployment",
+            None,
+        )
+        comparison_method = getattr(
+            self.controller,
+            "hybrid_policy_status",
+            None,
+        )
+        if (
+            method is None
+            or storage is None
+            or storage.get("_manifest") is None
+            and (not callable(configure_method) or not callable(comparison_method))
+        ):
+            QMessageBox.warning(
+                self,
+                "Pin selected to core",
+                "The installed companion/controller does not support hybrid "
+                "persistent-core policy storage.",
+            )
+            return
+        summary = self._policy_layer_preflight(
+            selected_ids,
+            layer="core",
+            title="Pin selected to core",
+        )
+        if summary is None:
+            return
+        size_text = self._policy_layer_size_text(summary)
+        warning_text = "\n\n" + "\n".join(summary.warnings) if summary.warnings else ""
+        if (
+            QMessageBox.question(
+                self,
+                "Pin selected to core",
+                f"Persist {len(selected_ids)} selected "
+                f"polic{'y' if len(selected_ids) == 1 else 'ies'} in router "
+                "NVRAM?\n\nCore policies survive reboot, apply globally, and "
+                f"perform a verified NVRAM commit.\n\n{size_text}{warning_text}",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        status = dict(self.router_status)
+        manifest_source = self._policy_overlay_source_value() or "auto"
+
+        def pin() -> object:
+            self._configure_policy_deployment_if_missing(
+                layer="core",
+                rule_ids=selected_ids,
+                source=manifest_source,
+                status=status,
+            )
+            return method(selected_ids)
+
+        self._run_task(
+            "Pinning persistent core policies",
+            pin,
+            self._hybrid_policy_action_completed,
+        )
+
+    def _load_selected_into_ram(self) -> None:
+        selected_ids = self._selected_policy_ids()
+        if not selected_ids:
+            self._select_something(
+                "Select one or more policies to load into the RAM overlay."
+            )
+            return
+        source = self._require_policy_overlay_source("Load selected into RAM")
+        if source is None:
+            return
+        storage = self._hybrid_policy_storage()
+        method = self._policy_storage_method("load")
+        configure_method = getattr(
+            self.controller,
+            "configure_policy_deployment",
+            None,
+        )
+        comparison_method = getattr(
+            self.controller,
+            "hybrid_policy_status",
+            None,
+        )
+        if (
+            method is None
+            or storage is None
+            or storage.get("_manifest") is None
+            and (not callable(configure_method) or not callable(comparison_method))
+        ):
+            QMessageBox.warning(
+                self,
+                "Load selected into RAM",
+                "The installed companion/controller does not support "
+                "owner-scoped RAM overlays.",
+            )
+            return
+        summary = self._policy_layer_preflight(
+            selected_ids,
+            layer="overlay",
+            title="Load selected into RAM",
+        )
+        if summary is None:
+            return
+        size_text = self._policy_layer_size_text(summary)
+        warning_text = "\n\n" + "\n".join(summary.warnings) if summary.warnings else ""
+        if (
+            QMessageBox.question(
+                self,
+                "Load selected into RAM",
+                f"Load {len(selected_ids)} selected "
+                f"polic{'y' if len(selected_ids) == 1 else 'ies'} for source "
+                f"{source}?\n\nThis overlay is volatile and performs no NVRAM "
+                f"commit. It disappears when DD-WRT reboots.\n\n"
+                f"{size_text}{warning_text}",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        status = dict(self.router_status)
+
+        def load() -> object:
+            self._configure_policy_deployment_if_missing(
+                layer="overlay",
+                rule_ids=selected_ids,
+                source=source,
+                status=status,
+            )
+            return method(selected_ids, source=source)
+
+        def loaded(result: object) -> None:
+            self._overlay_source_user_edited = False
+            self._hybrid_policy_action_completed(result)
+
+        self._run_task(
+            "Loading this computer's RAM overlay",
+            load,
+            loaded,
+        )
+
+    def _restore_ram_overlay_now(self) -> None:
+        storage = self._hybrid_policy_storage()
+        method = self._policy_storage_method("restore")
+        manifest = storage.get("_manifest") if storage is not None else None
+        saved_overlay = bool(
+            manifest is not None
+            and tuple(getattr(manifest, "overlay_rule_ids", ()) or ())
+            and getattr(manifest, "overlay_hash", None)
+        )
+        if method is None or storage is None or not saved_overlay:
+            QMessageBox.warning(
+                self,
+                "Restore RAM overlay now",
+                "No trusted, source-bound RAM overlay is saved for this "
+                "controller. Load a selected overlay first.",
+            )
+            return
+        source = self._require_saved_policy_overlay_source(
+            "Restore RAM overlay now",
+            storage,
+        )
+        if source is None:
+            return
+        self._run_task(
+            f"Restoring this computer's RAM overlay for {source}",
+            method,
+            self._hybrid_policy_action_completed,
+        )
+
+    def _remove_this_overlay(self) -> None:
+        storage = self._hybrid_policy_storage()
+        method = self._policy_storage_method("remove")
+        if storage is None or storage.get("_manifest") is None or method is None:
+            QMessageBox.warning(
+                self,
+                "Remove this overlay",
+                "The installed companion/controller cannot remove an "
+                "owner-scoped RAM overlay.",
+            )
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Remove this overlay",
+                "Remove only this computer's volatile RAM overlay?\n\n"
+                "The persistent core and overlays owned by other paired "
+                "controllers remain unchanged.",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        self._run_task(
+            "Removing this computer's RAM overlay",
+            method,
+            self._hybrid_policy_action_completed,
+        )
+
+    def _policy_auto_restore_toggled(self, checked: bool) -> None:
+        if self._syncing_policy_storage:
+            return
+        method = self._policy_storage_method("auto_restore")
+        storage = self._hybrid_policy_storage()
+        previous = not checked
+        manifest = storage.get("_manifest") if storage is not None else None
+        saved_overlay = bool(
+            manifest is not None
+            and tuple(getattr(manifest, "overlay_rule_ids", ()) or ())
+            and getattr(manifest, "overlay_hash", None)
+        )
+        source: str | None = None
+        if checked:
+            if not saved_overlay:
+                self._syncing_policy_storage = True
+                self.policy_auto_restore_check.setChecked(previous)
+                self._syncing_policy_storage = False
+                QMessageBox.warning(
+                    self,
+                    "Auto-restore RAM overlay",
+                    "Load a selected, source-bound RAM overlay before enabling "
+                    "automatic restore.",
+                )
+                return
+            source = self._require_saved_policy_overlay_source(
+                "Auto-restore RAM overlay",
+                storage,
+            )
+            if source is None:
+                self._syncing_policy_storage = True
+                self.policy_auto_restore_check.setChecked(previous)
+                self._syncing_policy_storage = False
+                return
+            if (
+                QMessageBox.question(
+                    self,
+                    "Auto-restore RAM overlay",
+                    "Save an explicit opt-in to restore this computer's "
+                    f"source-bound overlay ({source}) once after a new router "
+                    "runtime is observed?\n\nThis does not enable periodic SSH "
+                    "polling.",
+                )
+                != QMessageBox.StandardButton.Yes
+            ):
+                self._syncing_policy_storage = True
+                self.policy_auto_restore_check.setChecked(previous)
+                self._syncing_policy_storage = False
+                return
+        if method is None or storage is None or manifest is None:
+            self._syncing_policy_storage = True
+            self.policy_auto_restore_check.setChecked(previous)
+            self._syncing_policy_storage = False
+            QMessageBox.warning(
+                self,
+                "Auto-restore RAM overlay",
+                "The controller cannot persist the hybrid overlay auto-restore "
+                "preference.",
+            )
+            return
+
+        def revert(_message: str) -> None:
+            self._syncing_policy_storage = True
+            self.policy_auto_restore_check.setChecked(previous)
+            self._syncing_policy_storage = False
+
+        status = dict(self.router_status)
+        self._run_task(
+            (
+                "Enabling RAM overlay auto-restore"
+                if checked
+                else "Disabling RAM overlay auto-restore"
+            ),
+            lambda: method(checked, status=status),
+            self._hybrid_policy_action_completed,
+            failure=revert,
         )
 
     def _apply_policies(self) -> None:
