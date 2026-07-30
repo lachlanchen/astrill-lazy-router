@@ -183,6 +183,12 @@ class WindowsConnectionPage(QWidget):
         return self._dirty
 
     @property
+    def has_pending_favorite_changes(self) -> bool:
+        """Whether this draft would change router favorite membership."""
+
+        return bool(self._favorite_changes())
+
+    @property
     def presented_nvram_keys(self) -> tuple[str, ...]:
         return CONNECTION_KEYS
 
@@ -290,6 +296,35 @@ class WindowsConnectionPage(QWidget):
         self.conflict_banner.setVisible(False)
         self._update_capability_hints()
         self._update_actions()
+
+    def merge_external_favorites(self, settings: NativeAstrillSettings) -> None:
+        """Accept a verified favorite list without discarding other draft edits.
+
+        Endpoint-page favorite actions fresh-read and compare-and-swap only
+        ``astrill_favlist``. When this editor has an unrelated endpoint or
+        transport draft, folding that one verified value into its baseline
+        prevents a false conflict and keeps a later save from using stale
+        favorite membership.
+        """
+
+        if self.settings is None or self.has_pending_favorite_changes:
+            return
+
+        merged_values = dict(self.settings.values)
+        merged_values["astrill_favlist"] = settings.get("astrill_favlist")
+        self.settings = NativeAstrillSettings.from_dict(merged_values)
+
+        self._loading = True
+        try:
+            self._load_favorites(self.settings)
+            for server in self.servers:
+                self._update_server_favorite_marker(server.id)
+            self._sync_favorite_control()
+        finally:
+            self._loading = False
+
+        self._baseline = _settings_fingerprint(self.settings)
+        self._changed()
 
     def update_status(self, status: dict[str, Any]) -> None:
         self.status = dict(status)

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.11 - 2026-07-30
+
+- Fix the Windows **Favorite selected** action when an unrelated Connection
+  draft is open by merging only the verified `astrill_favlist` readback into
+  that draft's baseline without discarding its endpoint or transport edits.
+- Continue to block overlapping favorite edits from two pages, and give
+  disabled favorite actions an unmistakable disabled style and exact reason.
+- Reorganize Endpoints into a compact search/filter/action and favorites
+  toolbar so the endpoint table receives substantially more vertical space.
+- Move the manual Windows-PC latency test into a reusable on-demand dialog
+  while preserving scope, status, cached results, and manual-only behavior.
+- Exercise the real Qt Favorite-button signal, unrelated-draft merge,
+  overlapping-draft guard, and latency-dialog reopen behavior in regression
+  tests.
+
 ## 0.2.10 - 2026-07-30
 
 - Add a dedicated native Windows Connection view with endpoint-aware protocol

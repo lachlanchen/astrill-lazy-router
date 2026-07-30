@@ -31,7 +31,7 @@ The native Windows application provides:
   optional DD-WRT companion;
 - a local read-only guard that is enabled for every fresh configuration.
 
-Version `0.2.10` has nine views: Policies, Services, Countries, Devices,
+Version `0.2.11` has nine views: Policies, Services, Countries, Devices,
 Connection, Endpoints, Astrill, Router, and Settings. Local policy edits are
 saved immediately, but they do not affect traffic until the companion is
 installed and **Apply policies** succeeds.
@@ -460,10 +460,21 @@ start background monitoring.
 
 The app will not rewrite malformed favorite data. It labels the Favorite
 column invalid, preserves the router value, and disables Favorite/Unfavorite
-until a valid value is available. It also disables favorite changes while the
-Astrill or Connection page has unsaved edits. A sync may update read-only
-favorite summaries without replacing those pending controls, but the drafts
-must be saved or reloaded before changing membership.
+until a valid value is available. An unrelated Astrill or Connection draft no
+longer blocks a favorite action. For a dirty Connection page, the verified
+`astrill_favlist` readback is merged into its baseline without replacing
+pending endpoint or transport controls. A dirty Astrill page keeps all pending
+policy controls and refreshes only its read-only favorite summary. A Connection
+draft that itself changes favorite membership still blocks the Endpoints action
+until it is saved or reloaded, so two editors cannot overwrite the same list.
+
+The Endpoints workspace keeps search, country, protocol, sorting, connection,
+selection, favorite, and boot/recovery controls in a compact control area.
+The table receives the remaining height. **PC latency…** opens the manual test
+in a small reusable dialog; its selected/visible/all scope, status, and saved
+results persist when the dialog is closed and reopened. **Behavior…** opens
+the two native favorite-failover and router-boot preferences without taking a
+permanent row away from the endpoint table.
 
 The guard is an accident-prevention feature, not an authorization boundary.
 A user who can edit the configuration or invoke `ssh.exe` directly can still
@@ -472,7 +483,7 @@ change the router.
 ## Human-Readable Astrill Settings
 
 The **Astrill** view uses the same effective native controls as the Ubuntu
-frontend instead of presenting an editable raw NVRAM table. Version `0.2.10`
+frontend instead of presenting an editable raw NVRAM table. Version `0.2.11`
 uses seven spacious tabs: **Overview**, **Connection**, **Routing**, **Privacy
 & DNS**, **Devices**, **Resilience**, and **Advanced**. Boolean values use
 checkboxes, validated modes use named choices, MTU uses a bounded number

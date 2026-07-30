@@ -290,6 +290,14 @@ QPushButton#favoriteAction {{
 QPushButton#favoriteAction:hover {{
     background: #6d28d9;
 }}
+QPushButton#favoriteAction:disabled {{
+    color: #94a3b8;
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+}}
+QDialog#endpointLatencyDialog {{
+    background: {COLORS["window"]};
+}}
 QLabel#latencyTitle {{
     color: #155e75;
     font-size: 12pt;
@@ -708,7 +716,11 @@ class MainWindow(QMainWindow):
         ("countries", "Countries", "Policy regions on one shared tunnel"),
         ("devices", "Devices", "Observed DD-WRT LAN clients"),
         ("connection", "Connection", "Mirrored shared Astrill tunnel controls"),
-        ("endpoints", "Endpoints", "Choose the shared Astrill server"),
+        (
+            "endpoints",
+            "Endpoints",
+            "DD-WRT shared tunnel only · Windows routing is unchanged",
+        ),
         ("astrill", "Astrill", "Native DD-WRT Astrill settings"),
         ("router", "Router", "Connection, runtime, and recovery"),
         ("settings", "Settings", "Windows frontend and SSH access"),
@@ -1214,14 +1226,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
-        scope = QLabel(
-            "Choose the endpoint for the router's one shared Astrill tunnel. "
-            "This controls DD-WRT only; it does not install, connect, or reroute "
-            "a VPN on this Windows computer."
-        )
-        scope.setWordWrap(True)
-        layout.addWidget(scope)
+        layout.setSpacing(9)
 
         search_row = QHBoxLayout()
         self.endpoint_search = QLineEdit()
@@ -1233,12 +1238,6 @@ class MainWindow(QMainWindow):
         self.load_endpoints_button = QPushButton("Load endpoints")
         self.load_endpoints_button.clicked.connect(self._load_endpoints)
         search_row.addWidget(self.load_endpoints_button)
-        self.connect_endpoint_button = QPushButton(
-            "Connect router to selected endpoint"
-        )
-        self.connect_endpoint_button.setObjectName("primary")
-        self.connect_endpoint_button.clicked.connect(self._connect_endpoint)
-        search_row.addWidget(self.connect_endpoint_button)
         layout.addLayout(search_row)
 
         filter_row = QHBoxLayout()
@@ -1270,36 +1269,54 @@ class MainWindow(QMainWindow):
         self.endpoint_sort.currentIndexChanged.connect(self._endpoint_sort_changed)
         filter_row.addWidget(self.endpoint_sort)
         filter_row.addStretch(1)
+        self.endpoint_latency_dialog_button = QPushButton("PC latency…")
+        self.endpoint_latency_dialog_button.setToolTip(
+            "Open the manual PC latency test. Saved results remain visible in "
+            "the endpoint table."
+        )
+        self.endpoint_latency_dialog_button.clicked.connect(
+            self._show_endpoint_latency_dialog
+        )
+        filter_row.addWidget(self.endpoint_latency_dialog_button)
+        self.connect_endpoint_button = QPushButton("Connect selected")
+        self.connect_endpoint_button.setObjectName("primary")
+        self.connect_endpoint_button.setToolTip(
+            "Connect the router's shared Astrill tunnel to the one selected endpoint."
+        )
+        self.connect_endpoint_button.clicked.connect(self._connect_endpoint)
+        filter_row.addWidget(self.connect_endpoint_button)
         layout.addLayout(filter_row)
 
         favorite_card = QFrame()
         favorite_card.setObjectName("favoriteCard")
-        favorite_layout = QHBoxLayout(favorite_card)
-        favorite_layout.setContentsMargins(16, 13, 16, 13)
-        favorite_layout.setSpacing(10)
-        favorite_text = QVBoxLayout()
-        favorite_text.setSpacing(3)
+        favorite_layout = QVBoxLayout(favorite_card)
+        favorite_layout.setContentsMargins(14, 9, 14, 9)
+        favorite_layout.setSpacing(6)
+
+        favorite_heading = QHBoxLayout()
+        favorite_heading.setSpacing(8)
         favorite_title = QLabel("Router favorites")
         favorite_title.setObjectName("favoriteTitle")
-        favorite_text.addWidget(favorite_title)
+        favorite_heading.addWidget(favorite_title)
         self.endpoint_favorite_status = QLabel(
             "Not synced · load endpoints or select Sync favorites."
         )
         self.endpoint_favorite_status.setObjectName("favoriteStatus")
-        self.endpoint_favorite_status.setWordWrap(True)
-        favorite_text.addWidget(self.endpoint_favorite_status)
-        self.endpoint_selection_status = QLabel(
-            "No endpoints selected · use row checkboxes, Ctrl, or Shift."
+        self.endpoint_favorite_status.setWordWrap(False)
+        favorite_heading.addWidget(self.endpoint_favorite_status, 1)
+        self.endpoint_favorite_sync_button = QPushButton("Sync from router")
+        self.endpoint_favorite_sync_button.setToolTip(
+            "Read Astrill's current favorites from DD-WRT now. "
+            "No background polling is used."
         )
-        self.endpoint_selection_status.setObjectName("favoriteStatus")
-        self.endpoint_selection_status.setWordWrap(True)
-        favorite_text.addWidget(self.endpoint_selection_status)
-        favorite_layout.addLayout(favorite_text, 1)
+        self.endpoint_favorite_sync_button.clicked.connect(
+            self._sync_endpoint_favorites
+        )
+        favorite_heading.addWidget(self.endpoint_favorite_sync_button)
+        favorite_layout.addLayout(favorite_heading)
 
-        favorite_controls = QVBoxLayout()
-        favorite_controls.setSpacing(7)
-        selection_controls = QHBoxLayout()
-        selection_controls.setSpacing(7)
+        favorite_actions = QHBoxLayout()
+        favorite_actions.setSpacing(7)
         self.endpoint_select_visible = QCheckBox("Select visible")
         self.endpoint_select_visible.setTristate(True)
         self.endpoint_select_visible.setToolTip(
@@ -1309,120 +1326,53 @@ class MainWindow(QMainWindow):
         self.endpoint_select_visible.checkStateChanged.connect(
             self._toggle_visible_endpoint_selection
         )
-        selection_controls.addWidget(self.endpoint_select_visible)
-        self.endpoint_clear_selection_button = QPushButton("Clear selection")
+        favorite_actions.addWidget(self.endpoint_select_visible)
+        self.endpoint_clear_selection_button = QPushButton("Clear")
+        self.endpoint_clear_selection_button.setToolTip(
+            "Clear all selected endpoints, including selections hidden by filters."
+        )
         self.endpoint_clear_selection_button.clicked.connect(
             self._clear_endpoint_selection
         )
-        selection_controls.addWidget(self.endpoint_clear_selection_button)
-        selection_controls.addStretch(1)
-        favorite_controls.addLayout(selection_controls)
+        favorite_actions.addWidget(self.endpoint_clear_selection_button)
+        self.endpoint_selection_status = QLabel("0 selected")
+        self.endpoint_selection_status.setObjectName("favoriteStatus")
+        self.endpoint_selection_status.setWordWrap(False)
+        self.endpoint_selection_status.setToolTip(
+            "Use row checkboxes, Ctrl/Command, or Shift. Selections hidden by "
+            "search or country filters are preserved."
+        )
+        favorite_actions.addWidget(self.endpoint_selection_status)
+        favorite_actions.addStretch(1)
+        self.endpoint_behavior_dialog_button = QPushButton("Behavior…")
+        self.endpoint_behavior_dialog_button.setToolTip(
+            "Open favorite failover and router-boot connection settings."
+        )
+        self.endpoint_behavior_dialog_button.clicked.connect(
+            self._show_endpoint_behavior_dialog
+        )
+        favorite_actions.addWidget(self.endpoint_behavior_dialog_button)
+        favorite_layout.addLayout(favorite_actions)
 
-        favorite_actions = QHBoxLayout()
-        favorite_actions.setSpacing(7)
-        self.endpoint_favorite_sync_button = QPushButton("Sync favorites")
-        self.endpoint_favorite_sync_button.setToolTip(
-            "Read Astrill's current favorites from DD-WRT now. "
-            "No background polling is used."
-        )
-        self.endpoint_favorite_sync_button.clicked.connect(
-            self._sync_endpoint_favorites
-        )
-        self.endpoint_favorite_sync_button.setText("Sync from router")
-        favorite_actions.addWidget(self.endpoint_favorite_sync_button)
+        favorite_buttons = QHBoxLayout()
+        favorite_buttons.setSpacing(7)
+        favorite_buttons.addStretch(1)
         self.endpoint_favorite_button = QPushButton("Favorite selected")
         self.endpoint_favorite_button.setObjectName("favoriteAction")
         self.endpoint_favorite_button.clicked.connect(
             lambda _checked=False: self._set_selected_endpoint_favorites(True)
         )
-        favorite_actions.addWidget(self.endpoint_favorite_button)
+        favorite_buttons.addWidget(self.endpoint_favorite_button)
         self.endpoint_unfavorite_button = QPushButton("Unfavorite selected")
         self.endpoint_unfavorite_button.clicked.connect(
             lambda _checked=False: self._set_selected_endpoint_favorites(False)
         )
-        favorite_actions.addWidget(self.endpoint_unfavorite_button)
-        favorite_controls.addLayout(favorite_actions)
-        favorite_layout.addLayout(favorite_controls)
+        favorite_buttons.addWidget(self.endpoint_unfavorite_button)
+        favorite_layout.addLayout(favorite_buttons)
         layout.addWidget(favorite_card)
 
-        behavior = QGroupBox("Router connection behavior")
-        behavior_layout = QHBoxLayout(behavior)
-        self.endpoint_autocycle = QCheckBox("Auto reconnect to next favorite server")
-        self.endpoint_autocycle.setToolTip(
-            "Try the next saved endpoint if the router VPN drops."
-        )
-        self.endpoint_autocycle.toggled.connect(
-            lambda checked: self._endpoint_preference_changed(
-                "astrill_autocycle",
-                checked,
-            )
-        )
-        behavior_layout.addWidget(self.endpoint_autocycle)
-        self.endpoint_autostart = QCheckBox("Start automatically after router boot")
-        self.endpoint_autostart.setToolTip("Connect native Astrill when DD-WRT starts.")
-        self.endpoint_autostart.toggled.connect(
-            lambda checked: self._endpoint_preference_changed(
-                "astrill_autostart",
-                checked,
-            )
-        )
-        behavior_layout.addWidget(self.endpoint_autostart)
-        behavior_layout.addStretch(1)
-        layout.addWidget(behavior)
-
-        latency_card = QFrame()
-        latency_card.setObjectName("latencyCard")
-        latency_layout = QVBoxLayout(latency_card)
-        latency_layout.setContentsMargins(16, 13, 16, 13)
-        latency_layout.setSpacing(8)
-        latency_title = QLabel("PC latency test")
-        latency_title.setObjectName("latencyTitle")
-        latency_layout.addWidget(latency_title)
-        latency_note = QLabel(
-            "Manual TCP connect timing from this PC. No router command, endpoint "
-            "switch, or bandwidth test."
-        )
-        latency_note.setObjectName("latencyNote")
-        latency_note.setWordWrap(True)
-        latency_layout.addWidget(latency_note)
-        latency_controls = QHBoxLayout()
-        latency_controls.addWidget(QLabel("Scope"))
-        self.endpoint_probe_scope = QComboBox()
-        self.endpoint_probe_scope.addItem("Selected endpoints", "selected")
-        self.endpoint_probe_scope.addItem("Visible endpoints", "visible")
-        self.endpoint_probe_scope.addItem("All loaded endpoints", "all")
-        self.endpoint_probe_scope.currentIndexChanged.connect(
-            lambda _index: self._sync_endpoint_action_ui()
-        )
-        latency_controls.addWidget(self.endpoint_probe_scope)
-        self.endpoint_probe_button = QPushButton("Test PC latency")
-        self.endpoint_probe_button.setObjectName("latencyAction")
-        self.endpoint_probe_button.setToolTip(
-            "Manual only: opens one bounded TCP connection per endpoint from "
-            "this computer and immediately closes it."
-        )
-        self.endpoint_probe_button.clicked.connect(self._test_endpoint_latency)
-        latency_controls.addWidget(self.endpoint_probe_button)
-        self.endpoint_probe_clear_button = QPushButton("Clear results")
-        self.endpoint_probe_clear_button.clicked.connect(
-            self._clear_endpoint_probe_results
-        )
-        latency_controls.addWidget(self.endpoint_probe_clear_button)
-        latency_controls.addStretch(1)
-        latency_layout.addLayout(latency_controls)
-        saved_count = len(self._endpoint_probe_results)
-        self.endpoint_probe_status = QLabel(
-            (
-                f"Loaded {saved_count} saved result"
-                f"{'' if saved_count == 1 else 's'} · no automatic retest."
-            )
-            if saved_count
-            else "Not run · results appear only after you click Test PC latency."
-        )
-        self.endpoint_probe_status.setObjectName("latencyStatus")
-        self.endpoint_probe_status.setWordWrap(True)
-        latency_layout.addWidget(self.endpoint_probe_status)
-        layout.addWidget(latency_card)
+        self.endpoint_behavior_dialog = self._build_endpoint_behavior_dialog()
+        self.endpoint_latency_dialog = self._build_endpoint_latency_dialog()
 
         self.endpoint_action_status = QLabel("")
         self.endpoint_action_status.setWordWrap(True)
@@ -1474,6 +1424,150 @@ class MainWindow(QMainWindow):
         self._sync_endpoint_connection_controls()
         self._sync_endpoint_action_ui()
         return page
+
+    def _build_endpoint_behavior_dialog(self) -> QDialog:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Router connection behavior")
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        dialog.setMinimumWidth(460)
+
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
+
+        title = QLabel("Recovery and router boot")
+        title.setObjectName("favoriteTitle")
+        root.addWidget(title)
+        note = QLabel(
+            "These are native DD-WRT Astrill preferences. Changing one writes "
+            "and verifies that preference only; it does not connect the tunnel "
+            "or start desktop polling."
+        )
+        note.setWordWrap(True)
+        note.setProperty("class", "muted")
+        root.addWidget(note)
+
+        self.endpoint_autocycle = QCheckBox(
+            "Auto reconnect to the next favorite endpoint"
+        )
+        self.endpoint_autocycle.setToolTip(
+            "Try the next saved endpoint if the router VPN drops."
+        )
+        self.endpoint_autocycle.toggled.connect(
+            lambda checked: self._endpoint_preference_changed(
+                "astrill_autocycle",
+                checked,
+            )
+        )
+        root.addWidget(self.endpoint_autocycle)
+        self.endpoint_autostart = QCheckBox("Start Astrill after the router boots")
+        self.endpoint_autostart.setToolTip(
+            "Connect native Astrill after DD-WRT starts."
+        )
+        self.endpoint_autostart.toggled.connect(
+            lambda checked: self._endpoint_preference_changed(
+                "astrill_autostart",
+                checked,
+            )
+        )
+        root.addWidget(self.endpoint_autostart)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.hide)
+        root.addWidget(buttons)
+        return dialog
+
+    def _show_endpoint_behavior_dialog(self) -> None:
+        self._sync_endpoint_connection_controls()
+        self.endpoint_behavior_dialog.show()
+        self.endpoint_behavior_dialog.raise_()
+        self.endpoint_behavior_dialog.activateWindow()
+
+    def _build_endpoint_latency_dialog(self) -> QDialog:
+        dialog = QDialog(self)
+        dialog.setObjectName("endpointLatencyDialog")
+        dialog.setWindowTitle("PC latency test")
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        dialog.setMinimumWidth(560)
+
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        card = QFrame()
+        card.setObjectName("latencyCard")
+        latency_layout = QVBoxLayout(card)
+        latency_layout.setContentsMargins(16, 13, 16, 13)
+        latency_layout.setSpacing(9)
+
+        latency_title = QLabel("Manual endpoint latency")
+        latency_title.setObjectName("latencyTitle")
+        latency_layout.addWidget(latency_title)
+        latency_note = QLabel(
+            "Times one bounded TCP connection per endpoint from this PC, then "
+            "closes it. It never commands the router, switches endpoints, or "
+            "runs a bandwidth test."
+        )
+        latency_note.setObjectName("latencyNote")
+        latency_note.setWordWrap(True)
+        latency_layout.addWidget(latency_note)
+
+        self.endpoint_probe_target_status = QLabel("")
+        self.endpoint_probe_target_status.setObjectName("latencyStatus")
+        self.endpoint_probe_target_status.setWordWrap(True)
+        latency_layout.addWidget(self.endpoint_probe_target_status)
+
+        latency_controls = QHBoxLayout()
+        latency_controls.addWidget(QLabel("Test"))
+        self.endpoint_probe_scope = QComboBox()
+        self.endpoint_probe_scope.addItem("Selected endpoints", "selected")
+        self.endpoint_probe_scope.addItem("Visible endpoints", "visible")
+        self.endpoint_probe_scope.addItem("All loaded endpoints", "all")
+        self.endpoint_probe_scope.currentIndexChanged.connect(
+            lambda _index: self._sync_endpoint_action_ui()
+        )
+        latency_controls.addWidget(self.endpoint_probe_scope, 1)
+        self.endpoint_probe_button = QPushButton("Run latency test")
+        self.endpoint_probe_button.setObjectName("latencyAction")
+        self.endpoint_probe_button.setToolTip(
+            "Manual only: opens one bounded TCP connection per endpoint from "
+            "this computer and immediately closes it."
+        )
+        self.endpoint_probe_button.clicked.connect(self._test_endpoint_latency)
+        latency_controls.addWidget(self.endpoint_probe_button)
+        self.endpoint_probe_clear_button = QPushButton("Clear saved results")
+        self.endpoint_probe_clear_button.clicked.connect(
+            self._clear_endpoint_probe_results
+        )
+        latency_controls.addWidget(self.endpoint_probe_clear_button)
+        latency_layout.addLayout(latency_controls)
+
+        saved_count = len(self._endpoint_probe_results)
+        self.endpoint_probe_status = QLabel(
+            (
+                f"Loaded {saved_count} saved result"
+                f"{'' if saved_count == 1 else 's'} · no automatic retest."
+            )
+            if saved_count
+            else "Not run · results appear only after you start a test."
+        )
+        self.endpoint_probe_status.setObjectName("latencyStatus")
+        self.endpoint_probe_status.setWordWrap(True)
+        latency_layout.addWidget(self.endpoint_probe_status)
+        root.addWidget(card)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.hide)
+        root.addWidget(buttons)
+        return dialog
+
+    def _show_endpoint_latency_dialog(self) -> None:
+        self._sync_endpoint_action_ui()
+        self.endpoint_latency_dialog.show()
+        self.endpoint_latency_dialog.raise_()
+        self.endpoint_latency_dialog.activateWindow()
 
     def _build_astrill_page(self) -> QWidget:
         self.native_page = WindowsNativeSettingsPage(
@@ -2628,9 +2722,11 @@ class MainWindow(QMainWindow):
         )
         hidden_count = count - visible_count
         suffix = f" · {hidden_count} hidden by filters" if hidden_count else ""
-        self.endpoint_selection_status.setText(
-            f"{count} endpoint{'' if count == 1 else 's'} selected"
-            f" · Ctrl/Command adds rows; Shift selects a range{suffix}."
+        self.endpoint_selection_status.setText(f"{count} selected{suffix}")
+        self.endpoint_selection_status.setToolTip(
+            f"{count} endpoint{'' if count == 1 else 's'} selected. "
+            "Use row checkboxes, Ctrl/Command, or Shift; filtered selections "
+            f"remain selected{f' ({hidden_count} currently hidden)' if hidden_count else ''}."
         )
         self.endpoint_clear_selection_button.setEnabled(
             self.busy_count == 0 and count > 0
@@ -3104,7 +3200,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self.endpoint_probe_status.setText(
-                "Saved results cleared · tests run only when you click Test PC latency."
+                "Saved results cleared · tests run only when you start one here."
             )
         self._render_endpoints()
 
@@ -3153,10 +3249,10 @@ class MainWindow(QMainWindow):
                 "Settings first."
             )
             return
-        if self.native_page.dirty or self.connection_page.dirty:
+        if self.connection_page.has_pending_favorite_changes:
             self._select_something(
-                "Save or reload the unsaved Astrill or Connection-page edits "
-                "before changing favorites."
+                "The Connection page has unsaved favorite edits. Save or reload "
+                "that draft before changing the same favorite list here."
             )
             return
         if self._endpoint_favorites_valid is not True:
@@ -3363,6 +3459,10 @@ class MainWindow(QMainWindow):
         native_dirty = hasattr(self, "native_page") and (
             self.native_page.dirty or self.connection_page.dirty
         )
+        pending_connection_favorites = (
+            hasattr(self, "connection_page")
+            and self.connection_page.has_pending_favorite_changes
+        )
 
         protocol_supported = False
         if selected is not None:
@@ -3387,13 +3487,18 @@ class MainWindow(QMainWindow):
             idle and bool(selected_endpoints)
         )
         self.endpoint_probe_scope.setEnabled(idle)
+        probe_targets = self._endpoint_probe_selection()
         self.endpoint_probe_button.setEnabled(
-            idle
-            and self._endpoint_catalog_loaded
-            and bool(self._endpoint_probe_selection())
+            idle and self._endpoint_catalog_loaded and bool(probe_targets)
         )
         self.endpoint_probe_clear_button.setEnabled(
             idle and bool(self._endpoint_probe_results)
+        )
+        target_count = len(probe_targets)
+        self.endpoint_probe_target_status.setText(
+            f"{target_count} endpoint{'' if target_count == 1 else 's'} in scope "
+            f"· {ASTRILL_PROTOCOL_NAMES[self.protocol.currentIndex()]} "
+            "· results persist until cleared."
         )
         self.endpoint_favorite_sync_button.setEnabled(idle)
         favorite_ids = self._endpoint_favorite_records.keys()
@@ -3420,7 +3525,7 @@ class MainWindow(QMainWindow):
         favorite_editable = (
             idle
             and not read_only
-            and not native_dirty
+            and not pending_connection_favorites
             and self._endpoint_favorites_valid is True
         )
         self.endpoint_favorite_button.setEnabled(
@@ -3429,8 +3534,13 @@ class MainWindow(QMainWindow):
         self.endpoint_unfavorite_button.setEnabled(
             favorite_editable and bool(selected_favorites)
         )
-        if native_dirty:
-            favorite_tooltip = "Save or reload the Astrill page's unsaved edits first."
+        if pending_connection_favorites:
+            favorite_tooltip = (
+                "The Connection page has unsaved favorite edits. Save or reload "
+                "that draft before editing the same favorite list here."
+            )
+        elif read_only:
+            favorite_tooltip = "Turn off the read-only guard in Settings first."
         elif self._endpoint_favorites_valid is None:
             favorite_tooltip = "Sync favorites from DD-WRT first."
         elif self._endpoint_favorites_valid is False:
@@ -3454,7 +3564,11 @@ class MainWindow(QMainWindow):
         self.endpoint_favorite_button.setToolTip(favorite_tooltip)
         self.endpoint_unfavorite_button.setToolTip(
             favorite_tooltip
-            if native_dirty or self._endpoint_favorites_valid is not True
+            if (
+                pending_connection_favorites
+                or read_only
+                or self._endpoint_favorites_valid is not True
+            )
             else "Remove every selected current favorite in one verified commit."
         )
         self.connect_endpoint_button.setEnabled(
@@ -3470,9 +3584,7 @@ class MainWindow(QMainWindow):
         connected = self.router_status.get("vpn_state") == "up"
         reconnecting = selected is not None and selected.id == current_id and connected
         self.connect_endpoint_button.setText(
-            "Reconnect router to selected endpoint"
-            if reconnecting
-            else "Connect router to selected endpoint"
+            "Reconnect selected" if reconnecting else "Connect selected"
         )
 
         if self._endpoint_probe_running:
@@ -3487,10 +3599,21 @@ class MainWindow(QMainWindow):
                 "Inspection is available. Turn off the read-only guard in Settings "
                 "to connect the router to a selected endpoint."
             )
-        elif native_dirty:
+        elif pending_connection_favorites:
             message = (
-                "Save or reload the unsaved Astrill or Connection-page draft "
-                "before connecting from Endpoints."
+                "The Connection page has unsaved favorite edits. Save or reload "
+                "that draft before editing favorites or connecting here."
+            )
+        elif native_dirty:
+            dirty_page = (
+                "Astrill and Connection pages"
+                if self.native_page.dirty and self.connection_page.dirty
+                else ("Astrill page" if self.native_page.dirty else "Connection page")
+            )
+            message = (
+                f"The {dirty_page} has an unsaved draft, so router connection "
+                "changes are locked. Favorite membership remains available and "
+                "will be merged without discarding that draft."
             )
         elif not selected_endpoints:
             message = (
@@ -3842,6 +3965,11 @@ class MainWindow(QMainWindow):
                 f"{count} router favorite{'' if count == 1 else 's'} synced "
                 "from DD-WRT · manual only."
             )
+        if (
+            self.connection_page.dirty
+            and not self.connection_page.has_pending_favorite_changes
+        ):
+            self.connection_page.merge_external_favorites(settings)
         if force_native_page or not self.native_page.dirty:
             self.native_page.render(settings, self.clients)
         else:

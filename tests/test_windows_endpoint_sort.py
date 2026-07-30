@@ -44,6 +44,7 @@ from astrill_lazy.windows_ui import (
     ENDPOINT_REACH_COLUMN,
     ENDPOINT_SELECT_COLUMN,
     ENDPOINT_TESTED_COLUMN,
+    STYLE_SHEET,
     MainWindow,
 )
 from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
@@ -529,6 +530,303 @@ def test_add_and_remove_favorite_use_verified_returned_settings(
     window.close()
 
 
+def test_favorite_button_click_confirms_and_dispatches_exactly_once(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, servers = _window(tmp_path, monkeypatch)
+    window.controller.store.read_only = False
+    window._endpoint_favorites_loaded(_settings())
+    selected = servers[0]
+    window._set_endpoint_selected(
+        selected.id,
+        True,
+        item=_rows_by_id(window)[selected.id],
+    )
+    controller_calls: list[tuple[tuple[int, ...], int | None, bool]] = []
+    task_dispatches: list[str] = []
+
+    def set_favorites(
+        chosen: tuple[AstrillServer, ...],
+        protocol: int | None,
+        *,
+        enabled: bool,
+    ) -> NativeAstrillSettings:
+        controller_calls.append(
+            (tuple(server.id for server in chosen), protocol, enabled)
+        )
+        return _settings(_favorite(selected))
+
+    def run_now(
+        label: str,
+        function: object,
+        success: object = None,
+        **_kwargs: object,
+    ) -> None:
+        task_dispatches.append(label)
+        result = function()  # type: ignore[operator]
+        if success is not None:
+            success(result)  # type: ignore[operator]
+
+    monkeypatch.setattr(
+        window.controller,
+        "set_endpoint_favorites",
+        set_favorites,
+    )
+    monkeypatch.setattr(window, "_run_task", run_now)
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    assert window.endpoint_favorite_button.isEnabled()
+    window.endpoint_favorite_button.click()
+
+    assert len(task_dispatches) == 1
+    assert controller_calls == [((selected.id,), 1, True)]
+    assert window._endpoint_favorite_records == {selected.id: _favorite(selected)}
+    window.close()
+
+
+def test_unrelated_connection_draft_survives_endpoint_favorite_merge(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, servers = _window(tmp_path, monkeypatch)
+    window.controller.store.read_only = False
+    settings, baseline_values = _connection_settings(servers[0])
+    window._apply_native_settings(settings, force_native_page=True)
+
+    connection_server = servers[1]
+    connection_index = window.connection_page.server_dropdown.findData(
+        connection_server.id
+    )
+    assert connection_index >= 0
+    window.connection_page.server_dropdown.setCurrentIndex(connection_index)
+    draft_before = window.connection_page.collect()
+    assert window.connection_page.dirty
+    assert not window.connection_page.has_pending_favorite_changes
+
+    endpoint_favorite = _favorite(servers[2])
+    returned_values = {
+        **baseline_values,
+        "astrill_favlist": endpoint_favorite.to_native(),
+    }
+    returned_settings = NativeAstrillSettings.from_dict(returned_values)
+    endpoint_rows = _rows_by_id(window)
+    window._set_endpoint_selected(
+        servers[2].id,
+        True,
+        item=endpoint_rows[servers[2].id],
+    )
+    dispatches: list[str] = []
+
+    monkeypatch.setattr(
+        window.controller,
+        "set_endpoint_favorites",
+        lambda *_args, **_kwargs: returned_settings,
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    def run_now(
+        label: str,
+        function: object,
+        success: object = None,
+        **_kwargs: object,
+    ) -> None:
+        dispatches.append(label)
+        result = function()  # type: ignore[operator]
+        if success is not None:
+            success(result)  # type: ignore[operator]
+
+    monkeypatch.setattr(window, "_run_task", run_now)
+
+    assert window.endpoint_favorite_button.isEnabled()
+    window.endpoint_favorite_button.click()
+
+    draft_after = window.connection_page.collect()
+    assert dispatches == ["Adding 1 router favorites"]
+    assert window.connection_page.dirty
+    assert draft_after.selection == draft_before.selection
+    assert draft_after.changes == draft_before.changes
+    assert draft_after.favorite_changes == ()
+    assert not window.connection_page.has_pending_favorite_changes
+    assert window.connection_page.settings is not None
+    assert (
+        window.connection_page.settings.get("astrill_favlist")
+        == endpoint_favorite.to_native()
+    )
+    assert dict(window.connection_page._baseline or ())["astrill_favlist"] == (
+        endpoint_favorite.to_native()
+    )
+    assert not window.connection_page.conflict_banner.isVisible()
+    window.close()
+
+
+def test_dirty_native_controls_survive_endpoint_favorite_click(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, servers = _window(tmp_path, monkeypatch)
+    window.controller.store.read_only = False
+    settings, baseline_values = _connection_settings(servers[0])
+    window._apply_native_settings(settings, force_native_page=True)
+
+    ads = window.native_page._direct_controls["astrill_adsblock"]
+    assert isinstance(ads, QCheckBox)
+    ads.setChecked(True)
+    assert window.native_page.dirty
+
+    window._clear_endpoint_selection()
+    selected = servers[2]
+    window._set_endpoint_selected(
+        selected.id,
+        True,
+        item=_rows_by_id(window)[selected.id],
+    )
+    returned = NativeAstrillSettings.from_dict(
+        {
+            **baseline_values,
+            "astrill_favlist": _favorite(selected).to_native(),
+        }
+    )
+    monkeypatch.setattr(
+        window.controller,
+        "set_endpoint_favorites",
+        lambda *_args, **_kwargs: returned,
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    def run_now(
+        _label: str,
+        function: object,
+        success: object = None,
+        **_kwargs: object,
+    ) -> None:
+        result = function()  # type: ignore[operator]
+        if success is not None:
+            success(result)  # type: ignore[operator]
+
+    monkeypatch.setattr(window, "_run_task", run_now)
+
+    assert window.endpoint_favorite_button.isEnabled()
+    window.endpoint_favorite_button.click()
+
+    assert window.native_page.dirty
+    assert ads.isChecked()
+    assert selected.id in window._endpoint_favorite_records
+    assert (
+        "1 saved endpoint" in window.native_page._state_labels["astrill_favlist"].text()
+    )
+    window.close()
+
+
+def test_favorite_merge_keeps_unrelated_router_change_as_connection_conflict(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, servers = _window(tmp_path, monkeypatch)
+    window.controller.store.read_only = False
+    settings, baseline_values = _connection_settings(servers[0])
+    window._apply_native_settings(settings, force_native_page=True)
+
+    draft_server = servers[1]
+    window.connection_page.server_dropdown.setCurrentIndex(
+        window.connection_page.server_dropdown.findData(draft_server.id)
+    )
+    draft_before = window.connection_page.collect()
+    assert window.connection_page.dirty
+
+    window._clear_endpoint_selection()
+    favorite_server = servers[2]
+    window._set_endpoint_selected(
+        favorite_server.id,
+        True,
+        item=_rows_by_id(window)[favorite_server.id],
+    )
+    returned = NativeAstrillSettings.from_dict(
+        {
+            **baseline_values,
+            "astrill_favlist": _favorite(favorite_server).to_native(),
+            "astrill_cipher": "AES-256-CBC",
+        }
+    )
+    monkeypatch.setattr(
+        window.controller,
+        "set_endpoint_favorites",
+        lambda *_args, **_kwargs: returned,
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    def run_now(
+        _label: str,
+        function: object,
+        success: object = None,
+        **_kwargs: object,
+    ) -> None:
+        result = function()  # type: ignore[operator]
+        if success is not None:
+            success(result)  # type: ignore[operator]
+
+    monkeypatch.setattr(window, "_run_task", run_now)
+    window.endpoint_favorite_button.click()
+
+    draft_after = window.connection_page.collect()
+    assert draft_after.selection == draft_before.selection
+    assert draft_after.changes == draft_before.changes
+    assert window.connection_page.settings is not None
+    assert window.connection_page.settings.get("astrill_cipher") == "default"
+    assert dict(window.connection_page._baseline or ())["astrill_cipher"] == "default"
+    assert not window.connection_page.conflict_banner.isHidden()
+    window.close()
+
+
+def test_pending_connection_favorite_edit_blocks_endpoint_favorite_action(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, servers = _window(tmp_path, monkeypatch)
+    window.controller.store.read_only = False
+    settings, _values = _connection_settings(servers[0])
+    window._apply_native_settings(settings, force_native_page=True)
+    window.connection_page.favorite_switch.setChecked(True)
+    assert window.connection_page.dirty
+    assert window.connection_page.has_pending_favorite_changes
+
+    endpoint_rows = _rows_by_id(window)
+    window._set_endpoint_selected(
+        servers[1].id,
+        True,
+        item=endpoint_rows[servers[1].id],
+    )
+    window._sync_endpoint_action_ui()
+
+    assert not window.endpoint_favorite_button.isEnabled()
+    tooltip = window.endpoint_favorite_button.toolTip().casefold()
+    assert "connection" in tooltip
+    assert "favorite" in tooltip
+    assert "unsaved" in tooltip or "pending" in tooltip
+    window.close()
+
+
 def test_multiple_selected_endpoints_block_router_connect(
     app: QApplication,
     tmp_path: Path,
@@ -882,6 +1180,73 @@ def test_selected_latency_scope_uses_durable_multiselection_only(
     window.close()
 
 
+def test_latency_dialog_launcher_preserves_scope_and_status_when_reopened(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, _servers = _window(tmp_path, monkeypatch)
+    window.show()
+    app.processEvents()
+
+    dialog = window.endpoint_latency_dialog
+    assert dialog.isHidden()
+    assert not dialog.isVisible()
+
+    window.endpoint_latency_dialog_button.click()
+    app.processEvents()
+    assert dialog.isVisible()
+
+    all_index = window.endpoint_probe_scope.findData("all")
+    assert all_index >= 0
+    window.endpoint_probe_scope.setCurrentIndex(all_index)
+    preserved_status = (
+        "Manual PC test saved Â· 3/3 reachable Â· no DD-WRT commands sent."
+    )
+    window.endpoint_probe_status.setText(preserved_status)
+
+    dialog.close()
+    app.processEvents()
+    assert dialog.isHidden()
+    window.endpoint_latency_dialog_button.click()
+    app.processEvents()
+
+    assert dialog.isVisible()
+    assert window.endpoint_probe_scope.currentData() == "all"
+    assert window.endpoint_probe_status.text() == preserved_status
+    dialog.close()
+    window.close()
+
+
+def test_endpoint_toolbar_labels_fit_at_supported_minimum_window(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, _servers = _window(tmp_path, monkeypatch)
+    window.setStyleSheet(STYLE_SHEET)
+    window.stack.setCurrentIndex(5)
+    window.resize(960, 640)
+    window.show()
+    app.processEvents()
+
+    controls = (
+        window.endpoint_select_visible,
+        window.endpoint_clear_selection_button,
+        window.endpoint_behavior_dialog_button,
+        window.endpoint_favorite_button,
+        window.endpoint_unfavorite_button,
+    )
+    clipped = {
+        control.text(): (control.width(), control.sizeHint().width())
+        for control in controls
+        if control.width() < control.sizeHint().width()
+    }
+    assert clipped == {}
+    assert window.endpoint_tree.height() >= 120
+    window.close()
+
+
 def test_favorite_sync_preserves_dirty_native_page_and_invalid_data_blocks_edits(
     app: QApplication,
     tmp_path: Path,
@@ -917,14 +1282,15 @@ def test_favorite_sync_preserves_dirty_native_page_and_invalid_data_blocks_edits
     window.close()
 
 
-def test_favorite_action_handlers_enforce_dirty_read_only_and_busy_guards(
+def test_favorite_action_handlers_enforce_overlap_read_only_and_busy_guards(
     app: QApplication,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    window, _servers = _window(tmp_path, monkeypatch)
+    window, servers = _window(tmp_path, monkeypatch)
     window.controller.store.read_only = False
-    window._endpoint_favorites_loaded(_settings())
+    connection_settings, _values = _connection_settings(servers[0])
+    window._apply_native_settings(connection_settings, force_native_page=True)
     window.endpoint_tree.setCurrentItem(window.endpoint_tree.topLevelItem(0))
     messages: list[str] = []
     calls: list[tuple[tuple[int, ...], int | None, bool]] = []
@@ -938,14 +1304,17 @@ def test_favorite_action_handlers_enforce_dirty_read_only_and_busy_guards(
         raising=False,
     )
 
-    ads = window.native_page._direct_controls["astrill_adsblock"]
-    assert isinstance(ads, QCheckBox)
-    ads.setChecked(True)
+    window.connection_page.favorite_switch.setChecked(True)
+    assert window.connection_page.has_pending_favorite_changes
     window._toggle_selected_endpoint_favorite()
     assert calls == []
-    assert "unsaved Astrill or Connection-page edits" in messages[-1]
+    assert "unsaved favorite edits" in messages[-1]
 
-    window.native_page.render(_settings())
+    window._apply_native_settings(
+        connection_settings,
+        force_native_page=True,
+        force_connection_page=True,
+    )
     window.controller.store.read_only = True
     window._toggle_selected_endpoint_favorite()
     assert calls == []

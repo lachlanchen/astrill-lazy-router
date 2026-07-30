@@ -36,7 +36,7 @@ deployment are deliberately enabled.
 | Catalog | 261 maintained profiles with search and provider-country, category, and profile-type filters |
 | Batch workflow | Durable checkbox/Ctrl/Command/Shift selection, Select visible, and explicit Suggested, Direct, or Astrill policy creation |
 | Native sync | Bidirectional routing, DNS, endpoint, protocol, port, transport, favorite, and resilience settings |
-| Windows 0.2.10 | Nine views, including a transactional shared-tunnel Connection page and seven-section Astrill editor |
+| Windows 0.2.11 | Compact Endpoints workspace, safe favorite merging across unrelated drafts, and an on-demand latency dialog |
 | Native-only audit | Read-only status, settings, endpoints, and LAN clients with no companion or router writes |
 | Router safety | Validated input, separate marks/tables, transactional A/B activation, rollback, and watchdog recovery |
 | Recovery | One action removes every companion-owned object and restores native Astrill-only operation |

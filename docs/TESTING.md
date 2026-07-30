@@ -19,7 +19,7 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-246 tests passed, 4 skipped
+253 tests passed, 4 skipped
 Ruff lint and format: all checks passed
 Catalog: 261 profiles, 19 categories, 729 seeds / 650 unique
 ```
@@ -161,6 +161,9 @@ The following checks were performed against the Linksys E4200:
 - `0.2.10` real Windows-platform captures at `1180x760` for Services,
   Connection, Endpoints, and the seven-section Astrill page, with readable
   text and no observed overlap;
+- `0.2.11` real Windows-platform captures at `1180x760` for the compact
+  Endpoints workspace and its modeless PC-latency dialog, including a real
+  Favorite-button click with an unrelated Connection draft preserved;
 - a reversible GUI favorite add/remove for Singapore server `1498`, with the
   committed `astrill_favlist` read back after each action and the original
   nine-record string restored exactly;
