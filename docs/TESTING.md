@@ -51,6 +51,9 @@ Tests cover:
 - SSH banner error cleanup;
 - native mode adapters, device/site parsing, safe-key validation, and
   round-trip writes;
+- native favorite parsing, ordered add/remove behavior, malformed-value
+  rejection, compare-before-write replacement, exact readback, and Windows
+  Favorite-column guards;
 - route probe parsing, noise thresholds, minimum bypasses, and service-aware
   recommendations;
 - complete native-only removal and preserved Astrill state.

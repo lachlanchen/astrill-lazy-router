@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .astrill import ASTRILL_PROTOCOL_NAMES
+from .astrill import ASTRILL_PROTOCOL_NAMES, parse_astrill_favorites
 from .models import RouteTarget
 from .native_settings import (
     CIPHER_OPTIONS,
@@ -53,6 +53,7 @@ class WindowsNativeSettingsPage(QWidget):
         *,
         on_refresh: Callable[[], None],
         on_save: Callable[[], None],
+        on_dirty_changed: Callable[[bool], None] | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName("nativeAstrillPage")
@@ -69,6 +70,7 @@ class WindowsNativeSettingsPage(QWidget):
         self._direct_controls: dict[str, QWidget] = {}
         self._state_labels: dict[str, QLabel] = {}
         self._on_refresh = on_refresh
+        self._on_dirty_changed = on_dirty_changed
 
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 12, 20)
@@ -215,6 +217,12 @@ class WindowsNativeSettingsPage(QWidget):
         self._initial_device_state = self._device_state()
         self._sync_dirty()
 
+    def render_favorite_summary(self, settings: NativeAstrillSettings) -> None:
+        """Refresh the read-only favorite count without discarding draft edits."""
+        self._state_labels["astrill_favlist"].setText(
+            self._favorite_summary_text(settings.get("astrill_favlist"))
+        )
+
     def collect_changes(self) -> dict[str, str]:
         if self.settings is None:
             raise ValueError("native Astrill settings have not loaded")
@@ -278,6 +286,7 @@ class WindowsNativeSettingsPage(QWidget):
         }
         self._dirty = False
         self._sync_control_access()
+        self._notify_dirty_changed()
 
     def _request_refresh(self) -> None:
         if self._dirty:
@@ -734,11 +743,7 @@ class WindowsNativeSettingsPage(QWidget):
                         else f"Protocol mode {protocol}"
                     )
             elif key == "astrill_favlist":
-                favorites = [item for item in value.split(",") if item]
-                text = (
-                    f"{len(favorites)} saved endpoint"
-                    f"{'' if len(favorites) == 1 else 's'}"
-                )
+                text = self._favorite_summary_text(value)
             else:
                 text = value or "Not reported"
             label.setText(text)
@@ -791,6 +796,19 @@ class WindowsNativeSettingsPage(QWidget):
                 # validation error instead of silently treating them as clean.
                 self._dirty = True
         self._sync_control_access()
+        self._notify_dirty_changed()
+
+    def _notify_dirty_changed(self) -> None:
+        if self._on_dirty_changed is not None:
+            self._on_dirty_changed(self._dirty)
+
+    @staticmethod
+    def _favorite_summary_text(value: str) -> str:
+        try:
+            favorites = parse_astrill_favorites(value)
+        except ValueError:
+            return "Invalid favorite data · preserved"
+        return f"{len(favorites)} saved endpoint{'' if len(favorites) == 1 else 's'}"
 
     def _site_state(self) -> tuple[RouteTarget, str]:
         return self._selected_route(self.site_default), self.site_list.toPlainText()

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.9 - 2026-07-30
+
+- Add a dedicated Favorite column and explicit favorite synchronization to the
+  Windows Endpoints view so native Astrill favorites can be read from and
+  changed on DD-WRT.
+- Confirm every add or remove, refresh the favorite list immediately before
+  writing, compare it on the router before replacement, commit only
+  `astrill_favlist` once, and verify the complete readback.
+- Preserve unknown favorite records and unsaved Astrill-page edits, and block
+  favorite writes when the router value is malformed or the local page is
+  dirty.
+- Keep synchronization event-driven: endpoint loading, explicit Sync
+  favorites, and completed actions can refresh the display, but no recurring
+  SSH poll, endpoint reconnect, latency test, or companion operation is added.
+
 ## 0.2.8 - 2026-07-30
 
 - Persist validated Windows PC endpoint-latency results in a separate local

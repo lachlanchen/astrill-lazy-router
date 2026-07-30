@@ -151,6 +151,19 @@ desktop SSH monitor. Clean controls follow router-side applet changes. Unsaved
 desktop edits retain their baseline and expose a reload conflict when the
 router changes concurrently.
 
+Windows endpoint favorites use a narrower native-setting transaction. Endpoint
+loading, explicit synchronization, or a completed action may refresh the
+Favorite column, but no timer performs that read. A confirmed add or remove
+starts from a fresh allowlisted settings snapshot, preserves all unrelated
+favorite records and their order, and calculates a replacement for
+`astrill_favlist` only. The DD-WRT script compares the expected snapshot with
+the current NVRAM value before setting it, commits once, and the controller
+then reads back and verifies the complete setting. Concurrent or malformed
+values fail closed. The transaction is independent of companion installation
+and tunnel switching, and dirty Astrill-page drafts block favorite mutation.
+Ubuntu retains its existing favorite control inside the synchronized
+Connection draft.
+
 `Restore Astrill Only` records native tunnel state, removes all
 companion-owned runtime and persistent objects, audits that cleanup, and then
 checks that endpoint, protocol, and tunnel state are unchanged. The desktop

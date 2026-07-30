@@ -379,6 +379,113 @@ def test_connection_apply_verifies_selection_and_native_settings() -> None:
     ]
 
 
+def test_favorite_replacement_compares_current_value_and_reads_back() -> None:
+    values = {key: "" for key in SAFE_NATIVE_ASTRILL_KEYS}
+    expected = "998:402654182:1-65535:1:6:998"
+    replacement = expected + ",1109:402654293:1-65535:1:6:1109"
+    values["astrill_favlist"] = expected
+
+    class FavoriteRouter(RouterClient):
+        def __init__(self) -> None:
+            super().__init__("unused")
+            self.write_script = ""
+
+        def run_script(self, script: str, *, timeout: int = 60) -> str:
+            if "hexdump" in script:
+                return "\n".join(
+                    f"{key}\t{(value + chr(10)).encode().hex()}"
+                    for key, value in values.items()
+                )
+            assert timeout == 30
+            self.write_script = script
+            values["astrill_favlist"] = replacement
+            return ""
+
+    router = FavoriteRouter()
+    settings = router.replace_astrill_favorites(expected, replacement)
+
+    assert settings.get("astrill_favlist") == replacement
+    assert f"expected={expected}" in router.write_script
+    assert 'current="$(nvram get astrill_favlist)"' in router.write_script
+    assert 'if [ "$current" != "$expected" ]; then' in router.write_script
+    assert f"nvram set astrill_favlist={replacement}" in router.write_script
+    assert router.write_script.count("nvram commit") == 1
+    assert router.write_script.index("if [") < router.write_script.index("nvram set")
+
+
+def test_favorite_replacement_cas_conflict_stops_before_commit_or_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = "998:402654182:1-65535:1:6:998"
+    replacement = expected + ",1109:402654293:1-65535:1:6:1109"
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def conflict(
+        arguments: list[str],
+        **options: object,
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append((arguments, options))
+        script = bytes(options["input"]).decode("utf-8")
+        assert script.index("exit 75") < script.index("nvram commit")
+        return subprocess.CompletedProcess(
+            arguments,
+            75,
+            b"",
+            b"router favorite endpoints changed before this save; reload and try again\n",
+        )
+
+    monkeypatch.setattr(subprocess, "run", conflict)
+    monkeypatch.setattr(
+        router_module,
+        "background_process_options",
+        dict,
+    )
+
+    with pytest.raises(
+        RouterError,
+        match="favorite endpoints changed before this save",
+    ):
+        RouterClient("router").replace_astrill_favorites(expected, replacement)
+
+    # One failed compare-and-swap SSH call means the readback SSH call was
+    # never attempted. The simulated exit occurs before the commit line.
+    assert len(calls) == 1
+    assert calls[0][0][-1] == "/bin/sh -s"
+
+
+def test_favorite_replacement_validates_both_values_before_router_write() -> None:
+    class NoWriteRouter(RouterClient):
+        def run_script(self, _script: str, *, timeout: int = 60) -> str:
+            pytest.fail("invalid favorites must not reach the router")
+
+    router = NoWriteRouter()
+    valid = "998:402654182:1-65535:1:6:998"
+
+    with pytest.raises(ValueError, match="favorite record"):
+        router.replace_astrill_favorites("invalid", valid)
+    with pytest.raises(ValueError, match="favorite record"):
+        router.replace_astrill_favorites(valid, "invalid")
+
+
+def test_favorite_replacement_requires_exact_readback() -> None:
+    expected = "998:402654182:1-65535:1:6:998"
+    replacement = expected + ",1109:402654293:1-65535:1:6:1109"
+
+    class MismatchedRouter(RouterClient):
+        def run_script(self, _script: str, *, timeout: int = 60) -> str:
+            assert timeout == 30
+            return ""
+
+        def native_astrill_settings(self) -> NativeAstrillSettings:
+            return NativeAstrillSettings.from_dict({"astrill_favlist": expected})
+
+    with pytest.raises(
+        RouterError,
+        match="did not persist native Astrill settings: astrill_favlist",
+    ):
+        MismatchedRouter().replace_astrill_favorites(expected, replacement)
+
+
 def test_connection_apply_restores_native_settings_after_switch_failure() -> None:
     selection = AstrillConnectionSelection(1109, 1109, 536872021, "443", 1, 1, 6)
 

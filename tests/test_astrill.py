@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 
+import pytest
 from astrill_lazy.astrill import (
     ASTRILL_PROTOCOL_NAMES,
     AstrillConnectionSelection,
@@ -13,6 +14,7 @@ from astrill_lazy.astrill import (
     parse_astrill_favorites,
     serialize_astrill_favorites,
     unpack_applet,
+    update_astrill_favorite_list,
 )
 from astrill_lazy.models import Region
 
@@ -155,3 +157,34 @@ def test_favorites_round_trip_in_native_applet_format() -> None:
     assert favorites[0].server_id == 1109
     assert serialize_astrill_favorites(favorites) == original
     assert AstrillFavorite.parse(favorites[0].to_native()) == favorites[0]
+
+
+def test_favorite_list_updates_preserve_order_orphans_and_existing_records() -> None:
+    original = (
+        "1109:536872021:1-65535:0:6:1109,"
+        "9999:123:443:1:6:9999,"
+        "458:536871370:443:1:6:458"
+    )
+    added = AstrillFavorite(700, 456, "8292", 0, 5, 701)
+
+    assert update_astrill_favorite_list(original, 700, added) == (
+        original + ",700:456:8292:0:5:701"
+    )
+    assert update_astrill_favorite_list(original, 9999, None) == (
+        "1109:536872021:1-65535:0:6:1109,458:536871370:443:1:6:458"
+    )
+
+    different_existing = AstrillFavorite(458, 1, "53", 0, 1, 2)
+    assert update_astrill_favorite_list(original, 458, different_existing) == original
+    assert update_astrill_favorite_list(original, 700, None) == original
+
+
+def test_favorite_list_update_blocks_malformed_or_mismatched_records() -> None:
+    favorite = AstrillFavorite(700, 456, "8292", 0, 5, 701)
+
+    with pytest.raises(ValueError, match="favorite record"):
+        update_astrill_favorite_list("invalid", 700, favorite)
+    with pytest.raises(ValueError, match="does not match"):
+        update_astrill_favorite_list("", 701, favorite)
+    with pytest.raises(ValueError, match="server ID must be positive"):
+        update_astrill_favorite_list("", 0, None)

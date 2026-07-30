@@ -5,7 +5,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .astrill import AstrillServer, group_by_region, parse_applet
+from .astrill import (
+    AstrillConnectionSelection,
+    AstrillFavorite,
+    AstrillServer,
+    group_by_region,
+    parse_applet,
+    update_astrill_favorite_list,
+)
 from .catalog import Catalog, load_catalog
 from .compiler import compile_rules
 from .detector import MINIMUM_BYPASS_SERVICES
@@ -246,6 +253,47 @@ class WindowsController:
     def save_native_settings(self, changes: dict[str, Any]) -> NativeAstrillSettings:
         self._require_write("saving native Astrill settings")
         return self.router.update_native_astrill_settings(changes)
+
+    def set_endpoint_favorite(
+        self,
+        server: AstrillServer,
+        protocol: int | None,
+        *,
+        enabled: bool,
+    ) -> NativeAstrillSettings:
+        """Add or remove one native favorite using a fresh router snapshot."""
+
+        self._require_write("changing Astrill favorite endpoints")
+        if not isinstance(server, AstrillServer):
+            raise TypeError("favorite endpoint must be an Astrill server")
+        if not isinstance(enabled, bool):
+            raise TypeError("favorite state must be true or false")
+        settings = self.router.native_astrill_settings()
+        current = settings.get("astrill_favlist")
+        record: AstrillFavorite | None = None
+        if enabled:
+            if protocol is None:
+                raise ValueError("select an Astrill protocol for the new favorite")
+            catalog_server = next(
+                (item for item in self.server_catalog.servers if item.id == server.id),
+                None,
+            )
+            if catalog_server is None:
+                raise ValueError("load Astrill endpoints before adding a favorite")
+            selection = AstrillConnectionSelection.from_server(
+                catalog_server,
+                protocol,
+                0,
+            )
+            record = AstrillFavorite.from_selection(selection)
+        replacement = update_astrill_favorite_list(
+            current,
+            server.id,
+            record,
+        )
+        if replacement == current:
+            return settings
+        return self.router.replace_astrill_favorites(current, replacement)
 
     def next_priority(self) -> int:
         return min(

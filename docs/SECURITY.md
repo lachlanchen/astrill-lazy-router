@@ -64,6 +64,15 @@ selections can only be constructed from validated records parsed from the
 installed applet. A failed native reconnect restores the prior allowlisted
 values and attempts to recover the prior active session.
 
+Windows favorite membership changes are narrower writes to
+`astrill_favlist`. The operator must confirm each add or remove, and the
+controller obtains a fresh native-settings snapshot first. The router compares
+that expected favorite list with the current NVRAM value before setting it,
+commits once, and the controller verifies an exact readback. Concurrent or
+malformed values stop the write. The action is disabled while the native
+Astrill page has an unsaved draft and does not install the companion,
+reconnect the tunnel, or start background polling.
+
 Astrill installer input is transient. The GUI uses a redacted `xxx/xxx`
 template, limits downloaded or pasted shell text to 512 KiB, displays its
 SHA-256 digest, and requires a second confirmation before root execution. A

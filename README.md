@@ -134,6 +134,22 @@ their tested time, and marks old or changed-target results for a manual retest.
 The endpoint list can restore Astrill's default order, group by region, or sort
 current results by numeric PC latency without running another test.
 
+The Windows endpoint table also has a **Favorite** column backed by DD-WRT's
+native `astrill_favlist`. Favorites are read after the endpoint catalog loads,
+when **Sync favorites** is selected, and from verified action readbacks. Adding
+or removing the selected endpoint requires confirmation. The action reads a
+fresh router value, preserves every other record, rejects a concurrent change,
+commits only the favorite list once, and verifies the full readback. It does
+not require the companion, reconnect Astrill, switch endpoints, run a latency
+test, or start a recurring SSH poll.
+
+Malformed router favorite data is displayed but preserved and cannot be
+edited. Favorite changes are also blocked while the Astrill view has unsaved
+edits, preventing a favorite refresh from discarding a local draft. Ubuntu's
+existing Connection view continues to synchronize its selected endpoint's
+favorite switch with the same native value and its existing dirty-page
+conflict handling.
+
 The Astrill view owns native routing, device, interface, DNS, and advanced
 filters. Ubuntu and Windows present human-readable controls backed by an
 explicit NVRAM allowlist. Router state is read at launch and on explicit
@@ -163,6 +179,9 @@ per-application WFP backend; see the
   router packages.
 - Connection writes are allowlisted and read back exactly; a failed native
   reconnect restores the prior values and active session when possible.
+- Windows favorite changes use a fresh read plus compare-before-write
+  replacement, one NVRAM commit, and exact readback without reconnecting the
+  tunnel.
 - `Restore Astrill Only` removes companion state without changing the selected
   Astrill endpoint, protocol, or connection state.
 - Catalog extensions are declarative data and never execute on the router.

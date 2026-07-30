@@ -55,7 +55,12 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .astrill import ASTRILL_PROTOCOL_NAMES, AstrillServer
+from .astrill import (
+    ASTRILL_PROTOCOL_NAMES,
+    AstrillFavorite,
+    AstrillServer,
+    parse_astrill_favorites,
+)
 from .endpoint_list import EndpointListRow, sort_endpoint_rows
 from .endpoint_probe import EndpointProbeResult, EndpointProbeStatus, probe_servers
 from .endpoint_probe_store import (
@@ -75,6 +80,22 @@ from .windows_native_page import WindowsNativeSettingsPage
 from .windows_ssh_setup import WindowsHostKey, WindowsKeyAuthorization
 
 APP_NAME = "Astrill Lazy Router"
+
+ENDPOINT_NAME_COLUMN = 0
+ENDPOINT_REGION_COLUMN = 1
+ENDPOINT_FAVORITE_COLUMN = 2
+ENDPOINT_SERVER_ID_COLUMN = 3
+ENDPOINT_ROUTER_STATE_COLUMN = 4
+ENDPOINT_NODES_COLUMN = 5
+ENDPOINT_LATENCY_COLUMN = 6
+ENDPOINT_REACH_COLUMN = 7
+ENDPOINT_TESTED_COLUMN = 8
+ENDPOINT_COLUMN_COUNT = 9
+ENDPOINT_LATENCY_RESULT_COLUMNS = (
+    ENDPOINT_LATENCY_COLUMN,
+    ENDPOINT_REACH_COLUMN,
+    ENDPOINT_TESTED_COLUMN,
+)
 
 COLORS = {
     "window": "#f5f3ff",
@@ -184,6 +205,29 @@ QFrame#latencyCard {{
     border: 1px solid #67e8f9;
     border-left: 5px solid #06b6d4;
     border-radius: 12px;
+}}
+QFrame#favoriteCard {{
+    background: #f5f3ff;
+    border: 1px solid #c4b5fd;
+    border-left: 5px solid #7c3aed;
+    border-radius: 12px;
+}}
+QLabel#favoriteTitle {{
+    color: #5b21b6;
+    font-size: 12pt;
+    font-weight: 800;
+}}
+QLabel#favoriteStatus {{
+    color: #6d28d9;
+    font-weight: 600;
+}}
+QPushButton#favoriteAction {{
+    background: #7c3aed;
+    border-color: #7c3aed;
+    color: #ffffff;
+}}
+QPushButton#favoriteAction:hover {{
+    background: #6d28d9;
 }}
 QLabel#latencyTitle {{
     color: #155e75;
@@ -554,6 +598,8 @@ class MainWindow(QMainWindow):
         self._endpoint_probe_results = load_endpoint_probe_cache(
             self._endpoint_probe_cache_path
         )
+        self._endpoint_favorite_records: dict[int, AstrillFavorite] = {}
+        self._endpoint_favorites_valid: bool | None = None
         self.native_settings: NativeAstrillSettings | None = None
         self._native_settings_loading = False
         self._syncing_access = False
@@ -937,6 +983,40 @@ class MainWindow(QMainWindow):
         row.addWidget(self.connect_endpoint_button)
         layout.addLayout(row)
 
+        favorite_card = QFrame()
+        favorite_card.setObjectName("favoriteCard")
+        favorite_layout = QHBoxLayout(favorite_card)
+        favorite_layout.setContentsMargins(16, 13, 16, 13)
+        favorite_layout.setSpacing(10)
+        favorite_text = QVBoxLayout()
+        favorite_text.setSpacing(3)
+        favorite_title = QLabel("Router favorites")
+        favorite_title.setObjectName("favoriteTitle")
+        favorite_text.addWidget(favorite_title)
+        self.endpoint_favorite_status = QLabel(
+            "Not synced · load endpoints or select Sync favorites."
+        )
+        self.endpoint_favorite_status.setObjectName("favoriteStatus")
+        self.endpoint_favorite_status.setWordWrap(True)
+        favorite_text.addWidget(self.endpoint_favorite_status)
+        favorite_layout.addLayout(favorite_text, 1)
+        self.endpoint_favorite_sync_button = QPushButton("Sync favorites")
+        self.endpoint_favorite_sync_button.setToolTip(
+            "Read Astrill's current favorites from DD-WRT now. "
+            "No background polling is used."
+        )
+        self.endpoint_favorite_sync_button.clicked.connect(
+            self._sync_endpoint_favorites
+        )
+        favorite_layout.addWidget(self.endpoint_favorite_sync_button)
+        self.endpoint_favorite_button = QPushButton("Add selected favorite")
+        self.endpoint_favorite_button.setObjectName("favoriteAction")
+        self.endpoint_favorite_button.clicked.connect(
+            self._toggle_selected_endpoint_favorite
+        )
+        favorite_layout.addWidget(self.endpoint_favorite_button)
+        layout.addWidget(favorite_card)
+
         latency_card = QFrame()
         latency_card.setObjectName("latencyCard")
         latency_layout = QVBoxLayout(latency_card)
@@ -1001,6 +1081,7 @@ class MainWindow(QMainWindow):
             [
                 "Endpoint",
                 "Region",
+                "Favorite",
                 "Server ID",
                 "Router state",
                 "Nodes",
@@ -1015,15 +1096,13 @@ class MainWindow(QMainWindow):
             QAbstractItemView.SelectionMode.SingleSelection
         )
         self.endpoint_tree.header().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
+            ENDPOINT_NAME_COLUMN, QHeaderView.ResizeMode.Stretch
         )
-        for column in range(1, 8):
+        for column in range(1, ENDPOINT_COLUMN_COUNT):
             self.endpoint_tree.header().setSectionResizeMode(
                 column, QHeaderView.ResizeMode.ResizeToContents
             )
-        self.endpoint_tree.itemDoubleClicked.connect(
-            lambda _item, _column: self._connect_endpoint()
-        )
+        self.endpoint_tree.itemDoubleClicked.connect(self._endpoint_double_clicked)
         self.endpoint_tree.currentItemChanged.connect(self._endpoint_selection_changed)
         layout.addWidget(self.endpoint_tree)
         self._sync_endpoint_action_ui()
@@ -1033,6 +1112,7 @@ class MainWindow(QMainWindow):
         self.native_page = WindowsNativeSettingsPage(
             on_refresh=self._load_native_settings,
             on_save=self._save_native_settings,
+            on_dirty_changed=lambda _dirty: self._sync_endpoint_action_ui(),
         )
         self.save_native_button = self.native_page.save_button
         return self.native_page
@@ -1240,6 +1320,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{label}: {message}", 9000)
         if router_related:
             self.sidebar_status.setText("Router unavailable · check Settings")
+        if label == "Syncing Astrill favorites":
+            self.endpoint_favorite_status.setText(
+                f"Favorite sync failed · existing GUI state preserved: {message}"
+            )
+        elif label.startswith(("Adding router favorite", "Removing router favorite")):
+            self.endpoint_favorite_status.setText(
+                f"Favorite change failed · sync and retry: {message}"
+            )
         if not quiet:
             QMessageBox.warning(self, label, message)
 
@@ -1558,12 +1646,14 @@ class MainWindow(QMainWindow):
     def _endpoints_loaded(self, result: object) -> None:
         _catalog = result
         self._endpoint_catalog_loaded = True
+        self.load_endpoints_button.setText("Reload endpoints")
         available_ids = {server.id for server in self.controller.server_catalog.servers}
         if self._endpoint_selected_server_id not in available_ids:
             self._endpoint_selected_server_id = None
         self._render_endpoints()
         self._render_countries()
         self._update_status_metrics()
+        QTimer.singleShot(0, lambda: self._sync_endpoint_favorites(quiet=True))
 
     def _endpoint_protocol_selected(self, _index: int) -> None:
         self._endpoint_protocol_user_selected = True
@@ -1582,6 +1672,22 @@ class MainWindow(QMainWindow):
             if isinstance(value, AstrillServer):
                 self._endpoint_selected_server_id = value.id
         self._sync_endpoint_action_ui()
+
+    def _endpoint_double_clicked(
+        self,
+        _item: QTreeWidgetItem,
+        column: int,
+    ) -> None:
+        if column == ENDPOINT_FAVORITE_COLUMN:
+            return
+        self._connect_endpoint()
+
+    def _selected_endpoint(self) -> AstrillServer | None:
+        item = self.endpoint_tree.currentItem()
+        if item is None:
+            return None
+        value = item.data(ENDPOINT_NAME_COLUMN, Qt.ItemDataRole.UserRole)
+        return value if isinstance(value, AstrillServer) else None
 
     def _render_endpoints(self) -> None:
         if not hasattr(self, "endpoint_tree"):
@@ -1633,13 +1739,15 @@ class MainWindow(QMainWindow):
                 [
                     server.name,
                     row.region_name,
+                    self._endpoint_favorite_cell(server),
                     str(server.id),
                     state,
                     str(len(server.nodes)),
                     *self._endpoint_probe_cells(server),
                 ]
             )
-            item.setData(0, Qt.ItemDataRole.UserRole, server)
+            item.setData(ENDPOINT_NAME_COLUMN, Qt.ItemDataRole.UserRole, server)
+            self._decorate_endpoint_favorite(item, server)
             self._decorate_endpoint_probe_result(item, server)
             self.endpoint_tree.addTopLevelItem(item)
             if server.id == selected_id:
@@ -1647,6 +1755,41 @@ class MainWindow(QMainWindow):
         if item_to_select is not None:
             self.endpoint_tree.setCurrentItem(item_to_select)
         self._sync_endpoint_action_ui()
+
+    def _endpoint_favorite_cell(self, server: AstrillServer) -> str:
+        if self._endpoint_favorites_valid is None:
+            return "Not synced"
+        if self._endpoint_favorites_valid is False:
+            return "Invalid"
+        return "★ Favorite" if server.id in self._endpoint_favorite_records else "—"
+
+    def _decorate_endpoint_favorite(
+        self,
+        item: QTreeWidgetItem,
+        server: AstrillServer,
+    ) -> None:
+        if self._endpoint_favorites_valid is None:
+            tooltip = "Favorites have not been read from DD-WRT. Select Sync favorites."
+            color = COLORS["muted"]
+        elif self._endpoint_favorites_valid is False:
+            tooltip = (
+                "DD-WRT returned malformed favorite data. It is preserved, and "
+                "favorite changes are disabled."
+            )
+            color = "#b91c1c"
+        elif server.id in self._endpoint_favorite_records:
+            favorite = self._endpoint_favorite_records[server.id]
+            transport = "TCP" if favorite.mode else "UDP"
+            tooltip = (
+                f"Router favorite · {transport} · port {favorite.port}\n"
+                "Membership is synchronized by server ID."
+            )
+            color = "#7c3aed"
+        else:
+            tooltip = "Not currently saved in DD-WRT's Astrill favorite list."
+            color = COLORS["muted"]
+        item.setToolTip(ENDPOINT_FAVORITE_COLUMN, tooltip)
+        item.setForeground(ENDPOINT_FAVORITE_COLUMN, QColor(color))
 
     def _endpoint_probe_cells(self, server: AstrillServer) -> list[str]:
         saved = self._endpoint_probe_results.get(
@@ -1704,7 +1847,7 @@ class MainWindow(QMainWindow):
             )
         else:
             color = "#b91c1c"
-        for column in (5, 6, 7):
+        for column in ENDPOINT_LATENCY_RESULT_COLUMNS:
             item.setForeground(column, QColor(color))
         method = (
             f"{ASTRILL_PROTOCOL_NAMES[result.tested_protocol]} TCP counterpart"
@@ -1728,7 +1871,7 @@ class MainWindow(QMainWindow):
             tooltip += (
                 "\nThe applet now advertises a different target; retest manually."
             )
-        for column in (5, 6, 7):
+        for column in ENDPOINT_LATENCY_RESULT_COLUMNS:
             item.setToolTip(column, tooltip)
 
     @staticmethod
@@ -1831,6 +1974,122 @@ class MainWindow(QMainWindow):
             )
         self._render_endpoints()
 
+    def _sync_endpoint_favorites(self, *, quiet: bool = False) -> None:
+        if self._native_settings_loading:
+            return
+        self._native_settings_loading = True
+        self.endpoint_favorite_status.setText(
+            "Reading the current favorite list from DD-WRT…"
+        )
+        self._run_task(
+            "Syncing Astrill favorites",
+            self.controller.load_native_settings,
+            self._endpoint_favorites_loaded,
+            quiet=quiet,
+            finished_callback=self._native_settings_finished,
+        )
+
+    def _endpoint_favorites_loaded(self, settings: object) -> None:
+        if not isinstance(settings, NativeAstrillSettings):
+            return
+        self._apply_native_settings(
+            settings,
+            force_native_page=False,
+        )
+        self.statusBar().showMessage(
+            "Astrill favorites synchronized from DD-WRT.", 4000
+        )
+
+    def _toggle_selected_endpoint_favorite(self) -> None:
+        if self.busy_count:
+            self.statusBar().showMessage("Wait for the current action to finish.", 4000)
+            return
+        if self.controller.store.read_only:
+            self._select_something(
+                "The read-only guard blocks favorite changes. Turn it off in "
+                "Settings first."
+            )
+            return
+        if self.native_page.dirty:
+            self._select_something(
+                "Save or reload the unsaved Astrill-page edits before changing "
+                "favorites."
+            )
+            return
+        if self._endpoint_favorites_valid is not True:
+            self._select_something(
+                "Sync a valid favorite list from DD-WRT before changing it."
+            )
+            return
+        server = self._selected_endpoint()
+        if server is None:
+            self._select_something("Select an Astrill endpoint first.")
+            return
+
+        enabled = server.id not in self._endpoint_favorite_records
+        protocol = self.protocol.currentIndex()
+        if enabled:
+            try:
+                _sid, endpoint = server.endpoint_for(protocol)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Unsupported endpoint protocol", str(exc))
+                return
+            action = "Add"
+            detail = (
+                f"Add {server.name} to the router's Astrill favorites using "
+                f"{ASTRILL_PROTOCOL_NAMES[protocol]} and port {endpoint.port}?"
+            )
+        else:
+            action = "Remove"
+            detail = f"Remove {server.name} from the router's Astrill favorites?"
+
+        detail += (
+            "\n\nOnly the native astrill_favlist value will change. The app "
+            "will preserve every other favorite, commit once, and verify the "
+            "readback. It will not reconnect Astrill, switch endpoints, run a "
+            "latency test, or enable background polling."
+        )
+        if (
+            QMessageBox.warning(
+                self,
+                f"{action} router favorite",
+                detail,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        task_action = "Adding" if enabled else "Removing"
+        self._run_task(
+            f"{task_action} router favorite {server.name}",
+            lambda: self.controller.set_endpoint_favorite(
+                server,
+                protocol,
+                enabled=enabled,
+            ),
+            lambda result: self._endpoint_favorite_changed(
+                result,
+                server.name,
+                enabled,
+            ),
+        )
+
+    def _endpoint_favorite_changed(
+        self,
+        result: object,
+        server_name: str,
+        enabled: bool,
+    ) -> None:
+        if not isinstance(result, NativeAstrillSettings):
+            return
+        self._apply_native_settings(result, force_native_page=False)
+        action = "added to" if enabled else "removed from"
+        self.endpoint_favorite_status.setText(
+            f"{server_name} {action} router favorites · verified on DD-WRT."
+        )
+
     def _connect_endpoint(self) -> None:
         if self.busy_count:
             self.statusBar().showMessage(
@@ -1849,12 +2108,9 @@ class MainWindow(QMainWindow):
                 "router's Astrill endpoint."
             )
             return
-        item = self.endpoint_tree.currentItem()
-        if item is None:
+        server = self._selected_endpoint()
+        if server is None:
             self._select_something("Select an Astrill endpoint first.")
-            return
-        server = item.data(0, Qt.ItemDataRole.UserRole)
-        if not isinstance(server, AstrillServer):
             return
         protocol = self.protocol.currentIndex()
         try:
@@ -1896,12 +2152,8 @@ class MainWindow(QMainWindow):
         idle = self.busy_count == 0
         read_only = self.controller.store.read_only
         companion_enabled = self.controller.store.companion_enabled
-        selected: AstrillServer | None = None
-        item = self.endpoint_tree.currentItem()
-        if item is not None:
-            value = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(value, AstrillServer):
-                selected = value
+        selected = self._selected_endpoint()
+        native_dirty = hasattr(self, "native_page") and self.native_page.dirty
 
         protocol_supported = False
         if selected is not None:
@@ -1925,6 +2177,45 @@ class MainWindow(QMainWindow):
         self.endpoint_probe_clear_button.setEnabled(
             idle and bool(self._endpoint_probe_results)
         )
+        self.endpoint_favorite_sync_button.setEnabled(idle)
+        is_favorite = (
+            selected is not None
+            and selected.id in self._endpoint_favorite_records
+            and self._endpoint_favorites_valid is True
+        )
+        self.endpoint_favorite_button.setText(
+            "Remove selected favorite" if is_favorite else "Add selected favorite"
+        )
+        favorite_action_enabled = (
+            idle
+            and not read_only
+            and not native_dirty
+            and self._endpoint_favorites_valid is True
+            and selected is not None
+            and (is_favorite or protocol_supported)
+        )
+        self.endpoint_favorite_button.setEnabled(favorite_action_enabled)
+        if native_dirty:
+            self.endpoint_favorite_button.setToolTip(
+                "Save or reload the Astrill page's unsaved edits first."
+            )
+        elif self._endpoint_favorites_valid is None:
+            self.endpoint_favorite_button.setToolTip(
+                "Sync favorites from DD-WRT first."
+            )
+        elif self._endpoint_favorites_valid is False:
+            self.endpoint_favorite_button.setToolTip(
+                "The malformed router favorite list is preserved; editing is blocked."
+            )
+        elif is_favorite:
+            self.endpoint_favorite_button.setToolTip(
+                "Remove only this server from DD-WRT's native Astrill favorites."
+            )
+        else:
+            self.endpoint_favorite_button.setToolTip(
+                "Add this server using the selected protocol's default port. "
+                "This does not reconnect Astrill."
+            )
         self.connect_endpoint_button.setEnabled(
             idle
             and not read_only
@@ -1998,11 +2289,42 @@ class MainWindow(QMainWindow):
     def _native_settings_loaded(self, settings: object) -> None:
         if not isinstance(settings, NativeAstrillSettings):
             return
-        self.native_settings = settings
-        self.native_page.render(settings, self.clients)
+        self._apply_native_settings(settings, force_native_page=True)
         self.statusBar().showMessage(
             "Native Astrill settings loaded and synchronized.", 4000
         )
+
+    def _apply_native_settings(
+        self,
+        settings: NativeAstrillSettings,
+        *,
+        force_native_page: bool,
+    ) -> None:
+        self.native_settings = settings
+        try:
+            favorites = parse_astrill_favorites(settings.get("astrill_favlist"))
+        except ValueError:
+            self._endpoint_favorite_records = {}
+            self._endpoint_favorites_valid = False
+            self.endpoint_favorite_status.setText(
+                "DD-WRT returned malformed favorites · preserved; editing disabled."
+            )
+        else:
+            self._endpoint_favorite_records = {
+                favorite.server_id: favorite for favorite in favorites
+            }
+            self._endpoint_favorites_valid = True
+            count = len(favorites)
+            self.endpoint_favorite_status.setText(
+                f"{count} router favorite{'' if count == 1 else 's'} synced "
+                "from DD-WRT · manual only."
+            )
+        if force_native_page or not self.native_page.dirty:
+            self.native_page.render(settings, self.clients)
+        else:
+            self.native_page.render_favorite_summary(settings)
+        self._render_endpoints()
+        self._sync_endpoint_action_ui()
 
     def _save_native_settings(self) -> None:
         if self.native_settings is None:

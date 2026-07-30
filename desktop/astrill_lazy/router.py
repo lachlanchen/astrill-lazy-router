@@ -371,6 +371,42 @@ done
             return self.native_astrill_settings()
         return self._write_native_astrill_values(normalized)
 
+    def replace_astrill_favorites(
+        self,
+        expected_current: str,
+        replacement: str,
+    ) -> NativeAstrillSettings:
+        """Replace the native favorite list only if it is still current."""
+
+        expected = normalize_native_changes({"astrill_favlist": expected_current})[
+            "astrill_favlist"
+        ]
+        normalized = normalize_native_changes({"astrill_favlist": replacement})[
+            "astrill_favlist"
+        ]
+        script = [
+            "set -e",
+            f"expected={shlex.quote(expected)}",
+            'current="$(nvram get astrill_favlist)"',
+            'if [ "$current" != "$expected" ]; then',
+            (
+                "    printf '%s\\n' "
+                "'router favorite endpoints changed before this save; "
+                "reload and try again' >&2"
+            ),
+            "    exit 75",
+            "fi",
+            f"nvram set {shlex.quote(f'astrill_favlist={normalized}')}",
+            "nvram commit >/dev/null",
+        ]
+        self.run_script("\n".join(script) + "\n", timeout=30)
+        settings = self.native_astrill_settings()
+        self._verify_native_astrill_values(
+            settings,
+            {"astrill_favlist": normalized},
+        )
+        return settings
+
     def save_astrill_connection(
         self,
         selection: AstrillConnectionSelection,

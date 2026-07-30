@@ -69,6 +69,20 @@ class FakeRouter:
         self.write_calls.append(("native_settings", dict(changes)))
         return NativeAstrillSettings.from_dict(changes)
 
+    def replace_astrill_favorites(
+        self, expected_current: str, replacement: str
+    ) -> NativeAstrillSettings:
+        self.write_calls.append(
+            (
+                "favorites",
+                {
+                    "expected_current": expected_current,
+                    "replacement": replacement,
+                },
+            )
+        )
+        return NativeAstrillSettings.from_dict({"astrill_favlist": replacement})
+
     def apply_rules(self, payload: str) -> dict[str, Any]:
         self.write_calls.append(("apply", payload))
         return {"ok": True, "origin_count": 1}
@@ -364,6 +378,7 @@ def test_read_only_blocks_every_router_mutation_before_dispatch(
         lambda: controller.set_connection(True),
         lambda: controller.switch_server(server, 2),
         lambda: controller.save_native_settings({"astrill_adsblock": "1"}),
+        lambda: controller.set_endpoint_favorite(server, 2, enabled=True),
     )
 
     for operation in operations:
@@ -409,6 +424,111 @@ def test_endpoint_switch_requires_companion_and_dispatches_selected_protocol(
             },
         )
     ]
+
+
+def test_endpoint_favorite_fresh_reads_and_does_not_require_companion(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    current = "9999:123:443:1:6:9999"
+
+    def native_settings() -> NativeAstrillSettings:
+        router.read_calls.append("native_settings")
+        return NativeAstrillSettings.from_dict({"astrill_favlist": current})
+
+    router.native_astrill_settings = native_settings  # type: ignore[method-assign]
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+    controller.server_catalog = controller.load_servers()
+    router.read_calls.clear()
+
+    settings = controller.set_endpoint_favorite(
+        controller.server_catalog.servers[0],
+        2,
+        enabled=True,
+    )
+
+    assert router.read_calls == ["native_settings"]
+    assert router.write_calls == [
+        (
+            "favorites",
+            {
+                "expected_current": current,
+                "replacement": current + ",1:123:443:0:6:7",
+            },
+        )
+    ]
+    assert settings.get("astrill_favlist") == current + ",1:123:443:0:6:7"
+    assert store.companion_enabled is False
+
+
+def test_endpoint_favorite_remove_is_protocol_independent_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    current = "1:123:443:0:6:7,9999:456:53:0:5:9999"
+
+    def native_settings() -> NativeAstrillSettings:
+        router.read_calls.append("native_settings")
+        return NativeAstrillSettings.from_dict({"astrill_favlist": current})
+
+    router.native_astrill_settings = native_settings  # type: ignore[method-assign]
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+
+    removed = controller.set_endpoint_favorite(
+        make_server(),
+        None,
+        enabled=False,
+    )
+    assert removed.get("astrill_favlist") == "9999:456:53:0:5:9999"
+    assert router.write_calls[-1] == (
+        "favorites",
+        {
+            "expected_current": current,
+            "replacement": "9999:456:53:0:5:9999",
+        },
+    )
+
+    router.write_calls.clear()
+    missing = AstrillServer(700, "Missing", ())
+    unchanged = controller.set_endpoint_favorite(
+        missing,
+        None,
+        enabled=False,
+    )
+    assert unchanged.get("astrill_favlist") == current
+    assert router.write_calls == []
+
+
+def test_endpoint_favorite_malformed_snapshot_performs_no_write(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    router.native_astrill_settings = lambda: NativeAstrillSettings.from_dict(  # type: ignore[method-assign]
+        {"astrill_favlist": "invalid"}
+    )
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError, match="favorite record"):
+        controller.set_endpoint_favorite(make_server(), None, enabled=False)
+    assert router.write_calls == []
 
 
 def test_local_policy_service_and_device_mutations_are_saved_atomically(

@@ -285,6 +285,10 @@ recurring SSH poll. When a remote change is discovered, it updates a clean page
 immediately. If local edits are pending, the GUI retains them and shows a
 Reload conflict instead of silently overwriting the form.
 
+Ubuntu's Favorite switch remains part of this Connection draft. It synchronizes
+the selected endpoint's native favorite state through the same validated Save
+or Apply flow and retains the page's existing dirty-edit conflict protection.
+
 ### Endpoints
 
 The app reads the installed Astrill applet, groups its servers by configured
@@ -305,6 +309,24 @@ view marks results older than 24 hours or tied to a changed endpoint target for
 manual retesting. Its Sort control offers Astrill's default order, region
 order, and numeric fastest-first PC latency order; clearing results removes the
 saved cache.
+
+Windows also presents DD-WRT's native Astrill favorites in a dedicated
+**Favorite** column. The list is synchronized after endpoint loading, by the
+explicit **Sync favorites** action, and from completed-action readbacks. It is
+not polled. Add and remove require confirmation and operate independently of
+the active connection: they do not need the companion, reconnect the tunnel,
+switch endpoints, or trigger a latency test.
+
+Each confirmed change starts with a fresh settings read. The controller parses
+that current list, preserves unknown servers and record order, and changes
+only the selected server's membership. DD-WRT compares the expected list with
+NVRAM before replacing it, commits `astrill_favlist` once, and returns a full
+readback for exact verification. A concurrent router-side change therefore
+fails closed instead of being overwritten.
+
+Malformed native favorite data is preserved and disables favorite editing.
+Pending edits on the Windows Astrill page also disable add/remove; an inbound
+favorite summary can refresh without discarding that dirty form.
 
 Neither frontend's latency action sends a command to DD-WRT or switches the
 router endpoint. The displayed value is TCP-connect latency and reachability

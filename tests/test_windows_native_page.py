@@ -49,7 +49,7 @@ def native_settings(**overrides: str) -> NativeAstrillSettings:
         "astrill_portindex": "0",
         "astrill_protocol": "0",
         "astrill_vpnmode": "1",
-        "astrill_favlist": "998,999",
+        "astrill_favlist": ("998:123456:443:0:1:12,999:123457:443:0:1:13"),
         "astrill_routingmode": "2",
         "astrill_iplistraw": "example.com",
         "astrill_iplist": "",
@@ -138,6 +138,34 @@ def test_dirty_state_reverts_and_read_only_busy_guards_apply(
     assert page.save_button.isEnabled()
     page.render(native_settings())
     assert not page.dirty
+
+
+def test_favorite_summary_refresh_preserves_unsaved_controls(
+    page: WindowsNativeSettingsPage,
+) -> None:
+    page.render(native_settings())
+    ads = page._direct_controls["astrill_adsblock"]
+    assert isinstance(ads, QCheckBox)
+    ads.setChecked(True)
+
+    page.render_favorite_summary(
+        native_settings(
+            astrill_favlist="998:123456:443:0:1:12",
+        )
+    )
+
+    assert page.dirty
+    assert ads.isChecked()
+    assert page._state_labels["astrill_favlist"].text() == "1 saved endpoint"
+
+    page.render_favorite_summary(native_settings(astrill_favlist="malformed"))
+    assert page.dirty
+    assert ads.isChecked()
+    assert (
+        page._state_labels["astrill_favlist"].text()
+        == "Invalid favorite data · preserved"
+    )
+    page.render(native_settings())
 
 
 @pytest.mark.parametrize("routing_mode", ("2", "3", "4"))

@@ -327,6 +327,39 @@ def serialize_astrill_favorites(
     return ",".join(favorite.to_native() for favorite in ordered.values())
 
 
+def update_astrill_favorite_list(
+    value: str,
+    server_id: int,
+    favorite: AstrillFavorite | None,
+) -> str:
+    """Return a favorite list with one server added or removed.
+
+    Existing records retain their order and value.  In particular, adding a
+    server that is already present is idempotent rather than silently changing
+    the transport details stored by Astrill for that favorite.
+    """
+
+    if not isinstance(server_id, int) or isinstance(server_id, bool) or server_id <= 0:
+        raise ValueError("Astrill favorite server ID must be positive")
+    favorites = list(parse_astrill_favorites(value))
+    existing = next(
+        (item for item in favorites if item.server_id == server_id),
+        None,
+    )
+    if favorite is None:
+        if existing is None:
+            return value
+        favorites.remove(existing)
+        return serialize_astrill_favorites(favorites)
+    favorite._validate()
+    if favorite.server_id != server_id:
+        raise ValueError("Astrill favorite server ID does not match the selection")
+    if existing is not None:
+        return value
+    favorites.append(favorite)
+    return serialize_astrill_favorites(favorites)
+
+
 def parse_applet(payload: bytes) -> tuple[AstrillServer, ...]:
     script = unpack_applet(payload)
     endpoint_addresses = _extract_endpoint_addresses(script)

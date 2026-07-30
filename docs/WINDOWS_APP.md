@@ -21,6 +21,8 @@ The native Windows application provides:
 - country-preference and shared-endpoint summaries;
 - manual, Windows-PC-side TCP latency checks for a selected, visible, or all
   loaded endpoints;
+- event-driven native favorite synchronization with a Favorite column and
+  separately confirmed add/remove controls;
 - confirmed Astrill connect and disconnect controls, plus a companion-backed
   action that selects an endpoint and reconnects the router's shared tunnel;
 - installation, repair, refresh, rollback, and complete removal of the
@@ -265,7 +267,10 @@ Recommended first-use sequence:
    select **Connect router to selected endpoint**. The separate confirmation
    writes the endpoint to DD-WRT and briefly reconnects the shared router
    tunnel. It does not connect a VPN or change routing on the Windows PC.
-7. Apply policies only through the separate confirmation when intended.
+7. To change DD-WRT's native Astrill favorites, select **Sync favorites**,
+   choose an endpoint, and use **Add selected favorite** or **Remove selected
+   favorite**. Review the separate confirmation before approving the write.
+8. Apply policies only through the separate confirmation when intended.
 
 Guarded remote write operations include native Astrill setting changes,
 connection changes, companion installation, policy application, endpoint
@@ -310,6 +315,42 @@ first, and leaves untested endpoints last. Search is applied before sorting,
 and the selected endpoint is retained when it is temporarily hidden by a
 filter.
 
+### Router favorites
+
+The endpoint table's **Favorite** column mirrors native Astrill favorite
+membership from DD-WRT. Loading or reloading the endpoint catalog schedules
+one favorite read after the catalog is available. **Sync favorites** performs
+the same read explicitly, and a completed favorite or native-settings action
+applies its verified readback. These are event-driven reads; the Windows app
+does not schedule a recurring SSH poll.
+
+Select a row and use **Add selected favorite** or **Remove selected favorite**.
+Adding uses the currently selected supported protocol and its default endpoint
+port. Removing is matched by server ID and does not depend on the currently
+selected protocol. Both operations show a cancel-default confirmation that
+states the exact endpoint and effect.
+
+After confirmation, the controller reads the complete current native settings
+again instead of trusting the displayed copy. It parses the fresh
+`astrill_favlist`, preserves every other record and its order, and prepares
+only the requested membership change. The router then compares that fresh
+value with the current NVRAM value before replacement. If another client
+changed it in the meantime, the write stops and the app asks for another sync.
+On success, only `astrill_favlist` is set, `nvram commit` runs once, and the
+complete allowlisted settings are read back to verify the saved value.
+
+Favorite membership is a native Astrill setting and does not require the
+router companion. Adding or removing a favorite does not switch the active
+endpoint, reconnect the tunnel, run a latency test, change PC routing, or
+start background monitoring.
+
+The app will not rewrite malformed favorite data. It labels the Favorite
+column invalid, preserves the router value, and disables add/remove until a
+valid value is available. It also disables favorite changes while the Astrill
+page has unsaved edits. A sync may update the read-only favorite summary
+without replacing those pending controls, but the draft must be saved or
+reloaded before changing membership.
+
 The guard is an accident-prevention feature, not an authorization boundary.
 A user who can edit the configuration or invoke `ssh.exe` directly can still
 change the router.
@@ -331,10 +372,12 @@ modes are preserved unless the related controls are actually changed.
 
 For transparency, every row shows its underlying `astrill_*` NVRAM key in
 small text. Endpoint, node, protocol, encoded address, port, VPN mode,
-favorites, connection state, and the generated IPv4 summary remain read-only.
-The page covers exactly the explicit safe-key allowlist; it never requests or
-displays Astrill account credentials, router passwords, tokens, installer
-URLs, or generated VPN credentials.
+connection state, the favorite summary, and the generated IPv4 summary remain
+read-only on this page. Favorite membership is edited only through the
+confirmed Endpoints controls described above. The page covers exactly the
+explicit safe-key allowlist; it never requests or displays Astrill account
+credentials, router passwords, tokens, installer URLs, or generated VPN
+credentials.
 
 Controls stay disabled until a complete read succeeds. The read-only guard and
 background-task lock disable every writable control as well as Save. Save is
