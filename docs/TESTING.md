@@ -269,6 +269,35 @@ physical reboot. Astrill was later connected using its own upstream state while
 the pre-existing `astrill_autostart=0` setting remained unchanged. No endpoint
 switch was forced during this release verification.
 
+### 2026-07-30 Companion 0.2.10 Compression And Path Check
+
+The live E4200 upgrade migrated the active 5,118-byte plain policy to a
+924-byte gzip/base64 record before writing the larger package. Companion
+`0.2.10` then reconstructed and started from 18,691 package bytes in 14 NVRAM
+chunks with 2,935 bytes free. The package, active policy, watchdog, A/B jump,
+Direct table, VPN blackhole fallback, and disconnected fail-closed state all
+verified healthy.
+
+Jianguoyun/Nutstore was then added to the reboot-essential desktop set. The
+resulting six origins compile to 68 rows and 5,959 plain bytes, occupy 1,077
+encoded NVRAM bytes, resolve 140 addresses with zero failures, and leave 2,755
+bytes free. The 2 KiB reserve correctly keeps rollback runtime-only when a
+second persistent generation would be too large.
+
+After a managed reconnect to saved endpoint `1199` (USA - Los Angeles 10G),
+the verified RPDB order was Direct `32762`, VPN `32763`, and native Astrill
+minimum `32764`. Native device mode remained exclusion mode with only the 3040
+at `192.168.1.209`; Ubuntu 7090 and Mac 7050 remained Astrill-routed.
+Ordinary Ubuntu and Mac traffic used Astrill egress `152.232.60.10`, while the
+UU namespace at `192.168.1.108` used Direct egress `209.9.115.16`. A controlled
+namespace probe increased the UU source-rule counter from 5 to 95 packets.
+
+Google and YouTube passed on both computers. Instagram initially failed
+because both client DNS caches retained the earlier poisoned
+`104.244.46.246` result. Astrill DNS returned the correct Meta address; flushing
+`systemd-resolved` and macOS `mDNSResponder` restored HTTP 200 on both clients.
+No policy or native Astrill setting was changed to repair that cache issue.
+
 ## Package Verification
 
 The release wheel is checked for all catalog data and executable modes on the

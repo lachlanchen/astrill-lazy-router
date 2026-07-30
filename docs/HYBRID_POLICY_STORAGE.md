@@ -2,8 +2,13 @@
 
 ## Status
 
-This document is a design proposal. The current companion does **not** yet
-separate persistent core policy from RAM overlays.
+This document is a staged design. Companion `0.2.10` implements the first
+storage prerequisite: policy documents use gzip/base64 in NVRAM when that is
+smaller, legacy plain records remain readable, upgrades migrate before package
+growth, and the 2 KiB reserve still controls persistent rollback.
+
+The current companion does **not** yet separate persistent core policy from
+RAM overlays. Apply still persists the complete active document.
 
 Today, the companion package and active files run from the RAM-backed
 `/tmp/astrill-lazy` directory, but every successful policy Apply stores the
@@ -55,9 +60,13 @@ Two uncompressed 3,846-byte core generations would leave only about 2.9 KiB
 free in the observed NVRAM state. That is too close to the current 2 KiB
 reserve for comfortable package or settings growth. A compressed current and
 rollback core, or a compressed current core plus a smaller known-good recovery
-baseline, provides better margin. Compression and chunk decoding are companion
-changes that must be proven with the exact BusyBox tools on the router; the
-current policy records are plain NVRAM strings.
+baseline, provides better margin.
+
+The compression path was verified on the E4200 with its exact BusyBox
+`gzip`, `gunzip`, `uuencode`, and `uudecode` utilities. The `0.2.10` upgrade
+migrated a 5,118-byte plain policy to a 924-byte compressed record before
+expanding the package from 11 to 14 NVRAM chunks. After adding Jianguoyun, the
+5,959-byte active document occupied 1,077 encoded bytes.
 
 Compressing the complete library is not the final answer. The current complete
 document compresses close to the NVRAM limit by itself, leaving no comfortable
