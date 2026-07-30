@@ -16,23 +16,25 @@ The native Windows application provides:
 - native-only status, Astrill settings, endpoint, and LAN-client inspection;
 - local Direct/Astrill policies for services, domains, IPv4 networks, and LAN
   devices;
-- the 261-profile service catalog and Suggested, Direct, or Astrill batch
-  policy actions;
+- the 261-profile service catalog with category, profile-type, and
+  provider-country filters, durable checkbox/Ctrl/Command/Shift selection,
+  **Select visible**, and Suggested, Direct, or Astrill batch policy actions;
 - country-preference and shared-endpoint summaries;
+- a dedicated shared-tunnel Connection view with verified Save, Connect,
+  Apply & Connect/Reconnect, and Disconnect actions;
 - manual, Windows-PC-side TCP latency checks for a selected, visible, or all
   loaded endpoints;
-- event-driven native favorite synchronization with a Favorite column and
-  separately confirmed add/remove controls;
-- confirmed Astrill connect and disconnect controls, plus a companion-backed
-  action that selects an endpoint and reconnects the router's shared tunnel;
+- exact endpoint-country filtering, durable bulk selection, semantic header
+  ordering, and event-driven native favorite synchronization with atomic
+  Favorite/Unfavorite batch controls;
 - installation, repair, refresh, rollback, and complete removal of the
   optional DD-WRT companion;
 - a local read-only guard that is enabled for every fresh configuration.
 
-The app has eight views: Policies, Services, Countries, Devices, Endpoints,
-Astrill, Router, and Settings. Local policy edits are saved immediately, but
-they do not affect traffic until the companion is installed and `Apply
-policies` succeeds.
+Version `0.2.10` has nine views: Policies, Services, Countries, Devices,
+Connection, Endpoints, Astrill, Router, and Settings. Local policy edits are
+saved immediately, but they do not affect traffic until the companion is
+installed and **Apply policies** succeeds.
 
 ## Requirements
 
@@ -229,9 +231,9 @@ empty device result. Moving between pages therefore does not turn an empty
 inventory into repeated router requests. Use the page's explicit Load or
 Refresh action when fresh data is required.
 
-This removes desktop SSH polling only. An installed companion still runs its
-15-second watchdog and five-minute DNS refresh locally on DD-WRT; those
-router-local maintenance cycles do not open desktop SSH sessions.
+This removes desktop SSH polling only. An installed companion still performs
+the router-local maintenance described below; those cycles do not open desktop
+SSH sessions.
 
 When the local configuration records a previously confirmed companion,
 refresh also reconciles router-reboot state:
@@ -251,25 +253,66 @@ The app never silently installs or rewrites a missing or incompatible
 companion; that still requires the separate **Install / upgrade**
 confirmation.
 
+### Companion 0.2.4 runtime boundaries
+
+Companion `0.2.4` owns marked Direct and Astrill lookups at policy priorities
+`28000` and `28001`. These lower numbers place explicit companion decisions
+ahead of the native Astrill policy range observed on supported E4200
+installations. Upgrade/ensure removes old companion rules at `29000` and
+`29001` only when their mark and table exactly match; an unrelated policy rule
+at either number is preserved. The earlier legacy `32000`/`32001` cleanup uses
+the same ownership check.
+
+Endpoint switch and explicit connect paths allow 60 seconds for both native
+connected state and a `tun0` route. A timeout is still an error and the
+transaction attempts its documented recovery. The router-local watchdog
+ensures runtime every 60 seconds and re-resolves domains every 30 minutes,
+reducing background work without relying on the Windows application.
+
+### Services and local versus applied policy state
+
+The Services page combines text search with exact category, profile-type, and
+provider-country filters. Provider country is service-catalog metadata; it
+does not choose or switch the router's Astrill endpoint.
+
+Select services with row checkboxes, Ctrl/Command multi-select, Shift range
+selection, or the tri-state **Select visible** control. Selection is durable
+while search and filters change, and the count reports selected rows currently
+hidden by those filters. **Clear selection** clears both visible and hidden
+rows.
+
+Choose **Suggested**, **Direct**, or **Astrill**, then select **Add to
+Policies**. Suggested preserves each catalog profile's maintained route.
+Adding saves or updates the selected policies in the Windows configuration;
+it does not write the router. The Policies page distinguishes:
+
+- the enabled local count in the Windows configuration; and
+- the applied origin count returned by the latest router refresh.
+
+**Apply policies** is the separate confirmed operation that sends the current
+local document to the companion. For example, searching for **UU Remote**,
+selecting **Direct**, and choosing **Add to Policies** creates a reviewable
+local Direct rule. It is not a product default and reaches the router only
+after the explicit Apply confirmation.
+
 Recommended first-use sequence:
 
 1. Set up and test key-only SSH in **Settings**.
 2. Keep the read-only guard enabled while reviewing **Router**, **Astrill**,
-   **Devices**, and **Endpoints**.
-3. Add or edit local policies if desired. This changes only the current user's
-   configuration.
+   **Connection**, **Devices**, and **Endpoints**.
+3. Add or edit local policies through **Services** or **Policies** if desired.
+   This changes only the current user's configuration.
 4. Review the router prerequisites and recovery procedure in
    [Router Installation And Rollback](ROUTER_INSTALL.md).
 5. Select **Install / upgrade** in **Router** and confirm the exact DD-WRT
    writes. On a fresh profile that confirmation also disables the local guard;
    a failed installation restores it automatically.
-6. In **Endpoints**, load the server list, select a server and protocol, then
-   add or remove its router favorite as needed. **Auto reconnect to next
-   favorite server** and **Start automatically after router boot** mirror the
-   corresponding native Astrill settings. Select **Connect router to selected
-   endpoint** only when changing the active tunnel; its separate confirmation
-   writes the endpoint to DD-WRT and briefly reconnects the shared router
-   tunnel. It does not connect a VPN or change routing on the Windows PC.
+6. Use **Connection** for one complete endpoint/transport/resilience draft, or
+   use **Endpoints** for filtering, bulk favorites, latency, and a quick
+   single-endpoint connection. **Auto reconnect to next favorite server** and
+   **Start automatically after router boot** mirror the corresponding native
+   Astrill settings. These controls change DD-WRT only; they do not connect a
+   VPN or change routing on the Windows PC.
 7. Apply policies only through the separate confirmation when intended.
 
 Guarded remote write operations include native Astrill setting changes,
@@ -278,25 +321,83 @@ switching, domain refresh, rollback, and companion removal. Destructive or
 traffic-interrupting actions add confirmation dialogs, and the controller
 checks the read-only guard again even when a button remains visible.
 
-The endpoint list remains available for read-only inspection. Switching is
-enabled only while the app is idle, the read-only guard is off, the companion
-is enabled, and a server is selected. The companion transaction restores the
-previous router endpoint settings when the requested endpoint does not connect.
-All Astrill-targeted devices and policies still share that one router tunnel.
+### Dedicated Connection page
 
-Favorites do not require the companion. Each endpoint row displays the
-router's native favorite state; **Add selected favorite** and **Remove selected
-favorite** merge against a fresh `astrill_favlist` read, commit once, and
-render the verified readback. **Sync from router** and page-demand reads bring
-favorites plus the two connection-behavior checkboxes back from Astrill's
-router page. Favorite and behavior writes refuse to replace pending edits in
-the full **Astrill** view; synchronization preserves the draft while updating
-the read-only favorite summary and endpoint controls.
+The Connection page mirrors the Ubuntu shared-tunnel editor. One refresh loads
+status and native connection settings, then the applet's endpoint catalog.
+The form exposes searchable server and router favorite state, protocols and
+ports supported by the complete endpoint, cipher, MTU, acceleration, native
+kill switch, favorite cycling, and router-boot autostart.
+
+An incoming router read does not silently discard a local draft. The page
+keeps the draft, shows a conflict banner, and offers an explicit **Discard
+draft and reload** action. While either Connection or Astrill has unsaved
+overlapping values, endpoint connection/favorite behavior controls that could
+overwrite them are blocked.
+
+The actions are intentionally distinct:
+
+- **Save** writes and verifies a changed draft without starting the tunnel. It
+  is available only while disconnected.
+- **Connect** starts the tunnel with an already-saved, clean draft.
+- **Apply & Connect** or **Apply & Reconnect** saves the validated connection
+  values, connects, and verifies every changed value.
+- **Disconnect** stops the shared tunnel while preserving endpoint settings,
+  native favorites, and traffic policies.
+
+Favorite membership is fresh-read and compare-before-write merged separately
+before Save or Apply; the page never sends its loaded complete favorite list
+through an ordinary NVRAM write. This preserves unrelated router-side changes.
+If a subsequent connection-setting write or connection attempt fails, the
+error states explicitly that the already-verified favorite edit remains saved,
+and the draft stays available to refresh or retry.
+
+The connection-setting portion of confirmed Apply is transactional in both
+operating modes. With the companion enabled, `astrill-switch` restores the
+previous endpoint and its original connected or disconnected state if the
+requested endpoint does not become connected. In native-only mode, Windows
+records the previous values and connection state, disconnects if required,
+writes and verifies the new values, connects, and restores the prior values
+and session on failure when possible. Both paths allow up to 60 seconds. The
+companion requires native connected state plus `tun0`; native-only mode waits
+for the `tun0` route and then returns the native status/readback. If stopping a
+late tunnel or restoring the prior connection cannot be verified, the
+companion returns a distinct recovery-failed error instead of claiming that
+the previous state was restored.
+
+The endpoint list remains available for read-only inspection and quick
+connection. Switching is enabled only while the app is idle, the read-only
+guard is off, exactly one endpoint is selected, and its selected protocol is
+supported. It no longer requires the companion. All Astrill-targeted devices
+and policies still share that one router tunnel.
+
+### Endpoint filtering, selection, and ordering
+
+The **Country** selector uses an exact full-country-name comparison from the
+loaded endpoint catalog; it is independent of free-text search and policy
+regions. Select endpoints with row checkboxes, Ctrl/Command multi-select,
+Shift range selection, or tri-state **Select visible**. The durable selection
+survives search, exact-country filtering, and sorting, reports how many rows
+are hidden, and is cleared explicitly with **Clear selection**.
+
+The Select, Endpoint, Region, Favorite, Server ID, Router state, Nodes, PC
+latency, Reach, and Tested headers are clickable. Header ordering uses model
+values rather than display text: IDs, node counts, latency, and timestamps are
+numeric; selected/favorite/router state use actual membership and status; and
+reachability respects current, stale, changed-target, and no-reply states.
+Missing values stay at the end in both directions and Astrill's catalog order
+is the stable tie breaker.
+
+**Auto reconnect to next favorite server** and **Start automatically after
+router boot** mirror the same native settings shown on Connection and Astrill.
+Writes refuse to replace pending edits on either page; synchronization can
+still update read-only status without discarding those drafts.
 
 **Test PC latency** is a separate, manual inspection action. It can test the
-selected endpoint, endpoints visible under the current search, or all loaded
-endpoints. The test opens one bounded TCP connection per target from the
-Windows PC over its current network path, records TCP-connect latency and
+selected endpoints, endpoints visible under the current search and country
+filter, or all loaded endpoints. The test opens one bounded TCP connection per
+target from the Windows PC over its current network path, records TCP-connect
+latency and
 reachability, and immediately closes the connection. It never starts
 automatically, sends no command to DD-WRT, changes no NVRAM value, and does not
 switch or reconnect the router endpoint. The result is not a bandwidth,
@@ -321,8 +422,9 @@ Use the endpoint **Sort** control to choose **Default order**, **Region
 (A–Z)**, or **PC latency (fastest)**. Latency sorting uses the numeric
 measurement rather than its displayed text, places current reachable results
 first, and leaves untested endpoints last. Search is applied before sorting,
-and the selected endpoint is retained when it is temporarily hidden by a
-filter.
+and all selected endpoints are retained when temporarily hidden by a filter.
+Clicking a table header switches the Sort control to the corresponding
+semantic header mode without running another test.
 
 ### Router favorites
 
@@ -333,20 +435,23 @@ the same read explicitly, and a completed favorite or native-settings action
 applies its verified readback. These are event-driven reads; the Windows app
 does not schedule a recurring SSH poll.
 
-Select a row and use **Add selected favorite** or **Remove selected favorite**.
-Adding uses the currently selected supported protocol and its default endpoint
-port. Removing is matched by server ID and does not depend on the currently
-selected protocol. Both operations show a cancel-default confirmation that
-states the exact endpoint and effect.
+Select one or more rows and use **Favorite selected** or **Unfavorite
+selected**. Adding uses the currently selected protocol and each endpoint's
+default port. Every new favorite must support that protocol; if any selected
+addition does not, the complete batch is rejected before a router write.
+Removing is matched by server ID and does not depend on the currently selected
+protocol. Both operations show a cancel-default batch summary.
 
 After confirmation, the controller reads the complete current native settings
-again instead of trusting the displayed copy. It parses the fresh
-`astrill_favlist`, preserves every other record and its order, and prepares
-only the requested membership change. The router then compares that fresh
-value with the current NVRAM value before replacement. If another client
-changed it in the meantime, the write stops and the app asks for another sync.
-On success, only `astrill_favlist` is set, `nvram commit` runs once, and the
-complete allowlisted settings are read back to verify the saved value.
+once instead of trusting the displayed copy. It parses the fresh
+`astrill_favlist`, validates the whole request, preserves every other record
+and its order, and appends additions in deterministic selected order or
+removes only selected server IDs. The router then compares that fresh value
+with the current NVRAM value before replacement. If another client changed it
+in the meantime, the write stops and the app asks for another sync. A no-op
+makes no commit. Otherwise only `astrill_favlist` is set, `nvram commit` runs
+once for the complete batch, and the full allowlisted settings are read back
+to verify the saved value.
 
 Favorite membership is a native Astrill setting and does not require the
 router companion. Adding or removing a favorite does not switch the active
@@ -354,11 +459,11 @@ endpoint, reconnect the tunnel, run a latency test, change PC routing, or
 start background monitoring.
 
 The app will not rewrite malformed favorite data. It labels the Favorite
-column invalid, preserves the router value, and disables add/remove until a
-valid value is available. It also disables favorite changes while the Astrill
-page has unsaved edits. A sync may update the read-only favorite summary
-without replacing those pending controls, but the draft must be saved or
-reloaded before changing membership.
+column invalid, preserves the router value, and disables Favorite/Unfavorite
+until a valid value is available. It also disables favorite changes while the
+Astrill or Connection page has unsaved edits. A sync may update read-only
+favorite summaries without replacing those pending controls, but the drafts
+must be saved or reloaded before changing membership.
 
 The guard is an accident-prevention feature, not an authorization boundary.
 A user who can edit the configuration or invoke `ssh.exe` directly can still
@@ -367,11 +472,12 @@ change the router.
 ## Human-Readable Astrill Settings
 
 The **Astrill** view uses the same effective native controls as the Ubuntu
-frontend instead of presenting an editable raw NVRAM table. Settings are
-grouped into current endpoint state, website routing, device routing, router
-interfaces, DNS, connection behavior, and advanced website filters. Boolean
-values use checkboxes, validated modes use named choices, MTU uses a bounded
-number control, and lists use appropriately sized text fields.
+frontend instead of presenting an editable raw NVRAM table. Version `0.2.10`
+uses seven spacious tabs: **Overview**, **Connection**, **Routing**, **Privacy
+& DNS**, **Devices**, **Resilience**, and **Advanced**. Boolean values use
+checkboxes, validated modes use named choices, MTU uses a bounded number
+control, and lists use appropriately sized text fields. Changing tabs preserves
+the rendered draft and dirty state.
 
 Website, device, Wi-Fi, and VLAN include/exclude modes are shown as effective
 **Direct** or **Astrill** defaults plus route exceptions. Editing the website

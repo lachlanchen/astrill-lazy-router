@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import pytest
 from astrill_lazy.astrill import AstrillEndpoint, AstrillNode, AstrillServer
-from astrill_lazy.endpoint_list import EndpointListRow, sort_endpoint_rows
+from astrill_lazy.endpoint_list import (
+    EndpointListRow,
+    sort_endpoint_rows,
+    sort_endpoint_rows_by_header,
+)
 from astrill_lazy.endpoint_probe import EndpointProbeResult, EndpointProbeStatus
 from astrill_lazy.endpoint_probe_store import (
     STALE_AFTER_SECONDS,
@@ -147,3 +152,145 @@ def test_latency_sort_does_not_reuse_another_protocol_result() -> None:
     )
 
     assert [row.server.id for row in ordered] == [1, 2]
+
+
+def test_header_sort_uses_numeric_membership_and_router_values() -> None:
+    ten = _row(0, 10, "us", "United States")
+    two = _row(1, 2, "eu", "Europe")
+    rows = (ten, two)
+
+    assert [
+        row.server.id
+        for row in sort_endpoint_rows_by_header(
+            rows,
+            "server_id",
+            False,
+            {},
+            1,
+        )
+    ] == [2, 10]
+    assert [
+        row.server.id
+        for row in sort_endpoint_rows_by_header(
+            rows,
+            "selected",
+            True,
+            {},
+            1,
+            selected_server_ids={2},
+        )
+    ] == [2, 10]
+    assert [
+        row.server.id
+        for row in sort_endpoint_rows_by_header(
+            rows,
+            "favorite",
+            True,
+            {},
+            1,
+            favorite_server_ids={10},
+        )
+    ] == [10, 2]
+    assert [
+        row.server.id
+        for row in sort_endpoint_rows_by_header(
+            rows,
+            "router_state",
+            True,
+            {},
+            1,
+            current_server_id=2,
+            connected=True,
+        )
+    ] == [2, 10]
+
+
+def test_header_latency_descending_keeps_non_numeric_results_last() -> None:
+    fast = _row(0, 1, "us", "United States")
+    untested = _row(1, 2, "us", "United States")
+    slow = _row(2, 3, "eu", "Europe")
+    unreachable = _row(3, 4, "eu", "Europe")
+    results = {
+        (fast.server.id, 1): _saved(
+            fast,
+            EndpointProbeStatus.REACHABLE,
+            latency_ms=9.5,
+        ),
+        (slow.server.id, 1): _saved(
+            slow,
+            EndpointProbeStatus.REACHABLE,
+            latency_ms=100.0,
+        ),
+        (unreachable.server.id, 1): _saved(
+            unreachable,
+            EndpointProbeStatus.UNREACHABLE,
+        ),
+    }
+
+    descending = sort_endpoint_rows_by_header(
+        (fast, untested, slow, unreachable),
+        "latency",
+        True,
+        results,
+        1,
+        now=NOW,
+    )
+
+    assert [row.server.id for row in descending] == [3, 1, 4, 2]
+
+
+def test_header_reach_and_tested_sort_semantically_with_missing_last() -> None:
+    older_reachable = _row(0, 1, "us", "United States")
+    missing = _row(1, 2, "us", "United States")
+    newer_unreachable = _row(2, 3, "eu", "Europe")
+    results = {
+        (older_reachable.server.id, 1): _saved(
+            older_reachable,
+            EndpointProbeStatus.REACHABLE,
+            latency_ms=10.0,
+            checked_at=NOW - 10,
+        ),
+        (newer_unreachable.server.id, 1): _saved(
+            newer_unreachable,
+            EndpointProbeStatus.UNREACHABLE,
+            checked_at=NOW,
+        ),
+    }
+
+    by_reach = sort_endpoint_rows_by_header(
+        (missing, newer_unreachable, older_reachable),
+        "reach",
+        False,
+        results,
+        1,
+        now=NOW,
+    )
+    by_tested = sort_endpoint_rows_by_header(
+        (missing, older_reachable, newer_unreachable),
+        "tested",
+        True,
+        results,
+        1,
+    )
+
+    assert [row.server.id for row in by_reach] == [1, 3, 2]
+    assert [row.server.id for row in by_tested] == [3, 1, 2]
+
+
+def test_header_sort_rejects_unknown_field_and_preserves_invalid_favorite_order() -> (
+    None
+):
+    rows = (_row(2, 3, "eu", "Europe"), _row(0, 1, "us", "United States"))
+
+    preserved = sort_endpoint_rows_by_header(
+        rows,
+        "favorite",
+        True,
+        {},
+        1,
+        favorite_server_ids=None,
+    )
+
+    assert [row.server.id for row in preserved] == [1, 3]
+    with pytest.raises(ValueError, match="header sort field"):
+        sort_endpoint_rows_by_header(rows, "unknown", False, {}, 1)

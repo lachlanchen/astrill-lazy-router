@@ -24,10 +24,15 @@ VPN_MARK=0x8000000
 MARK_MASK=0xc000000
 DIRECT_TABLE=213
 VPN_TABLE=212
-DIRECT_PREF=29000
-VPN_PREF=29001
+DIRECT_PREF=28000
+VPN_PREF=28001
+PREVIOUS_DIRECT_PREF=29000
+PREVIOUS_VPN_PREF=29001
 LEGACY_DIRECT_PREF=32000
 LEGACY_VPN_PREF=32001
+WATCHDOG_INTERVAL=60
+WATCHDOG_REFRESH_CYCLES=30
+ASTRILL_CONNECT_ATTEMPTS=60
 MAX_RULE_BYTES=6144
 TAB="$(printf '\t')"
 
@@ -472,6 +477,10 @@ ensure_routes() {
     ensure_ip_rule "$DIRECT_PREF" "$DIRECT_MARK" "$DIRECT_TABLE" || return 1
     ensure_ip_rule "$VPN_PREF" "$VPN_MARK" "$VPN_TABLE" || return 1
     remove_exact_ip_rule \
+        "$PREVIOUS_DIRECT_PREF" "$DIRECT_MARK" "$DIRECT_TABLE" || return 1
+    remove_exact_ip_rule \
+        "$PREVIOUS_VPN_PREF" "$VPN_MARK" "$VPN_TABLE" || return 1
+    remove_exact_ip_rule \
         "$LEGACY_DIRECT_PREF" "$DIRECT_MARK" "$DIRECT_TABLE" || return 1
     remove_exact_ip_rule \
         "$LEGACY_VPN_PREF" "$VPN_MARK" "$VPN_TABLE" || return 1
@@ -638,11 +647,11 @@ watchdog_loop() {
     while :; do
         "$0" ensure >/dev/null 2>&1 || true
         cycles=$((cycles + 1))
-        if [ "$cycles" -ge 20 ]; then
+        if [ "$cycles" -ge "$WATCHDOG_REFRESH_CYCLES" ]; then
             "$0" refresh >/dev/null 2>&1 || true
             cycles=0
         fi
-        sleep 15 &
+        sleep "$WATCHDOG_INTERVAL" &
         watchdog_sleep_pid=$!
         wait "$watchdog_sleep_pid" 2>/dev/null || true
         watchdog_sleep_pid=0
@@ -853,6 +862,12 @@ switch_astrill() {
     fi
     [ -x /dev/astrill/astrillvpn ] || fail "Astrill applet is unavailable"
 
+    initially_connected=false
+    if [ "$(nvram get astrill_status)" = 3 ] &&
+       ip route show table main | grep -q ' dev tun0'; then
+        initially_connected=true
+    fi
+
     rollback_file=$BASE/astrill-switch.previous
     : > "$rollback_file"
     for key in astrill_serverid astrill_sid astrill_ip astrill_port astrill_portindex astrill_protocol astrill_vpnmode; do
@@ -868,10 +883,11 @@ switch_astrill() {
     /dev/astrill/astrillvpn start > "$BASE/astrill-switch.log" 2>&1 || true
 
     attempts=0
-    while [ "$attempts" -lt 30 ]; do
+    while [ "$attempts" -lt "$ASTRILL_CONNECT_ATTEMPTS" ]; do
         if [ "$(nvram get astrill_status)" = 3 ] && ip route show table main | grep -q ' dev tun0'; then
             nvram commit >/dev/null
             ensure_runtime >/dev/null 2>&1 || true
+            rm -f "$rollback_file"
             log_message INFO "switched Astrill server to id $server_id"
             status_json
             return 0
@@ -883,9 +899,58 @@ switch_astrill() {
     while IFS="$TAB" read -r key value; do
         nvram set "$key=$value"
     done < "$rollback_file"
-    /dev/astrill/astrillvpn start >> "$BASE/astrill-switch.log" 2>&1 || true
     nvram commit >/dev/null
-    fail "new Astrill server did not connect; previous settings were restored"
+
+    # Stop any late or partially established requested tunnel before restoring
+    # the original connection state. In particular, a failed switch that began
+    # while disconnected must never start the previous endpoint.
+    /dev/astrill/astrillvpn stop >> "$BASE/astrill-switch.log" 2>&1 || true
+    attempts=0
+    rollback_stopped=false
+    while [ "$attempts" -lt 65 ]; do
+        # pgrep -f is not reliable across the supported BusyBox builds.
+        # shellcheck disable=SC2009
+        if ! ip route show table main | grep -q ' dev tun0' &&
+           ! ps w | grep astrill/openvpn.conf | grep -vq grep; then
+            rollback_stopped=true
+            break
+        fi
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    rollback_verified=$rollback_stopped
+    if [ "$initially_connected" = true ]; then
+        /dev/astrill/astrillvpn start >> "$BASE/astrill-switch.log" 2>&1 || true
+        attempts=0
+        rollback_connected=false
+        while [ "$attempts" -lt "$ASTRILL_CONNECT_ATTEMPTS" ]; do
+            if [ "$(nvram get astrill_status)" = 3 ] &&
+               ip route show table main | grep -q ' dev tun0'; then
+                rollback_connected=true
+                break
+            fi
+            attempts=$((attempts + 1))
+            sleep 1
+        done
+        rollback_verified=false
+        if [ "$rollback_stopped" = true ] &&
+           [ "$rollback_connected" = true ]; then
+            rollback_verified=true
+        fi
+    fi
+
+    ensure_routes >/dev/null 2>&1 ||
+        log_message ERROR "could not reconcile policy routes after failed Astrill switch"
+    if [ "$rollback_verified" = true ]; then
+        log_message WARN "failed Astrill switch restored the original connection state"
+        rm -f "$rollback_file"
+        fail "new Astrill server did not connect; previous settings were restored"
+    else
+        log_message ERROR "failed Astrill switch could not verify the original connection state"
+        rm -f "$rollback_file"
+        fail "new Astrill server did not connect; previous connection state could not be verified"
+    fi
 }
 
 set_astrill_connection() {
@@ -901,7 +966,7 @@ set_astrill_connection() {
             fi
             /dev/astrill/astrillvpn start > "$BASE/astrill-connection.log" 2>&1 || true
             attempts=0
-            while [ "$attempts" -lt 60 ]; do
+            while [ "$attempts" -lt "$ASTRILL_CONNECT_ATTEMPTS" ]; do
                 if [ "$(nvram get astrill_status)" = 3 ] &&
                    ip route show table main | grep -q ' dev tun0'; then
                     ensure_routes >/dev/null 2>&1 || true
@@ -912,7 +977,7 @@ set_astrill_connection() {
                 attempts=$((attempts + 1))
                 sleep 1
             done
-            fail "Astrill did not connect within 60 seconds"
+            fail "Astrill did not connect within $ASTRILL_CONNECT_ATTEMPTS seconds"
             ;;
         down)
             /dev/astrill/astrillvpn stop > "$BASE/astrill-connection.log" 2>&1 || true

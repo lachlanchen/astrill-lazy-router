@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -43,6 +44,43 @@ from .native_settings import (
 
 ROUTE_OPTIONS = (("direct", "Direct"), ("vpn", "Astrill"))
 SITE_SOURCE_OPTIONS = (("0", "Inline website list"), ("1", "Router file"))
+SECTION_DEFINITIONS = (
+    (
+        "overview",
+        "Overview",
+        "A read-only snapshot of the native Astrill tunnel currently stored on DD-WRT.",
+    ),
+    (
+        "connection",
+        "Connection",
+        "Transport defaults shared with the dedicated Connection page.",
+    ),
+    (
+        "routing",
+        "Routing",
+        "Choose which websites and router interfaces use Direct or Astrill.",
+    ),
+    (
+        "privacy_dns",
+        "Privacy & DNS",
+        "Control native DNS resolution, filtering, and split-DNS behavior.",
+    ),
+    (
+        "devices",
+        "Devices",
+        "Review known LAN clients and give individual devices a route override.",
+    ),
+    (
+        "resilience",
+        "Resilience",
+        "Decide how the shared tunnel recovers, starts, and fails safely.",
+    ),
+    (
+        "advanced",
+        "Advanced",
+        "Low-level website-filter sources retained for native Astrill compatibility.",
+    ),
+)
 
 
 class WindowsNativeSettingsPage(QWidget):
@@ -62,6 +100,7 @@ class WindowsNativeSettingsPage(QWidget):
         self._loading = False
         self._busy = False
         self._read_only = False
+        self._external_lock = ""
         self._dirty = False
         self._device_parse_error = ""
         self._presented_keys: list[str] = []
@@ -73,16 +112,15 @@ class WindowsNativeSettingsPage(QWidget):
         self._on_dirty_changed = on_dirty_changed
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(2, 2, 12, 20)
-        root.setSpacing(16)
+        root.setContentsMargins(4, 4, 12, 18)
+        root.setSpacing(14)
 
         heading = QHBoxLayout()
-        heading.setSpacing(10)
+        heading.setSpacing(12)
         intro = QLabel(
-            "The same native Astrill controls as the Ubuntu app, translated "
-            "into plain language. Only the explicit safe NVRAM allowlist is "
-            "loaded; account names, passwords, tokens, and generated VPN "
-            "credentials are never requested."
+            "Native Astrill mirrors the same safe DD-WRT controls as the Ubuntu "
+            "app. Changes stay staged until you save; account names, passwords, "
+            "tokens, and generated VPN credentials are never loaded."
         )
         intro.setWordWrap(True)
         intro.setProperty("class", "nativeIntro")
@@ -102,12 +140,32 @@ class WindowsNativeSettingsPage(QWidget):
         self.summary.setProperty("class", "nativeSummary")
         root.addWidget(self.summary)
 
-        self._build_state(root)
-        self._build_routing(root)
-        self._build_dns(root)
-        self._build_connection(root)
-        self._build_advanced(root)
-        root.addStretch(1)
+        self.section_tabs = QTabWidget()
+        self.section_tabs.setObjectName("nativeSectionTabs")
+        self.section_tabs.setDocumentMode(True)
+        self.section_tabs.setMovable(False)
+        self.section_tabs.setUsesScrollButtons(True)
+        self.section_tabs.tabBar().setExpanding(False)
+        self._section_pages: dict[str, QWidget] = {}
+        self._section_layouts: dict[str, QVBoxLayout] = {}
+        for section_id, title, description in SECTION_DEFINITIONS:
+            page, layout = self._section_page(section_id, title, description)
+            self._section_pages[section_id] = page
+            self._section_layouts[section_id] = layout
+            self.section_tabs.addTab(page, title)
+        root.addWidget(self.section_tabs, 1)
+
+        self._build_state(self._section_layouts["overview"])
+        self._build_connection(self._section_layouts["connection"])
+        self._build_routing(
+            self._section_layouts["routing"],
+            self._section_layouts["devices"],
+        )
+        self._build_dns(self._section_layouts["privacy_dns"])
+        self._build_resilience(self._section_layouts["resilience"])
+        self._build_advanced(self._section_layouts["advanced"])
+        for layout in self._section_layouts.values():
+            layout.addStretch(1)
 
         expected = set(SAFE_NATIVE_ASTRILL_KEYS)
         presented = set(self._presented_keys)
@@ -130,6 +188,10 @@ class WindowsNativeSettingsPage(QWidget):
     def presented_nvram_keys(self) -> tuple[str, ...]:
         return tuple(self._presented_keys)
 
+    @property
+    def section_names(self) -> tuple[str, ...]:
+        return tuple(title for _section_id, title, _description in SECTION_DEFINITIONS)
+
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.refresh_button.setEnabled(not busy)
@@ -137,6 +199,12 @@ class WindowsNativeSettingsPage(QWidget):
 
     def set_read_only(self, read_only: bool) -> None:
         self._read_only = read_only
+        self._sync_control_access()
+
+    def set_external_lock(self, message: str) -> None:
+        """Block overlapping writes while the Connection editor has a draft."""
+
+        self._external_lock = message.strip()
         self._sync_control_access()
 
     def render(
@@ -302,7 +370,7 @@ class WindowsNativeSettingsPage(QWidget):
         self._on_refresh()
 
     def _build_state(self, root: QVBoxLayout) -> None:
-        group = QGroupBox("Current endpoint and connection (read only)")
+        group = self._panel("Router snapshot")
         form = self._form(group)
         fields = (
             (
@@ -356,8 +424,12 @@ class WindowsNativeSettingsPage(QWidget):
             form.addRow(self._field_label(title, description, key), value)
         root.addWidget(group)
 
-    def _build_routing(self, root: QVBoxLayout) -> None:
-        websites = QGroupBox("Website routing")
+    def _build_routing(
+        self,
+        routing_root: QVBoxLayout,
+        devices_root: QVBoxLayout,
+    ) -> None:
+        websites = self._panel("Website routes")
         form = self._form(websites)
         self.site_default = self._route_combo()
         form.addRow(
@@ -389,9 +461,9 @@ class WindowsNativeSettingsPage(QWidget):
             ),
             self.compiled_sites,
         )
-        root.addWidget(websites)
+        routing_root.addWidget(websites)
 
-        devices = QGroupBox("Device routing")
+        devices = self._panel("Per-device routes")
         form = self._form(devices)
         self.device_default = self._route_combo()
         form.addRow(
@@ -427,9 +499,19 @@ class WindowsNativeSettingsPage(QWidget):
             ),
             self.device_table,
         )
-        root.addWidget(devices)
+        self.dmz_device = QLineEdit()
+        form.addRow(
+            self._field_label(
+                "DMZ device",
+                "Native Astrill device record used for the DMZ.",
+                "astrill_dmzdevice",
+            ),
+            self.dmz_device,
+        )
+        self._direct_controls["astrill_dmzdevice"] = self.dmz_device
+        devices_root.addWidget(devices)
 
-        interfaces = QGroupBox("Router interfaces")
+        interfaces = self._panel("Router interfaces")
         form = self._form(interfaces)
         self.wifi_default = self._route_combo()
         form.addRow(
@@ -470,17 +552,7 @@ class WindowsNativeSettingsPage(QWidget):
             ),
             self.vlan_exceptions,
         )
-        self.dmz_device = QLineEdit()
-        form.addRow(
-            self._field_label(
-                "DMZ device",
-                "Native Astrill device record used for the DMZ.",
-                "astrill_dmzdevice",
-            ),
-            self.dmz_device,
-        )
-        self._direct_controls["astrill_dmzdevice"] = self.dmz_device
-        root.addWidget(interfaces)
+        routing_root.addWidget(interfaces)
 
         self._write_controls.extend(
             [
@@ -504,7 +576,7 @@ class WindowsNativeSettingsPage(QWidget):
         self.dmz_device.textChanged.connect(self._changed)
 
     def _build_dns(self, root: QVBoxLayout) -> None:
-        group = QGroupBox("DNS")
+        group = self._panel("Resolver and privacy controls")
         form = self._form(group)
         self.dns_provider = QComboBox()
         self._fill_combo(self.dns_provider, DNS_OPTIONS)
@@ -552,7 +624,16 @@ class WindowsNativeSettingsPage(QWidget):
         self._connect_direct_controls()
 
     def _build_connection(self, root: QVBoxLayout) -> None:
-        group = QGroupBox("Connection behavior")
+        notice = QLabel(
+            "Endpoint selection and connect/disconnect actions live on the "
+            "Connection page. These native transport values remain here so "
+            "the safe DD-WRT mirror is complete."
+        )
+        notice.setWordWrap(True)
+        notice.setProperty("class", "nativeIntro")
+        root.addWidget(notice)
+
+        group = self._panel("Transport defaults")
         form = self._form(group)
         self.cipher = QComboBox()
         self._fill_combo(self.cipher, CIPHER_OPTIONS)
@@ -584,6 +665,17 @@ class WindowsNativeSettingsPage(QWidget):
                 "Hardware acceleration",
                 "Use Astrill's native fast path.",
             ),
+        ):
+            control = QCheckBox("Enabled")
+            form.addRow(self._field_label(title, description, key), control)
+            self._direct_controls[key] = control
+        root.addWidget(group)
+        self._connect_direct_controls()
+
+    def _build_resilience(self, root: QVBoxLayout) -> None:
+        group = self._panel("Recovery and boot behavior")
+        form = self._form(group)
+        for key, title, description in (
             (
                 "astrill_blockinternet",
                 "Block Internet when disconnected",
@@ -607,7 +699,7 @@ class WindowsNativeSettingsPage(QWidget):
         self._connect_direct_controls()
 
     def _build_advanced(self, root: QVBoxLayout) -> None:
-        group = QGroupBox("Advanced website filters")
+        group = self._panel("Website filter source")
         form = self._form(group)
         self.site_source = QComboBox()
         self._fill_combo(self.site_source, SITE_SOURCE_OPTIONS)
@@ -763,7 +855,12 @@ class WindowsNativeSettingsPage(QWidget):
         )
 
     def _sync_control_access(self) -> None:
-        editable = self.settings is not None and not self._read_only and not self._busy
+        editable = (
+            self.settings is not None
+            and not self._read_only
+            and not self._busy
+            and not self._external_lock
+        )
         for control in self._write_controls:
             control.setEnabled(editable)
         device_editable = editable and not self._device_parse_error
@@ -775,6 +872,8 @@ class WindowsNativeSettingsPage(QWidget):
             self.save_button.setToolTip(
                 "Turn off the read-only safety guard in Settings before saving."
             )
+        elif self._external_lock:
+            self.save_button.setToolTip(self._external_lock)
         elif not self._dirty:
             self.save_button.setToolTip("No native Astrill settings have changed.")
         else:
@@ -941,10 +1040,43 @@ class WindowsNativeSettingsPage(QWidget):
     @staticmethod
     def _form(parent: QGroupBox) -> QFormLayout:
         form = QFormLayout(parent)
-        form.setContentsMargins(18, 22, 18, 18)
-        form.setHorizontalSpacing(24)
-        form.setVerticalSpacing(13)
+        form.setContentsMargins(20, 24, 20, 20)
+        form.setHorizontalSpacing(28)
+        form.setVerticalSpacing(16)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         return form
+
+    @staticmethod
+    def _panel(title: str) -> QGroupBox:
+        panel = QGroupBox(title)
+        panel.setProperty("class", "nativePanel")
+        return panel
+
+    @staticmethod
+    def _section_page(
+        section_id: str,
+        title: str,
+        description: str,
+    ) -> tuple[QWidget, QVBoxLayout]:
+        page = QWidget()
+        page.setObjectName(f"nativeSection_{section_id}")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(16, 20, 16, 20)
+        layout.setSpacing(16)
+
+        heading = QLabel(title)
+        heading.setObjectName(f"nativeSectionTitle_{section_id}")
+        heading_font = heading.font()
+        heading_font.setPointSizeF(max(heading_font.pointSizeF() + 4, 14))
+        heading_font.setBold(True)
+        heading.setFont(heading_font)
+        layout.addWidget(heading)
+
+        summary = QLabel(description)
+        summary.setObjectName(f"nativeSectionSummary_{section_id}")
+        summary.setWordWrap(True)
+        summary.setProperty("class", "nativeIntro")
+        layout.addWidget(summary)
+        return page, layout

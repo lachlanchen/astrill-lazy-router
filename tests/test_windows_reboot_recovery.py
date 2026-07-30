@@ -65,7 +65,14 @@ def install_fake_installer(
         def __init__(self, supplied_router: object) -> None:
             assert supplied_router is router
 
-        def check(self) -> CompanionCheck:
+        def check(
+            self,
+            *,
+            presence: dict[str, Any] | None = None,
+            status: dict[str, Any] | None = None,
+        ) -> CompanionCheck:
+            assert presence == router.presence
+            assert status is None
             return check
 
         def ensure(self, *, allow_install: bool = True) -> EnsureResult:

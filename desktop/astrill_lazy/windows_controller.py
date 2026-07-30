@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .astrill import (
+    ASTRILL_PROTOCOL_NAMES,
     AstrillConnectionSelection,
     AstrillFavorite,
     AstrillServer,
     group_by_region,
     parse_applet,
-    update_astrill_favorite_list,
+    parse_astrill_favorites,
+    update_astrill_favorite_list_batch,
 )
 from .catalog import Catalog, load_catalog
 from .compiler import compile_rules
@@ -19,7 +22,7 @@ from .detector import MINIMUM_BYPASS_SERVICES
 from .installer import EnsureResult, InstallResult, RouterInstaller
 from .models import MatchKind, RouteTarget, Rule
 from .native_settings import NativeAstrillSettings
-from .router import RouterClient
+from .router import AstrillConnectionResult, RouterClient
 from .service_policy import ServiceRouteMode, service_policy_route
 from .ssh_setup import identity_path
 from .store import ConfigStore
@@ -48,6 +51,13 @@ class ServiceChangeSummary:
 class ServerCatalog:
     servers: tuple[AstrillServer, ...]
     groups: dict[str, tuple[AstrillServer, ...]]
+
+
+@dataclass(frozen=True)
+class WindowsConnectionState:
+    settings: NativeAstrillSettings
+    status: dict[str, Any]
+    server_catalog: ServerCatalog
 
 
 class WindowsController:
@@ -190,13 +200,24 @@ class WindowsController:
             return self.router.status()
         return self.router.native_astrill_status()
 
-    def reconcile_status(self) -> dict[str, Any]:
+    def reconcile_status(
+        self,
+        *,
+        presence: dict[str, Any] | None = None,
+        companion_status: dict[str, Any] | None = None,
+        native_status: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Resume safely after a router reboot or lost companion installation."""
         self.recovery_notice = None
         if not self.store.companion_enabled:
-            return self.router.native_astrill_status()
+            return (
+                native_status
+                if native_status is not None
+                else self.router.native_astrill_status()
+            )
 
-        presence = self.router.companion_presence()
+        if presence is None:
+            presence = self.router.companion_presence()
         if not presence.get("installed"):
             if presence.get("runtime"):
                 raise ControllerError(
@@ -210,10 +231,17 @@ class WindowsController:
                 "The router no longer has the companion. Native-only mode was "
                 "resumed; Install / upgrade remains separately confirmed."
             )
-            return self.router.native_astrill_status()
+            return (
+                native_status
+                if native_status is not None
+                else self.router.native_astrill_status()
+            )
 
         installer = RouterInstaller(self.router)
-        check = installer.check()
+        check = installer.check(
+            presence=presence,
+            status=companion_status,
+        )
         if check.action == "none":
             if check.status is None:
                 raise ControllerError(
@@ -250,6 +278,29 @@ class WindowsController:
     def load_native_settings(self) -> NativeAstrillSettings:
         return self.router.native_astrill_settings()
 
+    def load_connection_state(
+        self,
+        *,
+        refresh_servers: bool = True,
+    ) -> WindowsConnectionState:
+        """Read connection status/settings together, then sequence catalog I/O."""
+
+        snapshot = self.router.monitor_snapshot(
+            include_companion=self.store.companion_enabled
+        )
+        status = self.reconcile_status(
+            presence=snapshot.companion_presence,
+            companion_status=snapshot.companion_status,
+            native_status=snapshot.native_status,
+        )
+        if refresh_servers or not self.server_catalog.servers:
+            self.load_servers()
+        return WindowsConnectionState(
+            settings=snapshot.settings,
+            status=status,
+            server_catalog=self.server_catalog,
+        )
+
     def save_native_settings(self, changes: dict[str, Any]) -> NativeAstrillSettings:
         self._require_write("saving native Astrill settings")
         return self.router.update_native_astrill_settings(changes)
@@ -263,34 +314,95 @@ class WindowsController:
     ) -> NativeAstrillSettings:
         """Add or remove one native favorite using a fresh router snapshot."""
 
+        return self.set_endpoint_favorites(
+            (server,),
+            protocol,
+            enabled=enabled,
+        )
+
+    def set_endpoint_favorites(
+        self,
+        servers: Iterable[AstrillServer],
+        protocol: int | None,
+        *,
+        enabled: bool,
+    ) -> NativeAstrillSettings:
+        """Set favorite membership for several endpoints in one transaction."""
+
         self._require_write("changing Astrill favorite endpoints")
-        if not isinstance(server, AstrillServer):
-            raise TypeError("favorite endpoint must be an Astrill server")
         if not isinstance(enabled, bool):
             raise TypeError("favorite state must be true or false")
+        selected = tuple(servers)
+        if not selected:
+            raise ValueError("select at least one Astrill endpoint")
+        selected_ids: set[int] = set()
+        for server in selected:
+            if not isinstance(server, AstrillServer):
+                raise TypeError("favorite endpoint must be an Astrill server")
+            if server.id in selected_ids:
+                raise ValueError(
+                    f"favorite endpoint selection contains duplicate server ID "
+                    f"{server.id}"
+                )
+            selected_ids.add(server.id)
+        if enabled and (
+            not isinstance(protocol, int)
+            or isinstance(protocol, bool)
+            or protocol not in range(len(ASTRILL_PROTOCOL_NAMES))
+        ):
+            raise ValueError("select an Astrill protocol for the new favorites")
+
         settings = self.router.native_astrill_settings()
         current = settings.get("astrill_favlist")
-        record: AstrillFavorite | None = None
+        existing_ids = {
+            favorite.server_id for favorite in parse_astrill_favorites(current)
+        }
+        changes: list[tuple[int, AstrillFavorite | None]] = []
         if enabled:
-            if protocol is None:
-                raise ValueError("select an Astrill protocol for the new favorite")
-            catalog_server = next(
-                (item for item in self.server_catalog.servers if item.id == server.id),
-                None,
-            )
-            if catalog_server is None:
-                raise ValueError("load Astrill endpoints before adding a favorite")
-            selection = AstrillConnectionSelection.from_server(
-                catalog_server,
-                protocol,
-                0,
-            )
-            record = AstrillFavorite.from_selection(selection)
-        replacement = update_astrill_favorite_list(
+            catalog_by_id = {
+                server.id: server for server in self.server_catalog.servers
+            }
+            for server in selected:
+                if server.id in existing_ids:
+                    continue
+                catalog_server = catalog_by_id.get(server.id)
+                if catalog_server is None:
+                    raise ValueError("load Astrill endpoints before adding favorites")
+                selection = AstrillConnectionSelection.from_server(
+                    catalog_server,
+                    protocol,
+                    0,
+                )
+                changes.append(
+                    (
+                        server.id,
+                        AstrillFavorite.from_selection(selection),
+                    )
+                )
+        else:
+            changes.extend((server.id, None) for server in selected)
+
+        replacement = update_astrill_favorite_list_batch(
             current,
-            server.id,
-            record,
+            changes,
         )
+        if replacement == current:
+            return settings
+        return self.router.replace_astrill_favorites(current, replacement)
+
+    def apply_endpoint_favorite_changes(
+        self,
+        changes: Iterable[tuple[int, AstrillFavorite | None]],
+    ) -> NativeAstrillSettings:
+        """Fresh-merge explicit favorite edits and replace the list with CAS."""
+
+        self._require_write("changing Astrill favorite endpoints")
+        requested = tuple(changes)
+        if not requested:
+            raise ValueError("select at least one Astrill favorite change")
+        settings = self.router.native_astrill_settings()
+        current = settings.get("astrill_favlist")
+        replacement = update_astrill_favorite_list_batch(current, requested)
         if replacement == current:
             return settings
         return self.router.replace_astrill_favorites(current, replacement)
@@ -498,6 +610,37 @@ class WindowsController:
             connected,
             companion_enabled=self.store.companion_enabled,
         )
+
+    def save_astrill_connection(
+        self,
+        selection: AstrillConnectionSelection,
+        changes: dict[str, Any],
+    ) -> NativeAstrillSettings:
+        self._require_write("saving the Astrill connection")
+        return self.router.save_astrill_connection(selection, changes)
+
+    def apply_astrill_connection(
+        self,
+        selection: AstrillConnectionSelection,
+        changes: dict[str, Any],
+    ) -> AstrillConnectionResult:
+        self._require_write("applying the Astrill connection")
+        return self.router.apply_astrill_connection(
+            selection,
+            changes,
+            companion_enabled=self.store.companion_enabled,
+        )
+
+    def apply_server_connection(
+        self,
+        server: AstrillServer,
+        protocol: int,
+        changes: dict[str, Any] | None = None,
+    ) -> AstrillConnectionResult:
+        if not isinstance(server, AstrillServer):
+            raise TypeError("connection endpoint must be an Astrill server")
+        selection = AstrillConnectionSelection.from_server(server, protocol, 0)
+        return self.apply_astrill_connection(selection, changes or {})
 
     def switch_server(
         self,

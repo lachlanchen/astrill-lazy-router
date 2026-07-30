@@ -20,7 +20,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -61,7 +61,11 @@ from .astrill import (
     AstrillServer,
     parse_astrill_favorites,
 )
-from .endpoint_list import EndpointListRow, sort_endpoint_rows
+from .endpoint_list import (
+    EndpointListRow,
+    sort_endpoint_rows,
+    sort_endpoint_rows_by_header,
+)
 from .endpoint_probe import EndpointProbeResult, EndpointProbeStatus, probe_servers
 from .endpoint_probe_store import (
     SavedEndpointProbe,
@@ -71,31 +75,88 @@ from .endpoint_probe_store import (
     load_endpoint_probe_cache,
     save_endpoint_probe_cache,
 )
-from .models import MatchKind, RouteTarget, Rule
+from .models import MatchKind, RouteTarget, Rule, Service
 from .native_settings import NativeAstrillSettings
-from .router import _openssh_config_path
+from .router import AstrillConnectionResult, _openssh_config_path
 from .service_policy import ServiceRouteMode
-from .windows_controller import WindowsController
+from .windows_connection_page import ConnectionDraft, WindowsConnectionPage
+from .windows_controller import ServerCatalog, WindowsConnectionState, WindowsController
 from .windows_native_page import WindowsNativeSettingsPage
 from .windows_ssh_setup import WindowsHostKey, WindowsKeyAuthorization
 
 APP_NAME = "Astrill Lazy Router"
 
-ENDPOINT_NAME_COLUMN = 0
-ENDPOINT_REGION_COLUMN = 1
-ENDPOINT_FAVORITE_COLUMN = 2
-ENDPOINT_SERVER_ID_COLUMN = 3
-ENDPOINT_ROUTER_STATE_COLUMN = 4
-ENDPOINT_NODES_COLUMN = 5
-ENDPOINT_LATENCY_COLUMN = 6
-ENDPOINT_REACH_COLUMN = 7
-ENDPOINT_TESTED_COLUMN = 8
-ENDPOINT_COLUMN_COUNT = 9
+ENDPOINT_SELECT_COLUMN = 0
+ENDPOINT_NAME_COLUMN = 1
+ENDPOINT_REGION_COLUMN = 2
+ENDPOINT_FAVORITE_COLUMN = 3
+ENDPOINT_SERVER_ID_COLUMN = 4
+ENDPOINT_ROUTER_STATE_COLUMN = 5
+ENDPOINT_NODES_COLUMN = 6
+ENDPOINT_LATENCY_COLUMN = 7
+ENDPOINT_REACH_COLUMN = 8
+ENDPOINT_TESTED_COLUMN = 9
+ENDPOINT_COLUMN_COUNT = 10
 ENDPOINT_LATENCY_RESULT_COLUMNS = (
     ENDPOINT_LATENCY_COLUMN,
     ENDPOINT_REACH_COLUMN,
     ENDPOINT_TESTED_COLUMN,
 )
+ENDPOINT_HEADER_SORT_FIELDS = {
+    ENDPOINT_SELECT_COLUMN: "selected",
+    ENDPOINT_NAME_COLUMN: "endpoint",
+    ENDPOINT_REGION_COLUMN: "region",
+    ENDPOINT_FAVORITE_COLUMN: "favorite",
+    ENDPOINT_SERVER_ID_COLUMN: "server_id",
+    ENDPOINT_ROUTER_STATE_COLUMN: "router_state",
+    ENDPOINT_NODES_COLUMN: "nodes",
+    ENDPOINT_LATENCY_COLUMN: "latency",
+    ENDPOINT_REACH_COLUMN: "reach",
+    ENDPOINT_TESTED_COLUMN: "tested",
+}
+ENDPOINT_HEADER_DEFAULT_DESCENDING = {
+    ENDPOINT_SELECT_COLUMN: True,
+    ENDPOINT_NAME_COLUMN: False,
+    ENDPOINT_REGION_COLUMN: False,
+    ENDPOINT_FAVORITE_COLUMN: True,
+    ENDPOINT_SERVER_ID_COLUMN: False,
+    ENDPOINT_ROUTER_STATE_COLUMN: True,
+    ENDPOINT_NODES_COLUMN: True,
+    ENDPOINT_LATENCY_COLUMN: False,
+    ENDPOINT_REACH_COLUMN: False,
+    ENDPOINT_TESTED_COLUMN: True,
+}
+
+
+class EndpointTreeWidget(QTreeWidget):
+    """Tree whose Select cells behave like independent checkbox targets."""
+
+    selectCellClicked = Signal(object)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        position = event.position().toPoint()
+        item = self.itemAt(position)
+        if item is not None and self.columnAt(position.x()) == ENDPOINT_SELECT_COLUMN:
+            self.selectCellClicked.emit(item)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class ServiceTreeWidget(QTreeWidget):
+    """Tree whose first column toggles durable batch selection."""
+
+    selectCellClicked = Signal(object)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        position = event.position().toPoint()
+        item = self.itemAt(position)
+        if item is not None and self.columnAt(position.x()) == 0:
+            self.selectCellClicked.emit(item)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
 
 COLORS = {
     "window": "#f5f3ff",
@@ -322,6 +383,80 @@ QLabel.nativeReadOnly {{
     border: 1px solid #d8d5ff;
     border-radius: 8px;
     padding: 9px 11px;
+}}
+QTabWidget#nativeSectionTabs::pane {{
+    background: #ffffff;
+    border: 1px solid #c4b5fd;
+    border-radius: 12px;
+    top: -1px;
+}}
+QTabWidget#nativeSectionTabs QTabBar::tab {{
+    color: #4338ca;
+    background: #ede9fe;
+    border: 1px solid #c4b5fd;
+    border-bottom: none;
+    padding: 10px 15px;
+    margin-right: 3px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    font-weight: 700;
+}}
+QTabWidget#nativeSectionTabs QTabBar::tab:selected {{
+    color: white;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 #7c3aed,
+        stop: 1 #0891b2
+    );
+    border-color: #6d28d9;
+}}
+QTabWidget#nativeSectionTabs QTabBar::tab:hover:!selected {{
+    background: #ddd6fe;
+}}
+QFrame#connectionConflictBanner {{
+    background: #fff7ed;
+    border: 1px solid #fb923c;
+    border-left: 5px solid #ea580c;
+    border-radius: 10px;
+}}
+QFrame#connectionActionBanner {{
+    background: #eef2ff;
+    border: 1px solid #a5b4fc;
+    border-left: 5px solid #6366f1;
+    border-radius: 10px;
+}}
+QFrame#connectionActionBanner[level="success"] {{
+    background: #ecfdf5;
+    border-color: #34d399;
+    border-left-color: #059669;
+}}
+QFrame#connectionActionBanner[level="warning"] {{
+    background: #fff7ed;
+    border-color: #fb923c;
+    border-left-color: #ea580c;
+}}
+QFrame#connectionActionBanner[level="error"] {{
+    background: #fff1f2;
+    border-color: #fb7185;
+    border-left-color: #dc2626;
+}}
+QLabel.connectionState {{
+    color: #dc2626;
+    font-size: 12pt;
+    font-weight: 800;
+}}
+QLabel.connectionState[connected="true"] {{
+    color: #059669;
+}}
+QLabel.guardNotice {{
+    color: #9a3412;
+    background: #ffedd5;
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-weight: 600;
+}}
+QGroupBox#connectionStatusPanel {{
+    border-top: 4px solid #06b6d4;
 }}
 QPushButton {{
     background: white;
@@ -572,6 +707,7 @@ class MainWindow(QMainWindow):
         ("services", "Services", "261 curated service profiles"),
         ("countries", "Countries", "Policy regions on one shared tunnel"),
         ("devices", "Devices", "Observed DD-WRT LAN clients"),
+        ("connection", "Connection", "Mirrored shared Astrill tunnel controls"),
         ("endpoints", "Endpoints", "Choose the shared Astrill server"),
         ("astrill", "Astrill", "Native DD-WRT Astrill settings"),
         ("router", "Router", "Connection, runtime, and recovery"),
@@ -586,12 +722,20 @@ class MainWindow(QMainWindow):
         self.busy_count = 0
         self.router_status: dict[str, Any] = {}
         self.clients: list[dict[str, Any]] = []
+        self._selected_service_ids: set[str] = set()
+        self._syncing_service_selection = False
         self._clients_loading = False
         self._clients_loaded = False
         self._endpoint_catalog_loading = False
         self._endpoint_catalog_loaded = False
         self._endpoint_probe_running = False
         self._endpoint_selected_server_id: int | None = None
+        self._endpoint_selected_server_ids: set[int] = set()
+        self._endpoint_selection_user_managed = False
+        self._syncing_endpoint_selection = False
+        self._endpoint_header_sort_column: int | None = None
+        self._endpoint_header_sort_descending = False
+        self._syncing_endpoint_sort = False
         self._endpoint_probe_cache_path = endpoint_probe_cache_path(
             self.controller.store.path
         )
@@ -731,10 +875,27 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_services_page())
         self.stack.addWidget(self._build_countries_page())
         self.stack.addWidget(self._build_devices_page())
+        self.stack.addWidget(self._scrollable_page(self._build_connection_page()))
         self.stack.addWidget(self._build_endpoints_page())
         self.stack.addWidget(self._scrollable_page(self._build_astrill_page()))
         self.stack.addWidget(self._build_router_page())
         self.stack.addWidget(self._scrollable_page(self._build_settings_page()))
+
+    def _build_connection_page(self) -> QWidget:
+        self.connection_page = WindowsConnectionPage(
+            on_refresh=self._refresh_connection_page,
+            on_save=self._save_connection_page,
+            on_connect=self._connect_connection_page,
+            on_apply_reconnect=self._apply_connection_page,
+            on_disconnect=self._disconnect_connection_page,
+            on_dirty_changed=self._connection_draft_dirty_changed,
+        )
+        return self.connection_page
+
+    def _connection_draft_dirty_changed(self, _dirty: bool) -> None:
+        self._sync_cross_editor_guards()
+        self._sync_endpoint_connection_controls()
+        self._sync_endpoint_action_ui()
 
     @staticmethod
     def _scrollable_page(page: QWidget) -> QScrollArea:
@@ -758,7 +919,7 @@ class MainWindow(QMainWindow):
             ("controller", "Controller"),
             ("tunnel", "Astrill tunnel"),
             ("endpoint", "Active endpoint"),
-            ("rules", "Enabled policies"),
+            ("rules", "Local / applied policies"),
         ):
             card = QFrame()
             card.setObjectName(f"metric_{key}")
@@ -779,7 +940,15 @@ class MainWindow(QMainWindow):
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Traffic policies"))
         toolbar.addStretch(1)
-        add = QPushButton("Add")
+        add_service = QPushButton("Add service…")
+        add_service.setObjectName("primary")
+        add_service.setToolTip(
+            "Open the service catalog, where provider-country filters and "
+            "batch selection are available."
+        )
+        add_service.clicked.connect(self._show_services_for_policy)
+        toolbar.addWidget(add_service)
+        add = QPushButton("Add custom…")
         add.clicked.connect(self._add_policy)
         toolbar.addWidget(add)
         edit = QPushButton("Edit")
@@ -793,6 +962,18 @@ class MainWindow(QMainWindow):
         delete.clicked.connect(self._delete_policy)
         toolbar.addWidget(delete)
         layout.addLayout(toolbar)
+
+        self.policy_empty_note = QLabel(
+            "No local policies are saved yet. Select services, choose a route, "
+            "then use Add to Policies. Apply policies is a separate router step."
+        )
+        self.policy_empty_note.setWordWrap(True)
+        self.policy_empty_note.setProperty("class", "muted")
+        layout.addWidget(self.policy_empty_note)
+        self.policy_sync_state = QLabel("")
+        self.policy_sync_state.setWordWrap(True)
+        self.policy_sync_state.setProperty("class", "muted")
+        layout.addWidget(self.policy_sync_state)
 
         self.policy_tree = QTreeWidget()
         self.policy_tree.setHeaderLabels(
@@ -829,12 +1010,95 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self.service_count)
         layout.addLayout(search_row)
 
-        self.service_tree = QTreeWidget()
+        filter_row = QHBoxLayout()
+        self.service_category_filter = QComboBox()
+        self.service_category_filter.setToolTip("Filter by service category")
+        self.service_category_filter.addItem("All categories", "all")
+        for category in sorted(
+            {service.category for service in self.controller.catalog.services},
+            key=str.casefold,
+        ):
+            self.service_category_filter.addItem(category, category)
+        self.service_category_filter.currentIndexChanged.connect(self._render_services)
+        filter_row.addWidget(self.service_category_filter)
+
+        self.service_profile_filter = QComboBox()
+        self.service_profile_filter.setToolTip("Filter by profile type")
+        self.service_profile_filter.addItem("All profiles", "all")
+        profile_types = sorted(
+            {service.profile_type for service in self.controller.catalog.services},
+            key=str.casefold,
+        )
+        for profile_type in profile_types:
+            label = {
+                "app": "Apps",
+                "company": "Companies",
+                "website": "Websites",
+            }.get(profile_type, profile_type.replace("-", " ").title())
+            self.service_profile_filter.addItem(label, profile_type)
+        self.service_profile_filter.currentIndexChanged.connect(self._render_services)
+        filter_row.addWidget(self.service_profile_filter)
+
+        self.service_country_filter = QComboBox()
+        self.service_country_filter.setToolTip("Filter by provider country")
+        self.service_country_filter.addItem("All countries", "all")
+        for country in sorted(
+            {service.provider_country for service in self.controller.catalog.services},
+            key=str.casefold,
+        ):
+            self.service_country_filter.addItem(country, country)
+        self.service_country_filter.currentIndexChanged.connect(self._render_services)
+        filter_row.addWidget(self.service_country_filter)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
+
+        batch = QHBoxLayout()
+        self.service_select_visible = QCheckBox("Select visible")
+        self.service_select_visible.setTristate(True)
+        self.service_select_visible.setToolTip(
+            "Select every service matching the current search and filters"
+        )
+        self.service_select_visible.checkStateChanged.connect(
+            self._toggle_visible_service_selection
+        )
+        batch.addWidget(self.service_select_visible)
+        self.service_clear_selection_button = QPushButton("Clear selection")
+        self.service_clear_selection_button.clicked.connect(
+            self._clear_service_selection
+        )
+        batch.addWidget(self.service_clear_selection_button)
+        self.service_selection_count = QLabel("0 services selected")
+        self.service_selection_count.setProperty("class", "muted")
+        batch.addWidget(self.service_selection_count)
+        batch.addStretch(1)
+        batch.addWidget(QLabel("Route:"))
+        self.service_route_mode = QComboBox()
+        self.service_route_mode.addItem("Suggested", ServiceRouteMode.SUGGESTED)
+        self.service_route_mode.addItem("Direct", ServiceRouteMode.DIRECT)
+        self.service_route_mode.addItem("Astrill", ServiceRouteMode.VPN)
+        batch.addWidget(self.service_route_mode)
+        self.service_add_selected_button = QPushButton("Add to Policies")
+        self.service_add_selected_button.setObjectName("primary")
+        self.service_add_selected_button.setToolTip(
+            "Save selected service policies locally; Apply policies writes them "
+            "to the router"
+        )
+        self.service_add_selected_button.clicked.connect(
+            lambda: self._add_services(
+                ServiceRouteMode(str(self.service_route_mode.currentData()))
+            )
+        )
+        batch.addWidget(self.service_add_selected_button)
+        layout.addLayout(batch)
+
+        self.service_tree = ServiceTreeWidget()
         self.service_tree.setHeaderLabels(
             [
+                "Select",
                 "Service",
                 "Company",
                 "Category",
+                "Profile",
                 "Provider country",
                 "Suggested",
                 "Policy",
@@ -845,29 +1109,21 @@ class MainWindow(QMainWindow):
         self.service_tree.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self.service_tree.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.service_tree.itemChanged.connect(self._service_item_changed)
+        self.service_tree.itemSelectionChanged.connect(
+            self._service_row_selection_changed
+        )
+        self.service_tree.selectCellClicked.connect(self._service_select_cell_clicked)
         header = self.service_tree.header()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for column in range(2, 6):
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        for column in range(3, 8):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.service_tree, 1)
-
-        actions = QHBoxLayout()
-        actions.addWidget(QLabel("Add or update selected:"))
-        for label, mode in (
-            ("Suggested", ServiceRouteMode.SUGGESTED),
-            ("Direct", ServiceRouteMode.DIRECT),
-            ("Astrill", ServiceRouteMode.VPN),
-        ):
-            button = QPushButton(label)
-            button.clicked.connect(
-                lambda _checked=False, selected_mode=mode: self._add_services(
-                    selected_mode
-                )
-            )
-            actions.addWidget(button)
-        actions.addStretch(1)
-        layout.addLayout(actions)
         return page
 
     def _build_countries_page(self) -> QWidget:
@@ -882,9 +1138,17 @@ class MainWindow(QMainWindow):
         note.setWordWrap(True)
         note.setProperty("class", "muted")
         layout.addWidget(note)
+        self.country_banner = QLabel("")
+        self.country_banner.setWordWrap(True)
+        self.country_banner.setObjectName("accessBanner")
+        self.country_banner.hide()
+        layout.addWidget(self.country_banner)
+        self.country_result_count = QLabel("")
+        self.country_result_count.setProperty("class", "muted")
+        layout.addWidget(self.country_result_count)
         self.country_tree = QTreeWidget()
         self.country_tree.setHeaderLabels(
-            ["Region", "Kind", "Enabled policies", "Known endpoints", "Active"]
+            ["Region", "Kind", "Policy summary", "Known endpoints", "Active"]
         )
         self.country_tree.setAlternatingRowColors(True)
         self.country_tree.setRootIsDecorated(False)
@@ -895,6 +1159,14 @@ class MainWindow(QMainWindow):
             self.country_tree.header().setSectionResizeMode(
                 column, QHeaderView.ResizeMode.ResizeToContents
             )
+        self.country_tree.itemDoubleClicked.connect(
+            lambda item, _column: self._open_region_endpoints(
+                str(item.data(0, Qt.ItemDataRole.UserRole))
+            )
+        )
+        self.country_tree.setToolTip(
+            "Double-click an Astrill region to open its endpoints."
+        )
         layout.addWidget(self.country_tree)
         return page
 
@@ -951,39 +1223,54 @@ class MainWindow(QMainWindow):
         scope.setWordWrap(True)
         layout.addWidget(scope)
 
-        row = QHBoxLayout()
+        search_row = QHBoxLayout()
         self.endpoint_search = QLineEdit()
-        self.endpoint_search.setPlaceholderText("Search Astrill endpoints")
+        self.endpoint_search.setPlaceholderText(
+            "Search endpoints by name, country, region, or server ID"
+        )
         self.endpoint_search.textChanged.connect(self._render_endpoints)
-        row.addWidget(self.endpoint_search, 1)
-        row.addWidget(QLabel("Protocol"))
-        self.protocol = QComboBox()
-        self.protocol.addItems(list(ASTRILL_PROTOCOL_NAMES))
-        self.protocol.activated.connect(self._endpoint_protocol_selected)
-        self.protocol.currentIndexChanged.connect(self._endpoint_protocol_changed)
-        row.addWidget(self.protocol)
-        row.addWidget(QLabel("Sort"))
-        self.endpoint_sort = QComboBox()
-        self.endpoint_sort.addItem("Default order", "default")
-        self.endpoint_sort.addItem("Region (A–Z)", "region")
-        self.endpoint_sort.addItem("PC latency (fastest)", "latency")
-        self.endpoint_sort.setToolTip(
-            "Sort locally. Default restores Astrill's catalog order."
-        )
-        self.endpoint_sort.currentIndexChanged.connect(
-            lambda _index: self._render_endpoints()
-        )
-        row.addWidget(self.endpoint_sort)
+        search_row.addWidget(self.endpoint_search, 1)
         self.load_endpoints_button = QPushButton("Load endpoints")
         self.load_endpoints_button.clicked.connect(self._load_endpoints)
-        row.addWidget(self.load_endpoints_button)
+        search_row.addWidget(self.load_endpoints_button)
         self.connect_endpoint_button = QPushButton(
             "Connect router to selected endpoint"
         )
         self.connect_endpoint_button.setObjectName("primary")
         self.connect_endpoint_button.clicked.connect(self._connect_endpoint)
-        row.addWidget(self.connect_endpoint_button)
-        layout.addLayout(row)
+        search_row.addWidget(self.connect_endpoint_button)
+        layout.addLayout(search_row)
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Country"))
+        self.endpoint_country_filter = QComboBox()
+        self.endpoint_country_filter.setToolTip(
+            "Show endpoints from one exact country; selections hidden by the "
+            "filter stay selected."
+        )
+        self.endpoint_country_filter.addItem("All countries", "")
+        self.endpoint_country_filter.setEnabled(False)
+        self.endpoint_country_filter.currentIndexChanged.connect(self._render_endpoints)
+        filter_row.addWidget(self.endpoint_country_filter)
+        filter_row.addWidget(QLabel("Protocol"))
+        self.protocol = QComboBox()
+        self.protocol.addItems(list(ASTRILL_PROTOCOL_NAMES))
+        self.protocol.activated.connect(self._endpoint_protocol_selected)
+        self.protocol.currentIndexChanged.connect(self._endpoint_protocol_changed)
+        filter_row.addWidget(self.protocol)
+        filter_row.addWidget(QLabel("Sort"))
+        self.endpoint_sort = QComboBox()
+        self.endpoint_sort.addItem("Default order", "default")
+        self.endpoint_sort.addItem("Region (A–Z)", "region")
+        self.endpoint_sort.addItem("PC latency (fastest)", "latency")
+        self.endpoint_sort.addItem("Header: Endpoint (A–Z)", "header")
+        self.endpoint_sort.setToolTip(
+            "Choose a preset or click any table header to order that column."
+        )
+        self.endpoint_sort.currentIndexChanged.connect(self._endpoint_sort_changed)
+        filter_row.addWidget(self.endpoint_sort)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
 
         favorite_card = QFrame()
         favorite_card.setObjectName("favoriteCard")
@@ -1001,7 +1288,38 @@ class MainWindow(QMainWindow):
         self.endpoint_favorite_status.setObjectName("favoriteStatus")
         self.endpoint_favorite_status.setWordWrap(True)
         favorite_text.addWidget(self.endpoint_favorite_status)
+        self.endpoint_selection_status = QLabel(
+            "No endpoints selected · use row checkboxes, Ctrl, or Shift."
+        )
+        self.endpoint_selection_status.setObjectName("favoriteStatus")
+        self.endpoint_selection_status.setWordWrap(True)
+        favorite_text.addWidget(self.endpoint_selection_status)
         favorite_layout.addLayout(favorite_text, 1)
+
+        favorite_controls = QVBoxLayout()
+        favorite_controls.setSpacing(7)
+        selection_controls = QHBoxLayout()
+        selection_controls.setSpacing(7)
+        self.endpoint_select_visible = QCheckBox("Select visible")
+        self.endpoint_select_visible.setTristate(True)
+        self.endpoint_select_visible.setToolTip(
+            "Select every endpoint matching the current search and filters. "
+            "Hidden selections are preserved."
+        )
+        self.endpoint_select_visible.checkStateChanged.connect(
+            self._toggle_visible_endpoint_selection
+        )
+        selection_controls.addWidget(self.endpoint_select_visible)
+        self.endpoint_clear_selection_button = QPushButton("Clear selection")
+        self.endpoint_clear_selection_button.clicked.connect(
+            self._clear_endpoint_selection
+        )
+        selection_controls.addWidget(self.endpoint_clear_selection_button)
+        selection_controls.addStretch(1)
+        favorite_controls.addLayout(selection_controls)
+
+        favorite_actions = QHBoxLayout()
+        favorite_actions.setSpacing(7)
         self.endpoint_favorite_sync_button = QPushButton("Sync favorites")
         self.endpoint_favorite_sync_button.setToolTip(
             "Read Astrill's current favorites from DD-WRT now. "
@@ -1011,13 +1329,20 @@ class MainWindow(QMainWindow):
             self._sync_endpoint_favorites
         )
         self.endpoint_favorite_sync_button.setText("Sync from router")
-        favorite_layout.addWidget(self.endpoint_favorite_sync_button)
-        self.endpoint_favorite_button = QPushButton("Add selected favorite")
+        favorite_actions.addWidget(self.endpoint_favorite_sync_button)
+        self.endpoint_favorite_button = QPushButton("Favorite selected")
         self.endpoint_favorite_button.setObjectName("favoriteAction")
         self.endpoint_favorite_button.clicked.connect(
-            self._toggle_selected_endpoint_favorite
+            lambda _checked=False: self._set_selected_endpoint_favorites(True)
         )
-        favorite_layout.addWidget(self.endpoint_favorite_button)
+        favorite_actions.addWidget(self.endpoint_favorite_button)
+        self.endpoint_unfavorite_button = QPushButton("Unfavorite selected")
+        self.endpoint_unfavorite_button.clicked.connect(
+            lambda _checked=False: self._set_selected_endpoint_favorites(False)
+        )
+        favorite_actions.addWidget(self.endpoint_unfavorite_button)
+        favorite_controls.addLayout(favorite_actions)
+        favorite_layout.addLayout(favorite_controls)
         layout.addWidget(favorite_card)
 
         behavior = QGroupBox("Router connection behavior")
@@ -1054,9 +1379,8 @@ class MainWindow(QMainWindow):
         latency_title.setObjectName("latencyTitle")
         latency_layout.addWidget(latency_title)
         latency_note = QLabel(
-            "Runs one TCP connection check from this Windows PC over its current "
-            "network path. It does not send commands to DD-WRT, switch the router "
-            "endpoint, or measure VPN download speed."
+            "Manual TCP connect timing from this PC. No router command, endpoint "
+            "switch, or bandwidth test."
         )
         latency_note.setObjectName("latencyNote")
         latency_note.setWordWrap(True)
@@ -1064,7 +1388,7 @@ class MainWindow(QMainWindow):
         latency_controls = QHBoxLayout()
         latency_controls.addWidget(QLabel("Scope"))
         self.endpoint_probe_scope = QComboBox()
-        self.endpoint_probe_scope.addItem("Selected endpoint", "selected")
+        self.endpoint_probe_scope.addItem("Selected endpoints", "selected")
         self.endpoint_probe_scope.addItem("Visible endpoints", "visible")
         self.endpoint_probe_scope.addItem("All loaded endpoints", "all")
         self.endpoint_probe_scope.currentIndexChanged.connect(
@@ -1104,9 +1428,10 @@ class MainWindow(QMainWindow):
         self.endpoint_action_status.setWordWrap(True)
         layout.addWidget(self.endpoint_action_status)
 
-        self.endpoint_tree = QTreeWidget()
+        self.endpoint_tree = EndpointTreeWidget()
         self.endpoint_tree.setHeaderLabels(
             [
+                "Select",
                 "Endpoint",
                 "Region",
                 "Favorite",
@@ -1121,15 +1446,28 @@ class MainWindow(QMainWindow):
         self.endpoint_tree.setAlternatingRowColors(True)
         self.endpoint_tree.setRootIsDecorated(False)
         self.endpoint_tree.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
+            QAbstractItemView.SelectionMode.ExtendedSelection
         )
-        self.endpoint_tree.header().setSectionResizeMode(
+        self.endpoint_tree.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        header = self.endpoint_tree.header()
+        header.setSectionsClickable(True)
+        header.setSortIndicatorShown(False)
+        header.sectionClicked.connect(self._endpoint_header_clicked)
+        header.setSectionResizeMode(
             ENDPOINT_NAME_COLUMN, QHeaderView.ResizeMode.Stretch
         )
-        for column in range(1, ENDPOINT_COLUMN_COUNT):
-            self.endpoint_tree.header().setSectionResizeMode(
-                column, QHeaderView.ResizeMode.ResizeToContents
-            )
+        for column in range(ENDPOINT_COLUMN_COUNT):
+            if column == ENDPOINT_NAME_COLUMN:
+                continue
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.endpoint_tree.setSortingEnabled(False)
+        self.endpoint_tree.selectCellClicked.connect(self._endpoint_select_cell_clicked)
+        self.endpoint_tree.itemChanged.connect(self._endpoint_item_changed)
+        self.endpoint_tree.itemSelectionChanged.connect(
+            self._endpoint_selection_set_changed
+        )
         self.endpoint_tree.itemDoubleClicked.connect(self._endpoint_double_clicked)
         self.endpoint_tree.currentItemChanged.connect(self._endpoint_selection_changed)
         layout.addWidget(self.endpoint_tree)
@@ -1141,10 +1479,31 @@ class MainWindow(QMainWindow):
         self.native_page = WindowsNativeSettingsPage(
             on_refresh=self._load_native_settings,
             on_save=self._save_native_settings,
-            on_dirty_changed=lambda _dirty: self._sync_endpoint_action_ui(),
+            on_dirty_changed=self._native_draft_dirty_changed,
         )
         self.save_native_button = self.native_page.save_button
         return self.native_page
+
+    def _native_draft_dirty_changed(self, _dirty: bool) -> None:
+        self._sync_cross_editor_guards()
+        self._sync_endpoint_connection_controls()
+        self._sync_endpoint_action_ui()
+
+    def _sync_cross_editor_guards(self) -> None:
+        if not hasattr(self, "native_page") or not hasattr(self, "connection_page"):
+            return
+        self.connection_page.set_external_lock(
+            "Save or reload the unsaved Astrill-page draft before editing "
+            "connection settings."
+            if self.native_page.dirty
+            else ""
+        )
+        self.native_page.set_external_lock(
+            "Save or reload the unsaved Connection-page draft before editing "
+            "the overlapping native settings."
+            if self.connection_page.dirty
+            else ""
+        )
 
     def _build_router_page(self) -> QWidget:
         page = QWidget()
@@ -1295,6 +1654,18 @@ class MainWindow(QMainWindow):
         self.page_subtitle.setText(subtitle)
         if title == "Devices" and not self._clients_loaded:
             self._load_devices(quiet=True)
+        if page_id == "connection":
+            if (
+                self.native_settings is not None
+                and self.controller.server_catalog.servers
+            ):
+                self.connection_page.sync(
+                    self.native_settings,
+                    self.controller.server_catalog.servers,
+                    self.router_status,
+                )
+            elif self.busy_count == 0:
+                self._refresh_connection_page()
         if title == "Endpoints":
             self._sync_endpoint_action_ui()
             if not self._endpoint_catalog_loaded:
@@ -1306,6 +1677,14 @@ class MainWindow(QMainWindow):
                 self._load_devices(quiet=True)
             if self.native_settings is None:
                 self._load_native_settings()
+
+    @classmethod
+    def _page_index(cls, page_id: str) -> int:
+        return next(
+            index
+            for index, (candidate, _title, _subtitle) in enumerate(cls.PAGE_DEFINITIONS)
+            if candidate == page_id
+        )
 
     def _run_task(
         self,
@@ -1357,10 +1736,16 @@ class MainWindow(QMainWindow):
             self.endpoint_favorite_status.setText(
                 f"Favorite sync failed · existing GUI state preserved: {message}"
             )
-        elif label.startswith(("Adding router favorite", "Removing router favorite")):
+        elif label.startswith(("Adding ", "Removing ")) and "router favorite" in label:
             self.endpoint_favorite_status.setText(
                 f"Favorite change failed · sync and retry: {message}"
             )
+        if "Astrill connection" in label or label in {
+            "Connecting Astrill",
+            "Reconnecting Astrill",
+            "Disconnecting Astrill",
+        }:
+            self.connection_page.set_action_status(message, level="error")
         if not quiet:
             QMessageBox.warning(self, label, message)
 
@@ -1400,8 +1785,59 @@ class MainWindow(QMainWindow):
             if not rule.enabled:
                 item.setForeground(0, QColor(COLORS["muted"]))
             self.policy_tree.addTopLevelItem(item)
-        enabled = sum(rule.enabled for rule in self.controller.store.rules)
-        self.metric_labels["rules"].setText(str(enabled))
+        self._update_policy_metric()
+        local_count = len(self.controller.store.rules)
+        router_count = self.router_status.get("rules_count")
+        if local_count:
+            self.policy_empty_note.hide()
+        else:
+            router_detail = (
+                ""
+                if router_count in (None, "")
+                else f" The last router refresh also reported {router_count} rules."
+            )
+            self.policy_empty_note.setText(
+                "No local policies are saved yet. Select services, choose a "
+                "route, then use Add to Policies. Apply policies is a separate "
+                f"router step.{router_detail}"
+            )
+            self.policy_empty_note.show()
+
+    def _update_policy_metric(self) -> None:
+        local_count = sum(rule.enabled for rule in self.controller.store.rules)
+        applied_value = self.router_status.get("origin_count")
+        applied_count = (
+            int(applied_value)
+            if isinstance(applied_value, int) and not isinstance(applied_value, bool)
+            else None
+        )
+        applied_text = "—" if applied_count is None else str(applied_count)
+        self.metric_labels["rules"].setText(f"{local_count} / {applied_text}")
+        self.metric_labels["rules"].setToolTip(
+            f"{local_count} enabled in the Windows config; "
+            + (
+                "router applied count has not been refreshed"
+                if applied_count is None
+                else f"{applied_count} origins reported by the router"
+            )
+        )
+        if applied_count is None:
+            self.policy_sync_state.setText(
+                "Local policies are shown below. Refresh the router to compare "
+                "the last applied count."
+            )
+            self.policy_sync_state.setStyleSheet("")
+        elif applied_count == local_count:
+            self.policy_sync_state.setText(
+                f"Local and router counts agree: {local_count} enabled."
+            )
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['green']};")
+        else:
+            self.policy_sync_state.setText(
+                f"{local_count} enabled locally; the router reports "
+                f"{applied_count} applied. Use Apply policies when ready."
+            )
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['orange']};")
 
     def _selected_rule(self) -> Rule | None:
         item = self.policy_tree.currentItem()
@@ -1428,6 +1864,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Could not add policy", str(exc))
             return
         self._render_after_policy_change()
+
+    def _show_services_for_policy(self) -> None:
+        self.navigation.setCurrentRow(self._page_index("services"))
+        self.service_search.setFocus()
 
     def _edit_policy(self) -> None:
         rule = self._selected_rule()
@@ -1485,68 +1925,217 @@ class MainWindow(QMainWindow):
         self._render_countries()
         self.statusBar().showMessage("Local policy saved. Apply when ready.", 5000)
 
+    def _filtered_services(self) -> list[Service]:
+        query = self.service_search.text().strip().casefold()
+        category = self.service_category_filter.currentData()
+        profile_type = self.service_profile_filter.currentData()
+        country = self.service_country_filter.currentData()
+        services = [
+            service
+            for service in self.controller.catalog.services
+            if (not query or query in service.search_text)
+            and (category == "all" or service.category == category)
+            and (profile_type == "all" or service.profile_type == profile_type)
+            and (country == "all" or service.provider_country == country)
+        ]
+        services.sort(key=lambda item: (item.company.casefold(), item.name.casefold()))
+        return services
+
     def _render_services(self) -> None:
         if not hasattr(self, "service_tree"):
             return
-        query = self.service_search.text().strip().casefold()
         existing = {
             rule.selector: rule
             for rule in self.controller.store.rules
             if rule.match_kind is MatchKind.SERVICE
         }
-        services = [
-            service
-            for service in self.controller.catalog.services
-            if not query or query in service.search_text
-        ]
-        services.sort(key=lambda item: (item.company.casefold(), item.name.casefold()))
-        self.service_tree.clear()
-        for service in services:
-            rule = existing.get(service.id)
-            item = QTreeWidgetItem(
-                [
-                    service.name,
-                    service.company,
-                    service.category,
-                    service.provider_country,
-                    (
-                        "Direct"
-                        if service.default_route is RouteTarget.DIRECT
-                        else "Astrill"
-                    ),
-                    (
-                        "None"
-                        if rule is None
-                        else (
+        services = self._filtered_services()
+        catalog_ids = {service.id for service in self.controller.catalog.services}
+        self._selected_service_ids.intersection_update(catalog_ids)
+        self._syncing_service_selection = True
+        try:
+            self.service_tree.clear()
+            for service in services:
+                rule = existing.get(service.id)
+                item = QTreeWidgetItem(
+                    [
+                        "",
+                        service.name,
+                        service.company,
+                        service.category,
+                        service.profile_type.replace("-", " ").title(),
+                        service.provider_country,
+                        (
                             "Direct"
-                            if rule.target is RouteTarget.DIRECT
-                            else f"Astrill · {self._region_name(rule.region)}"
-                        )
-                    ),
-                ]
-            )
-            item.setData(0, Qt.ItemDataRole.UserRole, service.id)
-            self.service_tree.addTopLevelItem(item)
+                            if service.default_route is RouteTarget.DIRECT
+                            else "Astrill"
+                        ),
+                        (
+                            "None"
+                            if rule is None
+                            else (
+                                "Direct"
+                                if rule.target is RouteTarget.DIRECT
+                                else f"Astrill · {self._region_name(rule.region)}"
+                            )
+                        ),
+                    ]
+                )
+                item.setFlags(
+                    item.flags()
+                    | Qt.ItemFlag.ItemIsUserCheckable
+                    | Qt.ItemFlag.ItemIsSelectable
+                )
+                item.setData(1, Qt.ItemDataRole.UserRole, service.id)
+                selected = service.id in self._selected_service_ids
+                item.setCheckState(
+                    0,
+                    Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked,
+                )
+                self.service_tree.addTopLevelItem(item)
+                item.setSelected(selected)
+        finally:
+            self._syncing_service_selection = False
         self.service_count.setText(
             f"{len(services)} of {len(self.controller.catalog.services)}"
         )
+        self._sync_service_selection_ui(services)
 
-    def _add_services(self, mode: ServiceRouteMode) -> None:
-        selected = [
-            str(item.data(0, Qt.ItemDataRole.UserRole))
+    def _visible_service_ids(self) -> set[str]:
+        return {
+            str(
+                self.service_tree.topLevelItem(index).data(
+                    1,
+                    Qt.ItemDataRole.UserRole,
+                )
+            )
+            for index in range(self.service_tree.topLevelItemCount())
+        }
+
+    def _service_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if self._syncing_service_selection or column != 0:
+            return
+        service_id = str(item.data(1, Qt.ItemDataRole.UserRole))
+        self._set_service_selected(
+            service_id,
+            item.checkState(0) == Qt.CheckState.Checked,
+        )
+
+    def _service_select_cell_clicked(self, item: QTreeWidgetItem) -> None:
+        service_id = str(item.data(1, Qt.ItemDataRole.UserRole))
+        self._set_service_selected(
+            service_id,
+            service_id not in self._selected_service_ids,
+        )
+
+    def _service_row_selection_changed(self) -> None:
+        if self._syncing_service_selection:
+            return
+        visible_ids = self._visible_service_ids()
+        selected_visible = {
+            str(item.data(1, Qt.ItemDataRole.UserRole))
             for item in self.service_tree.selectedItems()
+        }
+        self._selected_service_ids.difference_update(visible_ids)
+        self._selected_service_ids.update(selected_visible)
+        self._sync_service_selection_ui()
+
+    def _set_service_selected(self, service_id: str, selected: bool) -> None:
+        if selected:
+            self._selected_service_ids.add(service_id)
+        else:
+            self._selected_service_ids.discard(service_id)
+        self._sync_service_selection_ui()
+
+    def _toggle_visible_service_selection(self, state: Qt.CheckState) -> None:
+        if self._syncing_service_selection:
+            return
+        visible_ids = self._visible_service_ids()
+        if state == Qt.CheckState.Checked:
+            self._selected_service_ids.update(visible_ids)
+        else:
+            self._selected_service_ids.difference_update(visible_ids)
+        self._sync_service_selection_ui()
+
+    def _clear_service_selection(self) -> None:
+        self._selected_service_ids.clear()
+        self._sync_service_selection_ui()
+
+    def _sync_service_selection_ui(
+        self,
+        visible_services: list[Service] | None = None,
+    ) -> None:
+        if not hasattr(self, "service_select_visible"):
+            return
+        visible_ids = (
+            {service.id for service in visible_services}
+            if visible_services is not None
+            else self._visible_service_ids()
+        )
+        selected_visible = visible_ids & self._selected_service_ids
+        all_visible_selected = bool(visible_ids) and selected_visible == visible_ids
+        partially_selected = bool(selected_visible) and not all_visible_selected
+
+        self._syncing_service_selection = True
+        try:
+            for index in range(self.service_tree.topLevelItemCount()):
+                item = self.service_tree.topLevelItem(index)
+                service_id = str(item.data(1, Qt.ItemDataRole.UserRole))
+                selected = service_id in self._selected_service_ids
+                item.setCheckState(
+                    0,
+                    Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked,
+                )
+                item.setSelected(selected)
+            if partially_selected:
+                self.service_select_visible.setCheckState(
+                    Qt.CheckState.PartiallyChecked
+                )
+            elif all_visible_selected:
+                self.service_select_visible.setCheckState(Qt.CheckState.Checked)
+            else:
+                self.service_select_visible.setCheckState(Qt.CheckState.Unchecked)
+        finally:
+            self._syncing_service_selection = False
+
+        count = len(self._selected_service_ids)
+        noun = "service" if count == 1 else "services"
+        hidden_count = count - len(selected_visible)
+        hidden = f" · {hidden_count} hidden by filters" if hidden_count else ""
+        self.service_selection_count.setText(f"{count} {noun} selected{hidden}")
+        self.service_clear_selection_button.setEnabled(count > 0)
+        self.service_add_selected_button.setEnabled(count > 0)
+
+    def _add_services(self, mode: ServiceRouteMode | str) -> None:
+        try:
+            route_mode = ServiceRouteMode(mode)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Could not update services", str(exc))
+            return
+        selected = [
+            service.id
+            for service in self.controller.catalog.services
+            if service.id in self._selected_service_ids
         ]
         if not selected:
             self._select_something("Select one or more service rows first.")
             return
         try:
-            summary = self.controller.add_services(selected, mode)
-        except ValueError as exc:
+            summary = self.controller.add_services(selected, route_mode)
+        except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Could not update services", str(exc))
             return
+        self._selected_service_ids.clear()
         self._render_after_policy_change()
+        if summary.added == 0 and summary.updated == 0:
+            detail = "Selected policies already use this route."
+        else:
+            detail = (
+                f"Saved locally: {summary.added} added, "
+                f"{summary.updated} updated. Apply policies when ready."
+            )
         self.statusBar().showMessage(
-            f"Service policies: {summary.added} added, {summary.updated} updated",
+            detail,
             6000,
         )
 
@@ -1554,16 +2143,61 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "country_tree"):
             return
         enabled = [rule for rule in self.controller.store.rules if rule.enabled]
+        requested = {
+            rule.region
+            for rule in enabled
+            if rule.target is RouteTarget.VPN
+            and rule.region not in {"direct", "active-astrill"}
+        }
         groups = self.controller.server_catalog.groups
-        active_group = ""
+        active_group: str | None = None
         current_id = int(self.router_status.get("astrill_server_id", 0) or 0)
         for region_id, servers in groups.items():
             if any(server.id == current_id for server in servers):
                 active_group = region_id
                 break
+        tunnel_connected = self.router_status.get("vpn_state") == "up"
+        if not tunnel_connected:
+            active_group = None
+        region_names = self.controller.catalog.regions_by_id
+        if len(requested) > 1:
+            names = ", ".join(
+                region_names[region_id].name
+                for region_id in sorted(requested)
+                if region_id in region_names
+            )
+            self.country_banner.setText(
+                f"Country conflict: {names} cannot be active on one shared tunnel."
+            )
+            self.country_banner.show()
+        elif requested and active_group not in requested:
+            requested_id = next(iter(requested))
+            requested_name = region_names[requested_id].name
+            active_name = (
+                region_names[active_group].name
+                if active_group in region_names
+                else "no connected endpoint"
+            )
+            self.country_banner.setText(
+                f"Policies request {requested_name}; active region is {active_name}."
+            )
+            self.country_banner.show()
+        else:
+            self.country_banner.hide()
+
         self.country_tree.clear()
+        assigned_count = 0
         for region in self.controller.catalog.regions:
-            policies = sum(rule.region == region.id for rule in enabled)
+            policies = [rule for rule in enabled if rule.region == region.id]
+            assigned_count += len(policies)
+            policy_names = ", ".join(rule.name for rule in policies[:3])
+            if len(policies) > 3:
+                policy_names += f", +{len(policies) - 3} more"
+            policy_summary = (
+                "No enabled policies"
+                if not policies
+                else f"{len(policies)} · {policy_names}"
+            )
             endpoints = (
                 "WAN"
                 if region.kind == "direct"
@@ -1574,24 +2208,34 @@ class MainWindow(QMainWindow):
                 )
             )
             active = (
-                "Active"
-                if (
-                    region.id == active_group
-                    and self.router_status.get("vpn_state") == "up"
-                )
-                else ""
+                "Active" if (region.id == active_group and tunnel_connected) else ""
             )
-            self.country_tree.addTopLevelItem(
-                QTreeWidgetItem(
-                    [
-                        region.name,
-                        region.kind.title(),
-                        str(policies),
-                        endpoints,
-                        active,
-                    ]
-                )
+            item = QTreeWidgetItem(
+                [
+                    region.name,
+                    region.kind.title(),
+                    policy_summary,
+                    endpoints,
+                    active,
+                ]
             )
+            item.setData(0, Qt.ItemDataRole.UserRole, region.id)
+            self.country_tree.addTopLevelItem(item)
+        noun = "policy" if assigned_count == 1 else "policies"
+        self.country_result_count.setText(
+            f"{assigned_count} enabled {noun} across one shared Astrill tunnel · "
+            "double-click a region to inspect endpoints."
+        )
+
+    def _open_region_endpoints(self, region_id: str) -> None:
+        region = self.controller.catalog.regions_by_id.get(region_id)
+        if region is None or region.kind == "direct":
+            return
+        self.endpoint_country_filter.setCurrentIndex(0)
+        self.endpoint_search.setText(
+            "" if region_id == "active-astrill" else region.name
+        )
+        self.navigation.setCurrentRow(self._page_index("endpoints"))
 
     def _load_devices(self, *, quiet: bool = False) -> None:
         if self._clients_loading:
@@ -1677,16 +2321,50 @@ class MainWindow(QMainWindow):
         self._endpoint_catalog_loading = False
 
     def _endpoints_loaded(self, result: object) -> None:
-        _catalog = result
+        if not isinstance(result, ServerCatalog):
+            return
+        self._apply_server_catalog(result)
+        QTimer.singleShot(0, lambda: self._sync_endpoint_favorites(quiet=True))
+
+    def _apply_server_catalog(self, catalog: ServerCatalog) -> None:
+        servers = catalog.servers
         self._endpoint_catalog_loaded = True
         self.load_endpoints_button.setText("Reload endpoints")
-        available_ids = {server.id for server in self.controller.server_catalog.servers}
+        available_ids = {server.id for server in servers}
         if self._endpoint_selected_server_id not in available_ids:
             self._endpoint_selected_server_id = None
+        self._endpoint_selected_server_ids.intersection_update(available_ids)
+        self._refresh_endpoint_country_filter()
         self._render_endpoints()
         self._render_countries()
         self._update_status_metrics()
-        QTimer.singleShot(0, lambda: self._sync_endpoint_favorites(quiet=True))
+        if self.native_settings is not None:
+            self.connection_page.sync(
+                self.native_settings,
+                servers,
+                self.router_status,
+            )
+
+    def _refresh_endpoint_country_filter(self) -> None:
+        selected = str(self.endpoint_country_filter.currentData() or "")
+        countries = sorted(
+            {
+                server.country_name()
+                for server in self.controller.server_catalog.servers
+            },
+            key=str.casefold,
+        )
+        self.endpoint_country_filter.blockSignals(True)
+        try:
+            self.endpoint_country_filter.clear()
+            self.endpoint_country_filter.addItem("All countries", "")
+            for country in countries:
+                self.endpoint_country_filter.addItem(country, country)
+            index = self.endpoint_country_filter.findData(selected)
+            self.endpoint_country_filter.setCurrentIndex(max(index, 0))
+            self.endpoint_country_filter.setEnabled(bool(countries))
+        finally:
+            self.endpoint_country_filter.blockSignals(False)
 
     def _endpoint_protocol_selected(self, _index: int) -> None:
         self._endpoint_protocol_user_selected = True
@@ -1695,23 +2373,310 @@ class MainWindow(QMainWindow):
     def _endpoint_protocol_changed(self, _index: int) -> None:
         self._render_endpoints()
 
+    def _endpoint_sort_changed(self, _index: int) -> None:
+        if self._syncing_endpoint_sort:
+            return
+        mode = str(self.endpoint_sort.currentData())
+        if mode == "header" and self._endpoint_header_sort_column is None:
+            self._endpoint_header_sort_column = ENDPOINT_NAME_COLUMN
+            self._endpoint_header_sort_descending = False
+        self._sync_endpoint_sort_indicator()
+        self._render_endpoints()
+
+    def _endpoint_header_clicked(self, column: int) -> None:
+        if column not in ENDPOINT_HEADER_SORT_FIELDS:
+            return
+        if (
+            self.endpoint_sort.currentData() == "header"
+            and self._endpoint_header_sort_column == column
+        ):
+            self._endpoint_header_sort_descending = (
+                not self._endpoint_header_sort_descending
+            )
+        else:
+            self._endpoint_header_sort_column = column
+            self._endpoint_header_sort_descending = ENDPOINT_HEADER_DEFAULT_DESCENDING[
+                column
+            ]
+        label = self.endpoint_tree.headerItem().text(column)
+        direction = (
+            "high–low"
+            if self._endpoint_header_sort_descending
+            and column
+            in {
+                ENDPOINT_SERVER_ID_COLUMN,
+                ENDPOINT_NODES_COLUMN,
+                ENDPOINT_LATENCY_COLUMN,
+                ENDPOINT_TESTED_COLUMN,
+            }
+            else "low–high"
+            if not self._endpoint_header_sort_descending
+            and column
+            in {
+                ENDPOINT_SERVER_ID_COLUMN,
+                ENDPOINT_NODES_COLUMN,
+                ENDPOINT_LATENCY_COLUMN,
+                ENDPOINT_TESTED_COLUMN,
+            }
+            else "descending"
+            if self._endpoint_header_sort_descending
+            else "ascending"
+        )
+        header_index = self.endpoint_sort.findData("header")
+        self._syncing_endpoint_sort = True
+        try:
+            self.endpoint_sort.setItemText(
+                header_index,
+                f"Header: {label} ({direction})",
+            )
+            self.endpoint_sort.setCurrentIndex(header_index)
+        finally:
+            self._syncing_endpoint_sort = False
+        self._sync_endpoint_sort_indicator()
+        self._render_endpoints()
+
+    def _sync_endpoint_sort_indicator(self) -> None:
+        if not hasattr(self, "endpoint_tree"):
+            return
+        mode = str(self.endpoint_sort.currentData())
+        header = self.endpoint_tree.header()
+        if mode == "default":
+            header.setSortIndicatorShown(False)
+            return
+        if mode == "region":
+            column = ENDPOINT_REGION_COLUMN
+            descending = False
+        elif mode == "latency":
+            column = ENDPOINT_LATENCY_COLUMN
+            descending = False
+        else:
+            column = self._endpoint_header_sort_column
+            descending = self._endpoint_header_sort_descending
+        if column is None:
+            header.setSortIndicatorShown(False)
+            return
+        header.setSortIndicator(
+            column,
+            (
+                Qt.SortOrder.DescendingOrder
+                if descending
+                else Qt.SortOrder.AscendingOrder
+            ),
+        )
+        header.setSortIndicatorShown(True)
+
     def _endpoint_selection_changed(
         self,
         current: QTreeWidgetItem | None,
         _previous: QTreeWidgetItem | None,
     ) -> None:
         if current is not None:
-            value = current.data(0, Qt.ItemDataRole.UserRole)
+            value = current.data(ENDPOINT_NAME_COLUMN, Qt.ItemDataRole.UserRole)
             if isinstance(value, AstrillServer):
                 self._endpoint_selected_server_id = value.id
         self._sync_endpoint_action_ui()
+
+    def _endpoint_selection_set_changed(self) -> None:
+        if self._syncing_endpoint_selection:
+            return
+        self._endpoint_selection_user_managed = True
+        visible_ids = {server.id for server in self._visible_endpoint_servers()}
+        selected_visible = {
+            server.id
+            for item in self.endpoint_tree.selectedItems()
+            if (
+                server := item.data(
+                    ENDPOINT_NAME_COLUMN,
+                    Qt.ItemDataRole.UserRole,
+                )
+            )
+            and isinstance(server, AstrillServer)
+        }
+        self._endpoint_selected_server_ids.difference_update(visible_ids)
+        self._endpoint_selected_server_ids.update(selected_visible)
+        self._sync_endpoint_selection_ui()
+        if (
+            self.endpoint_sort.currentData() == "header"
+            and self._endpoint_header_sort_column == ENDPOINT_SELECT_COLUMN
+        ):
+            self._render_endpoints()
+            return
+        self._sync_endpoint_action_ui()
+
+    def _endpoint_item_changed(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+    ) -> None:
+        if self._syncing_endpoint_selection or column != ENDPOINT_SELECT_COLUMN:
+            return
+        server = item.data(ENDPOINT_NAME_COLUMN, Qt.ItemDataRole.UserRole)
+        if not isinstance(server, AstrillServer):
+            return
+        selected = item.checkState(ENDPOINT_SELECT_COLUMN) == Qt.CheckState.Checked
+        self._set_endpoint_selected(server.id, selected, item=item)
+
+    def _endpoint_select_cell_clicked(self, item: object) -> None:
+        if not isinstance(item, QTreeWidgetItem):
+            return
+        server = item.data(ENDPOINT_NAME_COLUMN, Qt.ItemDataRole.UserRole)
+        if not isinstance(server, AstrillServer):
+            return
+        selected = server.id not in self._endpoint_selected_server_ids
+        self._set_endpoint_selected(server.id, selected, item=item)
+
+    def _set_endpoint_selected(
+        self,
+        server_id: int,
+        selected: bool,
+        *,
+        item: QTreeWidgetItem | None = None,
+    ) -> None:
+        self._endpoint_selection_user_managed = True
+        if selected:
+            self._endpoint_selected_server_ids.add(server_id)
+        else:
+            self._endpoint_selected_server_ids.discard(server_id)
+        self._syncing_endpoint_selection = True
+        try:
+            if item is not None:
+                item.setCheckState(
+                    ENDPOINT_SELECT_COLUMN,
+                    (Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked),
+                )
+                item.setSelected(selected)
+                if selected:
+                    self.endpoint_tree.setCurrentItem(item)
+        finally:
+            self._syncing_endpoint_selection = False
+        self._sync_endpoint_selection_ui()
+        if (
+            self.endpoint_sort.currentData() == "header"
+            and self._endpoint_header_sort_column == ENDPOINT_SELECT_COLUMN
+        ):
+            self._render_endpoints()
+            return
+        self._sync_endpoint_action_ui()
+
+    def _toggle_visible_endpoint_selection(self, state: Qt.CheckState) -> None:
+        if self._syncing_endpoint_selection:
+            return
+        self._endpoint_selection_user_managed = True
+        visible = self._visible_endpoint_servers()
+        if state == Qt.CheckState.Checked:
+            self._endpoint_selected_server_ids.update(server.id for server in visible)
+        elif state == Qt.CheckState.Unchecked:
+            self._endpoint_selected_server_ids.difference_update(
+                server.id for server in visible
+            )
+        else:
+            return
+        self._sync_endpoint_selection_ui()
+        if (
+            self.endpoint_sort.currentData() == "header"
+            and self._endpoint_header_sort_column == ENDPOINT_SELECT_COLUMN
+        ):
+            self._render_endpoints()
+
+    def _clear_endpoint_selection(self) -> None:
+        self._endpoint_selection_user_managed = True
+        self._endpoint_selected_server_ids.clear()
+        self._endpoint_selected_server_id = None
+        self.endpoint_tree.clearSelection()
+        self._sync_endpoint_selection_ui()
+        if (
+            self.endpoint_sort.currentData() == "header"
+            and self._endpoint_header_sort_column == ENDPOINT_SELECT_COLUMN
+        ):
+            self._render_endpoints()
+
+    def _sync_endpoint_selection_ui(self) -> None:
+        if not hasattr(self, "endpoint_tree"):
+            return
+        self._syncing_endpoint_selection = True
+        try:
+            visible_ids: set[int] = set()
+            for index in range(self.endpoint_tree.topLevelItemCount()):
+                item = self.endpoint_tree.topLevelItem(index)
+                server = item.data(
+                    ENDPOINT_NAME_COLUMN,
+                    Qt.ItemDataRole.UserRole,
+                )
+                if not isinstance(server, AstrillServer):
+                    continue
+                visible_ids.add(server.id)
+                selected = server.id in self._endpoint_selected_server_ids
+                item.setCheckState(
+                    ENDPOINT_SELECT_COLUMN,
+                    (Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked),
+                )
+                item.setSelected(selected)
+            selected_visible = visible_ids & self._endpoint_selected_server_ids
+            if visible_ids and selected_visible == visible_ids:
+                master_state = Qt.CheckState.Checked
+            elif selected_visible:
+                master_state = Qt.CheckState.PartiallyChecked
+            else:
+                master_state = Qt.CheckState.Unchecked
+            self.endpoint_select_visible.setCheckState(master_state)
+        finally:
+            self._syncing_endpoint_selection = False
+        count = len(self._endpoint_selected_server_ids)
+        visible_count = len(
+            {server.id for server in self._visible_endpoint_servers()}
+            & self._endpoint_selected_server_ids
+        )
+        hidden_count = count - visible_count
+        suffix = f" · {hidden_count} hidden by filters" if hidden_count else ""
+        self.endpoint_selection_status.setText(
+            f"{count} endpoint{'' if count == 1 else 's'} selected"
+            f" · Ctrl/Command adds rows; Shift selects a range{suffix}."
+        )
+        self.endpoint_clear_selection_button.setEnabled(
+            self.busy_count == 0 and count > 0
+        )
+
+    def _visible_endpoint_servers(self) -> tuple[AstrillServer, ...]:
+        values: list[AstrillServer] = []
+        for index in range(self.endpoint_tree.topLevelItemCount()):
+            item = self.endpoint_tree.topLevelItem(index)
+            value = item.data(
+                ENDPOINT_NAME_COLUMN,
+                Qt.ItemDataRole.UserRole,
+            )
+            if isinstance(value, AstrillServer):
+                values.append(value)
+        return tuple(values)
+
+    def _selected_endpoints(self) -> tuple[AstrillServer, ...]:
+        selected: list[AstrillServer] = []
+        seen: set[int] = set()
+        for server in self._visible_endpoint_servers():
+            if (
+                server.id in self._endpoint_selected_server_ids
+                and server.id not in seen
+            ):
+                selected.append(server)
+                seen.add(server.id)
+        for server in self.controller.server_catalog.servers:
+            if (
+                server.id in self._endpoint_selected_server_ids
+                and server.id not in seen
+            ):
+                selected.append(server)
+                seen.add(server.id)
+        return tuple(selected)
+
+    def _single_selected_endpoint(self) -> AstrillServer | None:
+        selected = self._selected_endpoints()
+        return selected[0] if len(selected) == 1 else None
 
     def _endpoint_double_clicked(
         self,
         _item: QTreeWidgetItem,
         column: int,
     ) -> None:
-        if column == ENDPOINT_FAVORITE_COLUMN:
+        if column in {ENDPOINT_SELECT_COLUMN, ENDPOINT_FAVORITE_COLUMN}:
             return
         self._connect_endpoint()
 
@@ -1735,13 +2700,13 @@ class MainWindow(QMainWindow):
                 "router connection behavior."
             )
             return
-        if self.native_page.dirty:
+        if self.native_page.dirty or self.connection_page.dirty:
             self._sync_endpoint_connection_controls()
             QMessageBox.information(
                 self,
                 "Unsaved Astrill settings",
-                "Save or reload the pending edits on the Astrill page before "
-                "changing router connection behavior.",
+                "Save or reload the pending edits on the Astrill or Connection "
+                "page before changing router connection behavior.",
             )
             return
         value = "1" if checked else "0"
@@ -1781,7 +2746,9 @@ class MainWindow(QMainWindow):
         finally:
             self._syncing_endpoint_preferences = False
 
-        dirty = hasattr(self, "native_page") and self.native_page.dirty
+        dirty = hasattr(self, "native_page") and (
+            self.native_page.dirty or self.connection_page.dirty
+        )
         editable = (
             settings is not None
             and self.busy_count == 0
@@ -1799,11 +2766,22 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "endpoint_tree"):
             return
         query = self.endpoint_search.text().strip().casefold()
+        selected_country = str(self.endpoint_country_filter.currentData() or "")
         current_id = int(self.router_status.get("astrill_server_id", 0) or 0)
         connected = self.router_status.get("vpn_state") == "up"
         selected_id = self._endpoint_selected_server_id
         if selected_id is None:
             selected_id = current_id
+        if (
+            not self._endpoint_selection_user_managed
+            and not self._endpoint_selected_server_ids
+            and selected_id
+            and any(
+                server.id == selected_id
+                for server in self.controller.server_catalog.servers
+            )
+        ):
+            self._endpoint_selected_server_ids.add(selected_id)
         group_by_id: dict[int, str] = {}
         for region_id, servers in self.controller.server_catalog.groups.items():
             for server in servers:
@@ -1812,8 +2790,13 @@ class MainWindow(QMainWindow):
         for source_index, server in enumerate(self.controller.server_catalog.servers):
             region_id = group_by_id.get(server.id, "")
             region_name = self._region_name(region_id)
-            searchable = f"{server.name} {region_name} {server.id}".casefold()
-            if query and query not in searchable:
+            country_name = server.country_name()
+            searchable = (
+                f"{server.name} {country_name} {region_name} {server.id}".casefold()
+            )
+            if (selected_country and country_name != selected_country) or (
+                query and query not in searchable
+            ):
                 continue
             rows.append(
                 EndpointListRow(
@@ -1823,43 +2806,98 @@ class MainWindow(QMainWindow):
                     region_name=region_name,
                 )
             )
-        rows = list(
-            sort_endpoint_rows(
-                rows,
-                str(self.endpoint_sort.currentData()),
-                self._endpoint_probe_results,
-                self.protocol.currentIndex(),
+        sort_mode = str(self.endpoint_sort.currentData())
+        if sort_mode == "header":
+            column = self._endpoint_header_sort_column
+            if column is None:
+                column = ENDPOINT_NAME_COLUMN
+            rows = list(
+                sort_endpoint_rows_by_header(
+                    rows,
+                    ENDPOINT_HEADER_SORT_FIELDS[column],
+                    self._endpoint_header_sort_descending,
+                    self._endpoint_probe_results,
+                    self.protocol.currentIndex(),
+                    selected_server_ids=self._endpoint_selected_server_ids,
+                    favorite_server_ids=(
+                        self._endpoint_favorite_records.keys()
+                        if self._endpoint_favorites_valid is True
+                        else None
+                    ),
+                    current_server_id=current_id,
+                    connected=connected,
+                )
             )
-        )
+        else:
+            rows = list(
+                sort_endpoint_rows(
+                    rows,
+                    sort_mode,
+                    self._endpoint_probe_results,
+                    self.protocol.currentIndex(),
+                )
+            )
+        self._syncing_endpoint_selection = True
         self.endpoint_tree.clear()
         item_to_select: QTreeWidgetItem | None = None
-        for row in rows:
-            server = row.server
-            configured = server.id == current_id
-            state = (
-                "Connected"
-                if configured and connected
-                else ("Configured" if configured else "")
-            )
-            item = QTreeWidgetItem(
-                [
-                    server.name,
-                    row.region_name,
-                    self._endpoint_favorite_cell(server),
-                    str(server.id),
-                    state,
-                    str(len(server.nodes)),
-                    *self._endpoint_probe_cells(server),
-                ]
-            )
-            item.setData(ENDPOINT_NAME_COLUMN, Qt.ItemDataRole.UserRole, server)
-            self._decorate_endpoint_favorite(item, server)
-            self._decorate_endpoint_probe_result(item, server)
-            self.endpoint_tree.addTopLevelItem(item)
-            if server.id == selected_id:
-                item_to_select = item
-        if item_to_select is not None:
-            self.endpoint_tree.setCurrentItem(item_to_select)
+        first_selected: QTreeWidgetItem | None = None
+        try:
+            for row in rows:
+                server = row.server
+                configured = server.id == current_id
+                state = (
+                    "Connected"
+                    if configured and connected
+                    else ("Configured" if configured else "")
+                )
+                item = QTreeWidgetItem(
+                    [
+                        "",
+                        server.name,
+                        row.region_name,
+                        self._endpoint_favorite_cell(server),
+                        str(server.id),
+                        state,
+                        str(len(server.nodes)),
+                        *self._endpoint_probe_cells(server),
+                    ]
+                )
+                item.setFlags(
+                    item.flags()
+                    | Qt.ItemFlag.ItemIsUserCheckable
+                    | Qt.ItemFlag.ItemIsSelectable
+                )
+                item.setData(
+                    ENDPOINT_NAME_COLUMN,
+                    Qt.ItemDataRole.UserRole,
+                    server,
+                )
+                item.setCheckState(
+                    ENDPOINT_SELECT_COLUMN,
+                    (
+                        Qt.CheckState.Checked
+                        if server.id in self._endpoint_selected_server_ids
+                        else Qt.CheckState.Unchecked
+                    ),
+                )
+                self._decorate_endpoint_favorite(item, server)
+                self._decorate_endpoint_probe_result(item, server)
+                self.endpoint_tree.addTopLevelItem(item)
+                if (
+                    first_selected is None
+                    and server.id in self._endpoint_selected_server_ids
+                ):
+                    first_selected = item
+                if server.id == selected_id:
+                    item_to_select = item
+            if item_to_select is None:
+                item_to_select = first_selected
+            if item_to_select is not None:
+                self.endpoint_tree.setCurrentItem(item_to_select)
+        finally:
+            self._syncing_endpoint_selection = False
+        self._sync_endpoint_selection_ui()
+        self._sync_endpoint_sort_indicator()
         self._sync_endpoint_action_ui()
 
     def _endpoint_favorite_cell(self, server: AstrillServer) -> str:
@@ -1993,18 +3031,8 @@ class MainWindow(QMainWindow):
         if scope == "all":
             return tuple(self.controller.server_catalog.servers)
         if scope == "visible":
-            visible: list[AstrillServer] = []
-            for index in range(self.endpoint_tree.topLevelItemCount()):
-                item = self.endpoint_tree.topLevelItem(index)
-                value = item.data(0, Qt.ItemDataRole.UserRole)
-                if isinstance(value, AstrillServer):
-                    visible.append(value)
-            return tuple(visible)
-        item = self.endpoint_tree.currentItem()
-        if item is None:
-            return ()
-        value = item.data(0, Qt.ItemDataRole.UserRole)
-        return (value,) if isinstance(value, AstrillServer) else ()
+            return self._visible_endpoint_servers()
+        return self._selected_endpoints()
 
     def _test_endpoint_latency(self) -> None:
         if self.busy_count or self._endpoint_probe_running:
@@ -2107,6 +3135,15 @@ class MainWindow(QMainWindow):
         )
 
     def _toggle_selected_endpoint_favorite(self) -> None:
+        selected = self._selected_endpoints()
+        if len(selected) != 1:
+            self._select_something("Select exactly one Astrill endpoint first.")
+            return
+        self._set_selected_endpoint_favorites(
+            selected[0].id not in self._endpoint_favorite_records
+        )
+
+    def _set_selected_endpoint_favorites(self, enabled: bool) -> None:
         if self.busy_count:
             self.statusBar().showMessage("Wait for the current action to finish.", 4000)
             return
@@ -2116,10 +3153,10 @@ class MainWindow(QMainWindow):
                 "Settings first."
             )
             return
-        if self.native_page.dirty:
+        if self.native_page.dirty or self.connection_page.dirty:
             self._select_something(
-                "Save or reload the unsaved Astrill-page edits before changing "
-                "favorites."
+                "Save or reload the unsaved Astrill or Connection-page edits "
+                "before changing favorites."
             )
             return
         if self._endpoint_favorites_valid is not True:
@@ -2127,38 +3164,83 @@ class MainWindow(QMainWindow):
                 "Sync a valid favorite list from DD-WRT before changing it."
             )
             return
-        server = self._selected_endpoint()
-        if server is None:
-            self._select_something("Select an Astrill endpoint first.")
+        servers = self._selected_endpoints()
+        if not servers:
+            self._select_something(
+                "Select one or more Astrill endpoints using the checkboxes, "
+                "Ctrl/Command, or Shift."
+            )
             return
 
-        enabled = server.id not in self._endpoint_favorite_records
         protocol = self.protocol.currentIndex()
+        changed = tuple(
+            server
+            for server in servers
+            if (
+                server.id not in self._endpoint_favorite_records
+                if enabled
+                else server.id in self._endpoint_favorite_records
+            )
+        )
+        if not changed:
+            self.endpoint_favorite_status.setText(
+                "Every selected endpoint already has the requested favorite state."
+            )
+            return
         if enabled:
-            try:
-                _sid, endpoint = server.endpoint_for(protocol)
-            except ValueError as exc:
-                QMessageBox.warning(self, "Unsupported endpoint protocol", str(exc))
+            unsupported: list[str] = []
+            for server in changed:
+                try:
+                    server.endpoint_for(protocol)
+                except ValueError:
+                    unsupported.append(server.name)
+            if unsupported:
+                names = "\n".join(f"  • {name}" for name in unsupported[:12])
+                extra = (
+                    f"\n  • …and {len(unsupported) - 12} more"
+                    if len(unsupported) > 12
+                    else ""
+                )
+                QMessageBox.warning(
+                    self,
+                    "Unsupported endpoint protocol",
+                    f"{len(unsupported)} selected endpoint"
+                    f"{'' if len(unsupported) == 1 else 's'} do not offer "
+                    f"{ASTRILL_PROTOCOL_NAMES[protocol]}:\n\n"
+                    f"{names}{extra}\n\nChoose another protocol or adjust the "
+                    "selection. Nothing was written.",
+                )
                 return
-            action = "Add"
+            action = "Favorite"
             detail = (
-                f"Add {server.name} to the router's Astrill favorites using "
-                f"{ASTRILL_PROTOCOL_NAMES[protocol]} and port {endpoint.port}?"
+                f"Add {len(changed)} selected endpoint"
+                f"{'' if len(changed) == 1 else 's'} to the router's Astrill "
+                f"favorites using {ASTRILL_PROTOCOL_NAMES[protocol]}?"
             )
         else:
-            action = "Remove"
-            detail = f"Remove {server.name} from the router's Astrill favorites?"
+            action = "Unfavorite"
+            detail = (
+                f"Remove {len(changed)} selected endpoint"
+                f"{'' if len(changed) == 1 else 's'} from the router's Astrill "
+                "favorites?"
+            )
+
+        preview = "\n".join(f"  • {server.name}" for server in changed[:10])
+        if len(changed) > 10:
+            preview += f"\n  • …and {len(changed) - 10} more"
 
         detail += (
+            f"\n\n{preview}"
             "\n\nOnly the native astrill_favlist value will change. The app "
-            "will preserve every other favorite, commit once, and verify the "
+            "will fresh-read the complete list, preserve every other favorite, "
+            "commit the whole batch once, and verify the "
             "readback. It will not reconnect Astrill, switch endpoints, run a "
             "latency test, or enable background polling."
         )
         if (
             QMessageBox.warning(
                 self,
-                f"{action} router favorite",
+                f"{action} selected endpoints",
                 detail,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
@@ -2169,15 +3251,15 @@ class MainWindow(QMainWindow):
 
         task_action = "Adding" if enabled else "Removing"
         self._run_task(
-            f"{task_action} router favorite {server.name}",
-            lambda: self.controller.set_endpoint_favorite(
-                server,
-                protocol,
+            f"{task_action} {len(changed)} router favorites",
+            lambda: self.controller.set_endpoint_favorites(
+                servers,
+                protocol if enabled else None,
                 enabled=enabled,
             ),
             lambda result: self._endpoint_favorite_changed(
                 result,
-                server.name,
+                len(changed),
                 enabled,
             ),
         )
@@ -2185,7 +3267,7 @@ class MainWindow(QMainWindow):
     def _endpoint_favorite_changed(
         self,
         result: object,
-        server_name: str,
+        changed_count: int,
         enabled: bool,
     ) -> None:
         if not isinstance(result, NativeAstrillSettings):
@@ -2193,7 +3275,9 @@ class MainWindow(QMainWindow):
         self._apply_native_settings(result, force_native_page=False)
         action = "added to" if enabled else "removed from"
         self.endpoint_favorite_status.setText(
-            f"{server_name} {action} router favorites · verified on DD-WRT."
+            f"{changed_count} endpoint"
+            f"{'' if changed_count == 1 else 's'} {action} router favorites "
+            "· one verified DD-WRT commit."
         )
 
     def _connect_endpoint(self) -> None:
@@ -2208,15 +3292,17 @@ class MainWindow(QMainWindow):
                 "Settings before connecting the router to another endpoint."
             )
             return
-        if not self.controller.store.companion_enabled:
+        if self.native_page.dirty or self.connection_page.dirty:
             self._select_something(
-                "Install and enable the DD-WRT companion before switching the "
-                "router's Astrill endpoint."
+                "Save or reload the unsaved Astrill or Connection-page edits "
+                "before connecting from the Endpoints page."
             )
             return
-        server = self._selected_endpoint()
+        server = self._single_selected_endpoint()
         if server is None:
-            self._select_something("Select an Astrill endpoint first.")
+            self._select_something(
+                "Select exactly one Astrill endpoint before connecting the router."
+            )
             return
         protocol = self.protocol.currentIndex()
         try:
@@ -2224,12 +3310,20 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, "Unsupported endpoint protocol", str(exc))
             return
+        connection_path = (
+            "The installed companion will perform the switch and verify the "
+            "native readback."
+            if self.controller.store.companion_enabled
+            else "Native-only mode will disconnect if needed, save the new "
+            "selection, connect, verify the readback, and roll back the previous "
+            "selection if connection fails."
+        )
         detail = (
             f"Connect the router's shared Astrill tunnel to {server.name} using "
             f"{ASTRILL_PROTOCOL_NAMES[protocol]}?\n\nThis writes the selected "
             "endpoint to DD-WRT and reconnects the router tunnel, so all "
             "Astrill-routed traffic will pause briefly. It does not change this "
-            "Windows computer's VPN or local routing."
+            f"Windows computer's VPN or local routing.\n\n{connection_path}"
         )
         if (
             QMessageBox.warning(
@@ -2244,9 +3338,15 @@ class MainWindow(QMainWindow):
             return
         self._run_task(
             f"Connecting router to {server.name}",
-            lambda: self.controller.switch_server(server, protocol),
-            self._endpoint_connected,
+            lambda: self.controller.apply_server_connection(server, protocol),
+            self._endpoint_connection_applied,
         )
+
+    def _endpoint_connection_applied(self, result: object) -> None:
+        if not isinstance(result, AstrillConnectionResult):
+            return
+        self._apply_native_settings(result.settings, force_native_page=False)
+        self._endpoint_connected(result.status)
 
     def _endpoint_connected(self, status: object) -> None:
         self._endpoint_protocol_user_selected = False
@@ -2258,8 +3358,11 @@ class MainWindow(QMainWindow):
         idle = self.busy_count == 0
         read_only = self.controller.store.read_only
         companion_enabled = self.controller.store.companion_enabled
-        selected = self._selected_endpoint()
-        native_dirty = hasattr(self, "native_page") and self.native_page.dirty
+        selected_endpoints = self._selected_endpoints()
+        selected = selected_endpoints[0] if len(selected_endpoints) == 1 else None
+        native_dirty = hasattr(self, "native_page") and (
+            self.native_page.dirty or self.connection_page.dirty
+        )
 
         protocol_supported = False
         if selected is not None:
@@ -2271,9 +3374,18 @@ class MainWindow(QMainWindow):
 
         self.load_endpoints_button.setEnabled(idle)
         self.endpoint_search.setEnabled(idle)
+        self.endpoint_country_filter.setEnabled(
+            idle and bool(self.controller.server_catalog.servers)
+        )
         self.protocol.setEnabled(idle)
         self.endpoint_sort.setEnabled(idle)
         self.endpoint_tree.setEnabled(idle)
+        self.endpoint_select_visible.setEnabled(
+            idle and bool(self._visible_endpoint_servers())
+        )
+        self.endpoint_clear_selection_button.setEnabled(
+            idle and bool(selected_endpoints)
+        )
         self.endpoint_probe_scope.setEnabled(idle)
         self.endpoint_probe_button.setEnabled(
             idle
@@ -2284,48 +3396,71 @@ class MainWindow(QMainWindow):
             idle and bool(self._endpoint_probe_results)
         )
         self.endpoint_favorite_sync_button.setEnabled(idle)
-        is_favorite = (
-            selected is not None
-            and selected.id in self._endpoint_favorite_records
-            and self._endpoint_favorites_valid is True
+        favorite_ids = self._endpoint_favorite_records.keys()
+        missing_favorites = tuple(
+            server for server in selected_endpoints if server.id not in favorite_ids
         )
+        selected_favorites = tuple(
+            server for server in selected_endpoints if server.id in favorite_ids
+        )
+        unsupported_missing: list[AstrillServer] = []
+        for server in missing_favorites:
+            try:
+                server.endpoint_for(self.protocol.currentIndex())
+            except ValueError:
+                unsupported_missing.append(server)
         self.endpoint_favorite_button.setText(
-            "Remove selected favorite" if is_favorite else "Add selected favorite"
+            "Favorite selected"
+            + (f" ({len(missing_favorites)})" if missing_favorites else "")
         )
-        favorite_action_enabled = (
+        self.endpoint_unfavorite_button.setText(
+            "Unfavorite selected"
+            + (f" ({len(selected_favorites)})" if selected_favorites else "")
+        )
+        favorite_editable = (
             idle
             and not read_only
             and not native_dirty
             and self._endpoint_favorites_valid is True
-            and selected is not None
-            and (is_favorite or protocol_supported)
         )
-        self.endpoint_favorite_button.setEnabled(favorite_action_enabled)
+        self.endpoint_favorite_button.setEnabled(
+            favorite_editable and bool(missing_favorites) and not unsupported_missing
+        )
+        self.endpoint_unfavorite_button.setEnabled(
+            favorite_editable and bool(selected_favorites)
+        )
         if native_dirty:
-            self.endpoint_favorite_button.setToolTip(
-                "Save or reload the Astrill page's unsaved edits first."
-            )
+            favorite_tooltip = "Save or reload the Astrill page's unsaved edits first."
         elif self._endpoint_favorites_valid is None:
-            self.endpoint_favorite_button.setToolTip(
-                "Sync favorites from DD-WRT first."
-            )
+            favorite_tooltip = "Sync favorites from DD-WRT first."
         elif self._endpoint_favorites_valid is False:
-            self.endpoint_favorite_button.setToolTip(
+            favorite_tooltip = (
                 "The malformed router favorite list is preserved; editing is blocked."
             )
-        elif is_favorite:
-            self.endpoint_favorite_button.setToolTip(
-                "Remove only this server from DD-WRT's native Astrill favorites."
+        elif unsupported_missing:
+            favorite_tooltip = (
+                f"{len(unsupported_missing)} selected endpoint"
+                f"{'' if len(unsupported_missing) == 1 else 's'} do not offer "
+                f"{ASTRILL_PROTOCOL_NAMES[self.protocol.currentIndex()]}."
+            )
+        elif not selected_endpoints:
+            favorite_tooltip = (
+                "Select endpoints with their checkboxes, Ctrl/Command, or Shift."
             )
         else:
-            self.endpoint_favorite_button.setToolTip(
-                "Add this server using the selected protocol's default port. "
-                "This does not reconnect Astrill."
+            favorite_tooltip = (
+                "Add every selected nonfavorite endpoint in one verified commit."
             )
+        self.endpoint_favorite_button.setToolTip(favorite_tooltip)
+        self.endpoint_unfavorite_button.setToolTip(
+            favorite_tooltip
+            if native_dirty or self._endpoint_favorites_valid is not True
+            else "Remove every selected current favorite in one verified commit."
+        )
         self.connect_endpoint_button.setEnabled(
             idle
             and not read_only
-            and companion_enabled
+            and not native_dirty
             and selected is not None
             and protocol_supported
         )
@@ -2352,14 +3487,20 @@ class MainWindow(QMainWindow):
                 "Inspection is available. Turn off the read-only guard in Settings "
                 "to connect the router to a selected endpoint."
             )
-        elif not companion_enabled:
+        elif native_dirty:
             message = (
-                "Inspection is available. Install the DD-WRT companion to enable "
-                "safe endpoint switching and rollback."
+                "Save or reload the unsaved Astrill or Connection-page draft "
+                "before connecting from Endpoints."
             )
-        elif selected is None:
+        elif not selected_endpoints:
             message = (
                 "Select an endpoint, choose its protocol, then connect the router."
+            )
+        elif len(selected_endpoints) > 1:
+            message = (
+                f"{len(selected_endpoints)} endpoints selected. Favorite, "
+                "Unfavorite, and selected-endpoint latency actions use the batch; "
+                "connecting the router requires exactly one endpoint."
             )
         elif not protocol_supported:
             message = (
@@ -2368,16 +3509,289 @@ class MainWindow(QMainWindow):
                 "Choose another protocol or endpoint."
             )
         else:
+            path = "companion" if companion_enabled else "transactional native"
             if reconnecting:
                 message = (
                     f"{selected.name} is connected on the router. The action will "
-                    "reconnect that shared tunnel using the chosen protocol."
+                    "reconnect that shared tunnel using the chosen protocol "
+                    f"through the {path} path."
                 )
             else:
                 message = (
-                    f"Ready to connect the router's shared tunnel to {selected.name}."
+                    f"Ready to connect the router's shared tunnel to {selected.name} "
+                    f"through the {path} path."
                 )
         self.endpoint_action_status.setText(message)
+
+    def _refresh_connection_page(self) -> None:
+        if self.busy_count:
+            self.connection_page.set_action_status(
+                "Wait for the current router action before refreshing.",
+                level="warning",
+            )
+            return
+        self.connection_page.set_action_status(
+            "Reading one combined router snapshot, then the endpoint catalog.",
+            level="info",
+        )
+        self._run_task(
+            "Refreshing Astrill connection",
+            lambda: self.controller.load_connection_state(refresh_servers=True),
+            self._connection_state_loaded,
+        )
+
+    def _connection_state_loaded(self, result: object) -> None:
+        if not isinstance(result, WindowsConnectionState):
+            return
+        self._apply_server_catalog(result.server_catalog)
+        self._status_loaded(result.status)
+        self._apply_native_settings(
+            result.settings,
+            force_native_page=False,
+            force_connection_page=False,
+        )
+        self.connection_page.set_action_status(
+            "Connection settings, status, and endpoint capabilities refreshed.",
+            level="success",
+        )
+
+    def _connection_draft(self) -> ConnectionDraft | None:
+        try:
+            return self.connection_page.collect()
+        except ValueError as exc:
+            self.connection_page.set_action_status(str(exc), level="warning")
+            QMessageBox.warning(self, "Invalid Astrill connection", str(exc))
+            return None
+
+    def _connection_editor_blocked(self) -> bool:
+        if not self.native_page.dirty:
+            return False
+        message = (
+            "Save or reload the unsaved Astrill-page draft before changing "
+            "overlapping Connection settings."
+        )
+        self.connection_page.set_action_status(message, level="warning")
+        return True
+
+    def _save_connection_draft(
+        self,
+        draft: ConnectionDraft,
+    ) -> NativeAstrillSettings:
+        favorites_saved = False
+        if draft.favorite_changes:
+            self.controller.apply_endpoint_favorite_changes(draft.favorite_changes)
+            favorites_saved = True
+        try:
+            return self.controller.save_astrill_connection(
+                draft.selection,
+                draft.changes,
+            )
+        except Exception as exc:
+            if favorites_saved:
+                raise RuntimeError(
+                    "Favorite edits were saved and verified, but the remaining "
+                    f"connection settings were not saved: {exc}. Refresh or retry "
+                    "the Connection draft."
+                ) from exc
+            raise
+
+    def _apply_connection_draft(
+        self,
+        draft: ConnectionDraft,
+    ) -> AstrillConnectionResult:
+        favorites_saved = False
+        if draft.favorite_changes:
+            self.controller.apply_endpoint_favorite_changes(draft.favorite_changes)
+            favorites_saved = True
+        try:
+            return self.controller.apply_astrill_connection(
+                draft.selection,
+                draft.changes,
+            )
+        except Exception as exc:
+            if favorites_saved:
+                raise RuntimeError(
+                    "Favorite edits were saved and verified, but the Astrill "
+                    f"connection attempt failed: {exc}. The favorite edit remains "
+                    "saved; refresh or retry the Connection draft."
+                ) from exc
+            raise
+
+    def _save_connection_page(self) -> None:
+        if self._connection_editor_blocked():
+            return
+        draft = self._connection_draft()
+        if draft is None:
+            return
+        if not self.connection_page.dirty:
+            self.connection_page.set_action_status(
+                "Connection settings are already synchronized.",
+                level="info",
+            )
+            return
+        if self.router_status.get("vpn_state") == "up":
+            self.connection_page.set_action_status(
+                "The tunnel is connected; use Apply & Reconnect for live changes.",
+                level="warning",
+            )
+            return
+
+        self._run_task(
+            "Saving Astrill connection",
+            lambda: self._save_connection_draft(draft),
+            lambda settings: self._connection_saved(settings, draft),
+        )
+
+    def _connection_saved(
+        self,
+        result: object,
+        draft: ConnectionDraft,
+    ) -> None:
+        if not isinstance(result, NativeAstrillSettings):
+            return
+        status = dict(self.router_status)
+        status["astrill_server_id"] = draft.selection.server_id
+        status["astrill_protocol"] = draft.selection.protocol
+        self._status_loaded(status)
+        self._apply_native_settings(
+            result,
+            force_native_page=False,
+            force_connection_page=True,
+        )
+        self.connection_page.set_action_status(
+            "Connection settings saved and verified"
+            + (
+                "; favorite edits were fresh-merged with DD-WRT"
+                if draft.favorite_changes
+                else ""
+            )
+            + "; the tunnel remains disconnected.",
+            level="success",
+        )
+
+    def _connect_connection_page(self) -> None:
+        if self._connection_editor_blocked():
+            return
+        if self.connection_page.dirty:
+            self.connection_page.set_action_status(
+                "Save the draft or use Apply & Connect first.",
+                level="warning",
+            )
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Connect Astrill",
+                "Start the router's shared Astrill tunnel with the saved "
+                "connection settings?",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        self._run_task(
+            "Connecting Astrill",
+            lambda: self.controller.set_connection(True),
+            lambda status: self._connection_state_changed(status, connected=True),
+        )
+
+    def _apply_connection_page(self) -> None:
+        if self._connection_editor_blocked():
+            return
+        draft = self._connection_draft()
+        if draft is None:
+            return
+        if not self.connection_page.dirty:
+            self._connect_connection_page()
+            return
+        connected = self.router_status.get("vpn_state") == "up"
+        verb = "Reconnect" if connected else "Connect"
+        server = next(
+            (
+                candidate
+                for candidate in self.controller.server_catalog.servers
+                if candidate.id == draft.selection.server_id
+            ),
+            None,
+        )
+        server_name = (
+            server.name if server is not None else f"Server {draft.selection.server_id}"
+        )
+        if (
+            QMessageBox.warning(
+                self,
+                f"{verb} Astrill",
+                f"{verb} the shared tunnel to {server_name} using "
+                f"{ASTRILL_PROTOCOL_NAMES[draft.selection.protocol]} on "
+                f"{draft.selection.port}?\n\nThe complete connection draft will "
+                "be saved and read back. Favorite edits are fresh-merged with "
+                "DD-WRT using concurrent-change protection before the connection "
+                "attempt; previous connection settings are recovered if it fails.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        self._run_task(
+            f"{verb}ing Astrill",
+            lambda: self._apply_connection_draft(draft),
+            lambda result: self._connection_applied(result, draft),
+        )
+
+    def _connection_applied(
+        self,
+        result: object,
+        draft: ConnectionDraft | None = None,
+    ) -> None:
+        if not isinstance(result, AstrillConnectionResult):
+            return
+        self._status_loaded(result.status)
+        self._apply_native_settings(
+            result.settings,
+            force_native_page=False,
+            force_connection_page=True,
+        )
+        self.connection_page.set_action_status(
+            "Astrill connected and every changed connection value verified"
+            + (
+                "; favorite edits were fresh-merged with DD-WRT"
+                if draft is not None and draft.favorite_changes
+                else ""
+            )
+            + ".",
+            level="success",
+        )
+
+    def _disconnect_connection_page(self) -> None:
+        if (
+            QMessageBox.question(
+                self,
+                "Disconnect Astrill",
+                "Disconnect the router's shared Astrill tunnel while preserving "
+                "its saved endpoint and policies?",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        self._run_task(
+            "Disconnecting Astrill",
+            lambda: self.controller.set_connection(False),
+            lambda status: self._connection_state_changed(status, connected=False),
+        )
+
+    def _connection_state_changed(
+        self,
+        result: object,
+        *,
+        connected: bool,
+    ) -> None:
+        self._status_loaded(result)
+        self.connection_page.set_action_status(
+            "Astrill connected with the saved settings."
+            if connected
+            else "Astrill disconnected; saved settings and policies were preserved.",
+            level="success",
+        )
 
     def _load_native_settings(self) -> None:
         if self._native_settings_loading:
@@ -2407,6 +3821,7 @@ class MainWindow(QMainWindow):
         settings: NativeAstrillSettings,
         *,
         force_native_page: bool,
+        force_connection_page: bool = False,
     ) -> None:
         self.native_settings = settings
         try:
@@ -2431,11 +3846,25 @@ class MainWindow(QMainWindow):
             self.native_page.render(settings, self.clients)
         else:
             self.native_page.render_favorite_summary(settings)
+        self.connection_page.sync(
+            settings,
+            self.controller.server_catalog.servers,
+            self.router_status,
+            force=force_connection_page,
+        )
         self._render_endpoints()
         self._sync_endpoint_connection_controls()
         self._sync_endpoint_action_ui()
 
     def _save_native_settings(self) -> None:
+        if self.connection_page.dirty:
+            message = (
+                "Save or reload the unsaved Connection-page draft before saving "
+                "overlapping Astrill settings."
+            )
+            self.statusBar().showMessage(message, 6000)
+            QMessageBox.information(self, "Unsaved Connection settings", message)
+            return
         if self.native_settings is None:
             self._select_something("Load native Astrill settings first.")
             return
@@ -2479,6 +3908,7 @@ class MainWindow(QMainWindow):
 
     def _status_loaded(self, status: object) -> None:
         self.router_status = dict(status)  # type: ignore[arg-type]
+        self.connection_page.update_status(self.router_status)
         self.refresh_mode_label.setText(
             f"Updated {QTime.currentTime().toString('HH:mm')} · manual only"
         )
@@ -2528,14 +3958,7 @@ class MainWindow(QMainWindow):
             if tunnel
             else "No active tunnel"
         )
-        self.metric_labels["rules"].setText(
-            str(
-                status.get(
-                    "origin_count",
-                    sum(rule.enabled for rule in self.controller.store.rules),
-                )
-            )
-        )
+        self._update_policy_metric()
         if healthy:
             self.sidebar_status.setText(
                 "Native Astrill · connected" if native else "Router companion · healthy"
@@ -2918,6 +4341,8 @@ class MainWindow(QMainWindow):
         self.apply_button.setEnabled(companion_writable)
         self.native_page.set_read_only(read_only)
         self.native_page.set_busy(self.busy_count != 0)
+        self.connection_page.set_read_only(read_only)
+        self.connection_page.set_busy(self.busy_count != 0)
         self.refresh_button.setEnabled(self.busy_count == 0)
         idle = self.busy_count == 0
         if hasattr(self, "companion_action_buttons"):

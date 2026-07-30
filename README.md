@@ -33,9 +33,10 @@ deployment are deliberately enabled.
 | --- | --- |
 | Routing | Direct WAN or the router's currently active Astrill tunnel |
 | Selectors | Service, company, website, IPv4 network, LAN device, protocol, port, and isolated application on Ubuntu |
-| Catalog | 261 maintained profiles with search and provider-country, category, and type filters |
-| Batch workflow | Select the visible result and apply Suggested, Direct, or Astrill to new and existing policies |
+| Catalog | 261 maintained profiles with search and provider-country, category, and profile-type filters |
+| Batch workflow | Durable checkbox/Ctrl/Command/Shift selection, Select visible, and explicit Suggested, Direct, or Astrill policy creation |
 | Native sync | Bidirectional routing, DNS, endpoint, protocol, port, transport, favorite, and resilience settings |
+| Windows 0.2.10 | Nine views, including a transactional shared-tunnel Connection page and seven-section Astrill editor |
 | Native-only audit | Read-only status, settings, endpoints, and LAN clients with no companion or router writes |
 | Router safety | Validated input, separate marks/tables, transactional A/B activation, rollback, and watchdog recovery |
 | Recovery | One action removes every companion-owned object and restores native Astrill-only operation |
@@ -59,9 +60,10 @@ maintainable decision layer for workflows such as:
 - give an Ubuntu application its own DHCP identity and router policy;
 - compare Direct and Astrill paths before explicitly accepting a recommendation.
 
-The policy layer is incremental. Native Astrill classifications retain higher
-precedence, and the companion uses separate firewall mark bits and routing
-tables.
+The policy layer is incremental. The companion uses separate high firewall
+mark bits and routing tables, installs its explicit marked lookups ahead of
+native Astrill's policy rules, and leaves unmatched traffic with the native
+applet.
 
 ## Architecture
 
@@ -85,9 +87,12 @@ Astrill remains an independent privileged applet.
 
 ### Services
 
-Search 261 company, application, and website profiles, combine country,
-category, and type filters, then select one row or the complete visible
-result. Batch modes have explicit behavior:
+Search 261 company, application, and website profiles, combine provider
+country, category, and profile-type filters, then select rows with checkboxes,
+normal Ctrl/Command or Shift selection, or the tri-state **Select visible**
+control. Selections remain durable while filters change, and the selected
+count reports rows hidden by the current result. Batch modes have explicit
+behavior:
 
 | Mode | Result |
 | --- | --- |
@@ -97,7 +102,15 @@ result. Batch modes have explicit behavior:
 
 Rows with an existing policy show its actual route. Other rows show the
 catalog suggestion, so the list retains its intended mixed Direct/Astrill
-view.
+view. **Add to Policies** saves the selected rules locally; the separate
+**Apply policies** confirmation is what changes the router. The Policies view
+shows local enabled rules beside the count returned by the most recent router
+refresh.
+
+For example, search for **UU Remote**, select it, choose **Direct**, and select
+**Add to Policies**. That creates a local Direct policy which can then be
+reviewed and explicitly applied. UU Remote is not seeded or applied by
+default.
 
 ### Policies and countries
 
@@ -108,20 +121,33 @@ simultaneously.
 
 ### Connection, endpoints, and native Astrill
 
-The Ubuntu Connection view mirrors the native applet's selected endpoint,
-supported UDP/TCP transport, endpoint-specific port, favorite state, cipher,
-MTU, acceleration, kill switch, favorite cycling, and router-boot connection.
-Its server list comes from the installed applet. Save is available while
-disconnected; a changed connected session uses a confirmed, verified
-`Apply & Reconnect`.
+Ubuntu and Windows both provide a dedicated **Connection** view for the
+router's one shared tunnel. It mirrors selected endpoint, supported UDP/TCP
+transport, endpoint-specific port, favorite state, cipher, MTU, acceleration,
+kill switch, favorite cycling, and router-boot connection. Its server list
+comes from the installed applet.
 
-The Endpoints view remains the searchable country-grouped browser and quick
-connect surface. Each row mirrors its native router favorite and can add or
-remove that favorite from either frontend. The same view mirrors **Auto
-reconnect to next favorite server** and **Start automatically after router
-boot**. Router web-applet changes appear after page-demand or explicit sync;
-desktop writes merge against a fresh router read, commit once, and use the
-readback as the new GUI state.
+On Windows, **Save** verifies a changed draft without starting a disconnected
+tunnel, **Connect** uses an already-saved clean draft, **Apply & Connect** or
+**Apply & Reconnect** performs the confirmed transaction, and **Disconnect**
+preserves the saved endpoint, favorites, and policies. The transaction works
+with or without the companion: the companion switch restores its prior
+endpoint on failure, while native-only mode restores the prior allowlisted
+values and active session when possible. Concurrent router refreshes preserve
+an unsaved form and surface a conflict instead of silently replacing it.
+Favorite membership edits use a separate fresh-read, compare-before-write
+merge before Save or Apply, so a stale Connection draft cannot replace an
+external favorite change. If a later connection step fails, the UI explicitly
+reports that the already-verified favorite edit remains saved.
+
+The Windows **Endpoints** view remains the quick-connect and bulk-management
+surface. Its exact-country filter compares complete catalog country names.
+Checkboxes, Ctrl/Command and Shift selection, and tri-state **Select visible**
+remain durable across search, filtering, and sorting; connecting requires
+exactly one selected endpoint. Clickable headers sort Select, Endpoint,
+Region, Favorite, Server ID, Router state, Nodes, PC latency, Reach, and Tested
+by their semantic values rather than displayed text. Numeric fields remain
+numeric and missing results stay last in either direction.
 
 Both frontends offer a manual-only bounded TCP reachability test from the
 desktop's current network path. Ubuntu's **Ping** action measures the visible
@@ -132,37 +158,36 @@ all loaded rows.
 
 The tests send no command to DD-WRT, do not measure bandwidth, and never switch
 the endpoint. The separately confirmed Windows connect action changes DD-WRT
-only; it neither installs a VPN nor changes local PC routing. It uses the
-optional companion so a failed connection can restore the router's previous
-endpoint settings.
+only; it neither installs a VPN nor changes local PC routing.
 
 Windows saves manual results locally until they are cleared or replaced, shows
 their tested time, and marks old or changed-target results for a manual retest.
-The endpoint list can restore Astrill's default order, group by region, or sort
-current results by numeric PC latency without running another test.
+The endpoint list can restore Astrill's default order, group by region, sort
+current results by numeric PC latency, or use any semantic table header without
+running another test.
 
 The Windows endpoint table also has a **Favorite** column backed by DD-WRT's
 native `astrill_favlist`. Favorites are read after the endpoint catalog loads,
-when **Sync favorites** is selected, and from verified action readbacks. Adding
-or removing the selected endpoint requires confirmation. The action reads a
-fresh router value, preserves every other record, rejects a concurrent change,
-commits only the favorite list once, and verifies the full readback. It does
+on **Sync from router**, and from verified action readbacks. **Favorite
+selected** and **Unfavorite selected** validate the whole selection before any
+write, preserve every other record and its order, reject concurrent changes,
+commit the complete batch at most once, and verify the full readback. They do
 not require the companion, reconnect Astrill, switch endpoints, run a latency
 test, or start a recurring SSH poll.
 
 Malformed router favorite data is displayed but preserved and cannot be
-edited. Favorite changes are also blocked while the Astrill view has unsaved
-edits, preventing a favorite refresh from discarding a local draft. Ubuntu's
-existing Connection view continues to synchronize its selected endpoint's
-favorite switch with the same native value and its existing dirty-page
-conflict handling.
+edited. Windows favorite changes are blocked while either Astrill or
+Connection has unsaved edits, preventing a refresh from discarding a local
+draft. Both frontends synchronize the Connection page's selected-endpoint
+favorite with the same native value and preserve dirty-page conflicts.
 
-The Astrill view owns native routing, device, interface, DNS, and advanced
-filters. Ubuntu and Windows present human-readable controls backed by an
-explicit NVRAM allowlist. Router state is read at launch and on explicit
-refresh, page demand, or completed actions; the desktop does not run a recurring
-SSH poll. Pending edits are retained and a reload conflict is shown instead of
-silently replacing them.
+The Windows **Astrill** view organizes the complete safe native mirror into
+seven human-readable sections: **Overview**, **Connection**, **Routing**,
+**Privacy & DNS**, **Devices**, **Resilience**, and **Advanced**. Ubuntu and
+Windows remain backed by the same explicit NVRAM allowlist. Router state is
+read at launch and on explicit refresh, page demand, or completed actions; the
+desktop does not run a recurring SSH poll. Pending edits are retained and a
+reload conflict is shown instead of silently replacing them.
 
 ### Devices and applications
 
@@ -176,7 +201,9 @@ per-application WFP backend; see the
 ## Safety model
 
 - The companion never edits Astrill applet files.
-- Native Astrill marks and classifications retain precedence.
+- Companion `0.2.4` installs its marked Direct/Astrill lookups at priorities
+  `28000` and `28001`, ahead of observed native Astrill rules, and removes only
+  matching former companion entries at `29000` and `29001`.
 - Direct and Astrill policies use separate high mark bits and tables.
 - VPN-targeted policy is fail-closed while `tun0` is unavailable.
 - A/B activation leaves the previous ruleset active until the replacement is
@@ -186,9 +213,15 @@ per-application WFP backend; see the
   router packages.
 - Connection writes are allowlisted and read back exactly; a failed native
   reconnect restores the prior values and active session when possible.
+- Endpoint switching allows up to 60 seconds for both connected state and
+  `tun0` before rollback; rollback restores the original selected endpoint and
+  whether its tunnel was connected or disconnected, or reports explicitly
+  when that recovery cannot be verified.
 - Windows favorite changes use a fresh read plus compare-before-write
-  replacement, one NVRAM commit, and exact readback without reconnecting the
-  tunnel.
+  batch replacement, at most one NVRAM commit, and exact readback without
+  reconnecting the tunnel.
+- Router-local maintenance ensures runtime every 60 seconds and performs the
+  domain refresh every 30 minutes; the Windows desktop does not poll over SSH.
 - `Restore Astrill Only` removes companion state without changing the selected
   Astrill endpoint, protocol, or connection state.
 - Catalog extensions are declarative data and never execute on the router.

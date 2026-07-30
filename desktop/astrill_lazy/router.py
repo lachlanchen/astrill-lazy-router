@@ -271,7 +271,10 @@ done
             str(vpn_mode),
             "--json",
         ]
-        result = self._run_alctl(arguments, timeout=90)
+        # A failed switch can use up to 60 seconds for the requested endpoint,
+        # 65 seconds to stop a late tunnel, and 60 seconds to verify restoration
+        # of a previously connected endpoint.
+        result = self._run_alctl(arguments, timeout=210)
         return json.loads(_last_json_line(result.stdout))
 
     def set_astrill_connection(

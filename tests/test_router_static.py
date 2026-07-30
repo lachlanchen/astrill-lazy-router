@@ -85,8 +85,10 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "eval " not in helper
     assert "--set-xmark" in controller
     assert "0xc000000" in controller
-    assert "DIRECT_PREF=29000" in controller
-    assert "VPN_PREF=29001" in controller
+    assert "DIRECT_PREF=28000" in controller
+    assert "VPN_PREF=28001" in controller
+    assert "PREVIOUS_DIRECT_PREF=29000" in controller
+    assert "PREVIOUS_VPN_PREF=29001" in controller
     assert "LEGACY_DIRECT_PREF=32000" in controller
     assert "LEGACY_VPN_PREF=32001" in controller
     assert "ensure_companion_precedence" in controller
@@ -94,6 +96,9 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     direct_pref = int(re.search(r"^DIRECT_PREF=(\d+)$", controller, re.MULTILINE)[1])
     vpn_pref = int(re.search(r"^VPN_PREF=(\d+)$", controller, re.MULTILINE)[1])
     assert 0 < direct_pref < vpn_pref < 29998
+    assert "WATCHDOG_INTERVAL=60" in controller
+    assert "WATCHDOG_REFRESH_CYCLES=30" in controller
+    assert "ASTRILL_CONNECT_ATTEMPTS=60" in controller
     assert "MAX_RULE_BYTES=6144" in controller
     assert controller.count("iptables -w 10") >= 15
     assert "insufficient NVRAM headroom" in controller
@@ -108,6 +113,69 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "astrill-connect)" in controller
     assert "astrill-disconnect)" in controller
     assert "/dev/astrill/astrillvpn stop" in controller
+
+
+def test_failed_astrill_switch_restores_settings_and_original_tunnel_state() -> None:
+    controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
+    match = re.search(
+        r"^switch_astrill\(\) \{\n(?P<body>.*?)"
+        r"^\}\n\nset_astrill_connection\(\)",
+        controller,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None
+    switch = match["body"]
+
+    state_snapshot = "initially_connected=false"
+    state_up = "initially_connected=true"
+    requested_start = '/dev/astrill/astrillvpn start > "$BASE/astrill-switch.log"'
+    restore_settings = 'done < "$rollback_file"'
+    rollback_stop = '/dev/astrill/astrillvpn stop >> "$BASE/astrill-switch.log"'
+    state_branch = 'if [ "$initially_connected" = true ]; then'
+    rollback_start = '/dev/astrill/astrillvpn start >> "$BASE/astrill-switch.log"'
+    original_failure = (
+        'fail "new Astrill server did not connect; previous settings were restored"'
+    )
+    unverified_failure = (
+        'fail "new Astrill server did not connect; '
+        'previous connection state could not be verified"'
+    )
+
+    assert switch.index(state_snapshot) < switch.index(state_up)
+    assert switch.index(state_up) < switch.index(requested_start)
+    assert switch.index(requested_start) < switch.index(restore_settings)
+    assert switch.index(restore_settings) < switch.index(rollback_stop)
+    assert switch.index(rollback_stop) < switch.index(state_branch)
+    assert switch.index(state_branch) < switch.index(rollback_start)
+    assert switch.index(rollback_start) < switch.index(original_failure)
+    assert switch.index(original_failure) < switch.index(unverified_failure)
+
+    disconnected_rollback = switch[
+        switch.index(rollback_stop) : switch.index(state_branch)
+    ]
+    assert "astrillvpn start" not in disconnected_rollback
+    assert "rollback_stopped=false" in disconnected_rollback
+    assert 'while [ "$attempts" -lt 65 ]' in disconnected_rollback
+    assert "astrill/openvpn.conf" in disconnected_rollback
+
+    connected_rollback = switch[
+        switch.index(state_branch) : switch.index("ensure_routes >/dev/null 2>&1")
+    ]
+    assert rollback_start in connected_rollback
+    assert "rollback_connected=false" in connected_rollback
+    assert "rollback_connected=true" in connected_rollback
+    assert "rollback_verified=false" in connected_rollback
+    assert 'while [ "$attempts" -lt "$ASTRILL_CONNECT_ATTEMPTS" ]' in connected_rollback
+    assert "rollback_verified=true" in connected_rollback
+    assert '[ "$rollback_stopped" = true ]' in connected_rollback
+    assert '[ "$rollback_connected" = true ]' in connected_rollback
+
+    assert "rollback_verified=$rollback_stopped" in switch
+    assert switch.count('rm -f "$rollback_file"') == 3
+    assert "could not verify the original connection state" in switch
+    assert switch.index("ensure_routes >/dev/null 2>&1") < switch.index(
+        original_failure
+    )
 
 
 def test_ddwrt_banner_is_removed_from_ssh_errors() -> None:

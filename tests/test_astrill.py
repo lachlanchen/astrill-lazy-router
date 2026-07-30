@@ -15,6 +15,7 @@ from astrill_lazy.astrill import (
     serialize_astrill_favorites,
     unpack_applet,
     update_astrill_favorite_list,
+    update_astrill_favorite_list_batch,
 )
 from astrill_lazy.models import Region
 
@@ -188,3 +189,56 @@ def test_favorite_list_update_blocks_malformed_or_mismatched_records() -> None:
         update_astrill_favorite_list("", 701, favorite)
     with pytest.raises(ValueError, match="server ID must be positive"):
         update_astrill_favorite_list("", 0, None)
+
+
+def test_favorite_list_batch_preserves_order_orphans_and_request_order() -> None:
+    original = (
+        "1109:536872021:1-65535:0:6:1109,"
+        "9999:123:443:1:6:9999,"
+        "458:536871370:443:1:6:458"
+    )
+    existing_replacement = AstrillFavorite(458, 1, "53", 0, 1, 2)
+    first_added = AstrillFavorite(700, 456, "8292", 0, 5, 701)
+    second_added = AstrillFavorite(701, 457, "443", 1, 6, 702)
+
+    updated = update_astrill_favorite_list_batch(
+        original,
+        (
+            (458, existing_replacement),
+            (1109, None),
+            (700, first_added),
+            (701, second_added),
+        ),
+    )
+
+    assert updated == (
+        "9999:123:443:1:6:9999,"
+        "458:536871370:443:1:6:458,"
+        "700:456:8292:0:5:701,"
+        "701:457:443:1:6:702"
+    )
+
+
+def test_favorite_list_batch_validates_all_changes_and_keeps_noops_exact() -> None:
+    original = "1109:536872021:1-65535:0:6:1109"
+    favorite = AstrillFavorite(700, 456, "8292", 0, 5, 701)
+
+    assert (
+        update_astrill_favorite_list_batch(
+            original,
+            (
+                (1109, AstrillFavorite(1109, 1, "53", 0, 1, 2)),
+                (700, None),
+            ),
+        )
+        == original
+    )
+    with pytest.raises(ValueError, match="duplicate server ID"):
+        update_astrill_favorite_list_batch(
+            original,
+            ((700, favorite), (700, None)),
+        )
+    with pytest.raises(ValueError, match="does not match"):
+        update_astrill_favorite_list_batch(original, ((701, favorite),))
+    with pytest.raises(ValueError, match="favorite record"):
+        update_astrill_favorite_list_batch("invalid", ())

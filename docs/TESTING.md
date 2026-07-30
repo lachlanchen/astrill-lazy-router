@@ -7,6 +7,7 @@ Run from the repository:
 ```bash
 .venv/bin/pytest
 .venv/bin/ruff check desktop tests scripts/validate-catalog.py
+.venv/bin/ruff format --check desktop tests scripts/validate-catalog.py
 .venv/bin/python scripts/validate-catalog.py --dns
 shellcheck -x -s sh \
   scripts/*.sh helpers/astrill-lazy-netns \
@@ -18,13 +19,15 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-182 tests passed, 2 skipped
-Ruff: all checks passed
-Catalog: 261 profiles, 650/650 unique seed hosts resolved to IPv4
-ShellCheck: no findings
-Desktop entry: valid
-AppStream metadata: valid
+246 tests passed, 4 skipped
+Ruff lint and format: all checks passed
+Catalog: 261 profiles, 19 categories, 729 seeds / 650 unique
 ```
+
+The release pytest result was produced by the full Windows build virtual
+environment with `python -m pytest -ra`. The four skips are two Ubuntu-only
+provider tests and two router static tests that require a POSIX shell
+unavailable in that Windows environment.
 
 Tests cover:
 
@@ -51,9 +54,24 @@ Tests cover:
 - SSH banner error cleanup;
 - native mode adapters, device/site parsing, safe-key validation, and
   round-trip writes;
-- native favorite parsing, ordered add/remove behavior, malformed-value
-  rejection, compare-before-write replacement, exact readback, and Windows
-  Favorite-column guards;
+- native favorite parsing, ordered atomic batch add/remove behavior,
+  malformed-value rejection, whole-selection validation,
+  compare-before-write replacement, exact readback, and Windows
+  Favorite/Unfavorite guards;
+- Windows Services category/profile/provider-country filtering, durable
+  checkbox and row multi-selection, tri-state Select visible, and explicit
+  Add-to-Policies behavior;
+- Windows endpoint exact-country filtering, durable checkbox plus
+  Ctrl/Command/Shift selection, semantic header ordering,
+  numeric/missing-value behavior, and persistent manual latency-cache
+  rendering;
+- Windows Connection draft validation, dirty/conflict preservation,
+  protocol/port capability changes, favorite synchronization, action gating,
+  and native/companion transactional controller paths;
+- seven-section Windows Astrill rendering, complete safe-key coverage, and
+  section changes that preserve draft/dirty state;
+- companion `0.2.4` policy preferences, owned legacy-priority cleanup,
+  60-second connect boundary, and reduced ensure/refresh cadence;
 - route probe parsing, noise thresholds, minimum bypasses, and service-aware
   recommendations;
 - complete native-only removal and preserved Astrill state.
@@ -68,18 +86,20 @@ The following checks were performed against the Linksys E4200:
 
 - router package installation and repeated idempotent upgrade;
 - startup/MyPage preservation;
-- overlay policy preferences `29000` and `29001`, their precedence guard, and
-  exact cleanup of legacy `32000` and `32001` rules;
+- overlay policy preferences `28000` and `28001`, their companion-before-native
+  precedence guard, exact owned cleanup of former `29000`/`29001` and legacy
+  `32000`/`32001` rules, and preservation of unrelated policy entries;
 - WAN table `213` and tunnel table `212`;
 - default empty chain with no traffic effect;
-- `UU Remote -> Direct` compilation and DNS resolution;
+- the explicit `UU Remote -> Direct` workflow scenario, compilation, and DNS
+  resolution; fresh product configurations still start with no policy;
 - four Direct service groups expanding to 56 domain/network rules;
 - real HTTPS request to `uuyc.163.com`;
 - 49 packets incrementing the `0x4000000/0xc000000` mark rule in a live
   verification run;
 - direct table pointing to `vlan2`;
-- removal of the active `PREROUTING` jump and watchdog restoration within 18
-  seconds;
+- removal of the active `PREROUTING` jump and router-local watchdog
+  restoration, with the release cadence now one ensure per 60 seconds;
 - rollback to zero rules and reapply to the alternate chain;
 - upgrade replacing the watchdog PID while retaining persisted rules;
 - orphaned old-watchdog upgrade recovery and owner-aware PID-file cleanup;
@@ -124,6 +144,13 @@ The following checks were performed against the Linksys E4200:
 - applet address-map parsing, fixed and ranged TCP probe selection, bounded
   endpoint latency validation, successful connection timing, and no-reply
   handling;
+- companion `0.2.4` switching from a fully down tunnel to server `998` with
+  RouterPro VPN TCP (protocol index `3`) in 28.4 seconds, demonstrating why
+  the former 30-second switch cutoff was marginal and verifying the new
+  60-second boundary;
+- installed companion maintenance configured for a 60-second ensure and a
+  domain refresh every 30 cycles (approximately 30 minutes), with no desktop
+  polling involved;
 - applet country-name normalization, default-order preservation, country
   sorting, measured fastest/slowest sorting, and stable pending/no-reply/
   unmeasured ordering;
@@ -131,9 +158,9 @@ The following checks were performed against the Linksys E4200:
   with observed values from 172.3 ms to 487.2 ms at inspection time.
 - Endpoints Country/Ping header and row rendering at both `1180x760` and
   `880x600` without control, row-label, or result overlap.
-- `0.2.9` Endpoints and full Connection rendering at both `1180x760` and
-  `880x600`, including nine native favorites, next-favorite reconnect enabled,
-  and router-boot connection disabled.
+- `0.2.10` real Windows-platform captures at `1180x760` for Services,
+  Connection, Endpoints, and the seven-section Astrill page, with readable
+  text and no observed overlap;
 - a reversible GUI favorite add/remove for Singapore server `1498`, with the
   committed `astrill_favlist` read back after each action and the original
   nine-record string restored exactly;

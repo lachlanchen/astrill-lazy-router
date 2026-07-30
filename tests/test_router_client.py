@@ -43,6 +43,45 @@ def test_refresh_allows_a_full_forced_domain_resolution(
     assert client.refresh() == {"health": "healthy"}
 
 
+def test_astrill_switch_timeout_covers_verified_failure_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+
+    def run_alctl(
+        arguments: list[str],
+        *,
+        input_bytes: bytes | None = None,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        assert arguments == [
+            "astrill-switch",
+            "998",
+            "998",
+            "123",
+            "443",
+            "0",
+            "3",
+            "6",
+            "--json",
+        ]
+        assert input_bytes is None
+        assert timeout == 210
+        return CommandResult('{"health":"healthy"}\n', "", 0)
+
+    monkeypatch.setattr(client, "_run_alctl", run_alctl)
+
+    assert client.switch_astrill(
+        server_id=998,
+        sid=998,
+        encoded_ip=123,
+        port="443",
+        port_index=0,
+        protocol=3,
+        vpn_mode=6,
+    ) == {"health": "healthy"}
+
+
 def test_remote_timeout_is_reported_as_a_router_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -14,13 +14,17 @@ from astrill_lazy.native_settings import (
     SAFE_NATIVE_ASTRILL_KEYS,
     NativeAstrillSettings,
 )
-from astrill_lazy.windows_native_page import WindowsNativeSettingsPage
+from astrill_lazy.windows_native_page import (
+    SECTION_DEFINITIONS,
+    WindowsNativeSettingsPage,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QTabWidget,
 )
 
 
@@ -105,6 +109,64 @@ def test_page_covers_every_safe_key_and_starts_disabled(
         label.text() == "NVRAM · astrill_serverid"
         for label in page.findChildren(QLabel)
     )
+
+
+def test_page_has_clear_spacious_sections_and_keeps_controls_in_context(
+    page: WindowsNativeSettingsPage,
+) -> None:
+    expected_names = tuple(title for _section_id, title, _help in SECTION_DEFINITIONS)
+    assert page.section_names == expected_names
+    assert isinstance(page.section_tabs, QTabWidget)
+    assert page.section_tabs.count() == len(expected_names) == 7
+    assert (
+        tuple(
+            page.section_tabs.tabText(index)
+            for index in range(page.section_tabs.count())
+        )
+        == expected_names
+    )
+
+    for section_id, _title, description in SECTION_DEFINITIONS:
+        section = page._section_pages[section_id]
+        summary = section.findChild(QLabel, f"nativeSectionSummary_{section_id}")
+        assert summary is not None
+        assert summary.text() == description
+        assert summary.wordWrap()
+        margins = page._section_layouts[section_id].contentsMargins()
+        assert margins.left() >= 16
+        assert page._section_layouts[section_id].spacing() >= 16
+
+    controls_by_section = {
+        "overview": page._state_labels["astrill_serverid"],
+        "connection": page._direct_controls["astrill_cipher"],
+        "routing": page.site_default,
+        "privacy_dns": page._direct_controls["astrill_dnsserver"],
+        "devices": page.device_table,
+        "resilience": page._direct_controls["astrill_autocycle"],
+        "advanced": page._direct_controls["astrill_iplistext"],
+    }
+    for section_id, control in controls_by_section.items():
+        assert page._section_pages[section_id].isAncestorOf(control)
+
+
+def test_section_navigation_preserves_rendered_draft_and_dirty_state(
+    page: WindowsNativeSettingsPage,
+) -> None:
+    page.render(native_settings())
+    page.section_tabs.setCurrentWidget(page._section_pages["privacy_dns"])
+    ads = page._direct_controls["astrill_adsblock"]
+    assert isinstance(ads, QCheckBox)
+    ads.setChecked(True)
+    page.section_tabs.setCurrentWidget(page._section_pages["overview"])
+
+    assert page.dirty
+    assert ads.isChecked()
+    assert page.collect_changes() == {"astrill_adsblock": "1"}
+
+    page.render(native_settings(astrill_adsblock="1"))
+    assert not page.dirty
+    assert ads.isChecked()
+    assert page.collect_changes() == {}
 
 
 def test_dirty_state_reverts_and_read_only_busy_guards_apply(

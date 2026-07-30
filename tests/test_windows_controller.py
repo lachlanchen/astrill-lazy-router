@@ -6,17 +6,24 @@ from typing import Any
 import astrill_lazy.windows_controller as controller_module
 import pytest
 from astrill_lazy.astrill import (
+    AstrillConnectionSelection,
     AstrillEndpoint,
+    AstrillFavorite,
     AstrillNode,
     AstrillServer,
 )
 from astrill_lazy.catalog import load_catalog
-from astrill_lazy.installer import EnsureResult, InstallResult
+from astrill_lazy.installer import CompanionCheck, EnsureResult, InstallResult
 from astrill_lazy.models import MatchKind, RouteTarget
 from astrill_lazy.native_settings import NativeAstrillSettings
+from astrill_lazy.router import AstrillConnectionResult, RouterMonitorSnapshot
 from astrill_lazy.service_policy import ServiceRouteMode
 from astrill_lazy.store import ConfigStore
-from astrill_lazy.windows_controller import ControllerError, WindowsController
+from astrill_lazy.windows_controller import (
+    ControllerError,
+    ServerCatalog,
+    WindowsController,
+)
 from astrill_lazy.windows_ssh_setup import (
     WindowsHostKey,
     WindowsKeyAuthorization,
@@ -27,6 +34,20 @@ class FakeRouter:
     def __init__(self) -> None:
         self.read_calls: list[str] = []
         self.write_calls: list[tuple[str, object]] = []
+        self.monitor_presence: dict[str, Any] = {
+            "installed": True,
+            "version": "0.2.4",
+            "runtime": True,
+        }
+        self.monitor_companion_status: dict[str, Any] | None = {
+            "health": "healthy",
+            "version": "0.2.4",
+            "jump_installed": True,
+            "watchdog": True,
+            "vpn_state": "up",
+            "astrill_server_id": 1,
+            "astrill_protocol": 2,
+        }
         self.payload = (
             b"this.list = [{id:1,name:'USA - Test',servers:["
             b"{id:7,lf:1,ips:["
@@ -62,6 +83,32 @@ class FakeRouter:
     def native_astrill_settings(self) -> NativeAstrillSettings:
         self.read_calls.append("native_settings")
         return NativeAstrillSettings.from_dict({})
+
+    def monitor_snapshot(self, *, include_companion: bool) -> RouterMonitorSnapshot:
+        self.read_calls.append("monitor")
+        return RouterMonitorSnapshot(
+            native_status={
+                "health": "healthy",
+                "native_mode": True,
+                "vpn_state": "down",
+            },
+            settings=NativeAstrillSettings.from_dict(
+                {
+                    "astrill_serverid": "1",
+                    "astrill_protocol": "2",
+                }
+            ),
+            companion_presence=(
+                dict(self.monitor_presence)
+                if include_companion
+                else {"installed": False, "version": None, "runtime": False}
+            ),
+            companion_status=(
+                dict(self.monitor_companion_status)
+                if include_companion and self.monitor_companion_status is not None
+                else None
+            ),
+        )
 
     def update_native_astrill_settings(
         self, changes: dict[str, Any]
@@ -112,6 +159,41 @@ class FakeRouter:
     def switch_astrill(self, **arguments: object) -> dict[str, Any]:
         self.write_calls.append(("switch", dict(arguments)))
         return {"ok": True, "astrill_server_id": arguments["server_id"]}
+
+    def save_astrill_connection(
+        self,
+        selection: AstrillConnectionSelection,
+        changes: dict[str, Any],
+    ) -> NativeAstrillSettings:
+        values = {**selection.native_values(), **changes}
+        self.write_calls.append(("save_connection", values))
+        return NativeAstrillSettings.from_dict(values)
+
+    def apply_astrill_connection(
+        self,
+        selection: AstrillConnectionSelection,
+        changes: dict[str, Any],
+        *,
+        companion_enabled: bool,
+    ) -> AstrillConnectionResult:
+        values = {**selection.native_values(), **changes}
+        self.write_calls.append(
+            (
+                "apply_connection",
+                {
+                    "values": values,
+                    "companion_enabled": companion_enabled,
+                },
+            )
+        )
+        return AstrillConnectionResult(
+            status={
+                "ok": True,
+                "vpn_state": "up",
+                "astrill_server_id": selection.server_id,
+            },
+            settings=NativeAstrillSettings.from_dict(values),
+        )
 
 
 def make_store(path: Path) -> ConfigStore:
@@ -377,8 +459,14 @@ def test_read_only_blocks_every_router_mutation_before_dispatch(
         controller.rollback,
         lambda: controller.set_connection(True),
         lambda: controller.switch_server(server, 2),
+        lambda: controller.apply_server_connection(server, 2),
+        lambda: controller.save_astrill_connection(
+            AstrillConnectionSelection.from_server(server, 2, 0),
+            {},
+        ),
         lambda: controller.save_native_settings({"astrill_adsblock": "1"}),
         lambda: controller.set_endpoint_favorite(server, 2, enabled=True),
+        lambda: controller.apply_endpoint_favorite_changes(((server.id, None),)),
     )
 
     for operation in operations:
@@ -424,6 +512,187 @@ def test_endpoint_switch_requires_companion_and_dispatches_selected_protocol(
             },
         )
     ]
+
+
+def test_endpoint_apply_supports_companion_and_transactional_native_paths(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+    server = make_server()
+
+    native_result = controller.apply_server_connection(
+        server,
+        2,
+        {"astrill_autostart": "1"},
+    )
+    assert native_result.status["vpn_state"] == "up"
+    assert router.write_calls[-1] == (
+        "apply_connection",
+        {
+            "values": {
+                "astrill_serverid": "1",
+                "astrill_sid": "7",
+                "astrill_ip": "123",
+                "astrill_port": "443",
+                "astrill_portindex": "0",
+                "astrill_protocol": "2",
+                "astrill_vpnmode": "6",
+                "astrill_autostart": "1",
+            },
+            "companion_enabled": False,
+        },
+    )
+
+    store.companion_enabled = True
+    companion_result = controller.apply_server_connection(server, 2)
+    assert companion_result.settings.get("astrill_serverid") == "1"
+    assert router.write_calls[-1][1]["companion_enabled"] is True  # type: ignore[index]
+
+
+def test_connection_state_sequences_one_snapshot_before_catalog(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.companion_enabled = True
+    router = FakeRouter()
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+
+    state = controller.load_connection_state(refresh_servers=True)
+
+    assert state.status["vpn_state"] == "up"
+    assert state.settings.get("astrill_serverid") == "1"
+    assert len(state.server_catalog.servers) == 1
+    assert router.read_calls[-2:] == ["monitor", "servers"]
+
+    router.read_calls.clear()
+    cached = controller.load_connection_state(refresh_servers=False)
+    assert cached.server_catalog is controller.server_catalog
+    assert router.read_calls == ["monitor"]
+
+
+def test_connection_state_repairs_vanished_companion_runtime_before_catalog(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.companion_enabled = True
+    router = FakeRouter()
+    router.monitor_presence = {
+        "installed": True,
+        "version": "0.2.4",
+        "runtime": False,
+    }
+    router.monitor_companion_status = None
+    repaired = {
+        "health": "healthy",
+        "version": "0.2.4",
+        "jump_installed": True,
+        "watchdog": True,
+        "vpn_state": "down",
+        "astrill_server_id": 1,
+        "astrill_protocol": 2,
+    }
+
+    class FakeInstaller:
+        def __init__(self, supplied_router: object) -> None:
+            assert supplied_router is router
+
+        def check(
+            self,
+            *,
+            presence: dict[str, Any] | None = None,
+            status: dict[str, Any] | None = None,
+        ) -> CompanionCheck:
+            router.read_calls.append("check")
+            assert presence == router.monitor_presence
+            assert status is None
+            return CompanionCheck(
+                "repair",
+                "0.2.4",
+                "0.2.4",
+                None,
+                "runtime needs repair",
+            )
+
+        def ensure(self, *, allow_install: bool = True) -> EnsureResult:
+            router.read_calls.append("ensure")
+            assert allow_install is False
+            return EnsureResult(repaired, "repaired")
+
+    monkeypatch.setattr(controller_module, "RouterInstaller", FakeInstaller)
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+
+    state = controller.load_connection_state(refresh_servers=True)
+
+    assert state.status == repaired
+    assert state.status.get("native_mode") is not True
+    assert controller.store.companion_enabled is True
+    assert "restored from router NVRAM" in str(controller.recovery_notice)
+    assert router.read_calls == ["monitor", "check", "ensure", "servers"]
+
+
+def test_connection_state_never_masks_unrepairable_runtime_as_native(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.companion_enabled = True
+    router = FakeRouter()
+    router.monitor_presence = {
+        "installed": True,
+        "version": "0.2.4",
+        "runtime": False,
+    }
+    router.monitor_companion_status = None
+
+    class FakeInstaller:
+        def __init__(self, supplied_router: object) -> None:
+            assert supplied_router is router
+
+        def check(
+            self,
+            *,
+            presence: dict[str, Any] | None = None,
+            status: dict[str, Any] | None = None,
+        ) -> CompanionCheck:
+            router.read_calls.append("check")
+            assert presence == router.monitor_presence
+            assert status is None
+            return CompanionCheck(
+                "install",
+                "0.2.4",
+                "0.2.4",
+                None,
+                "stored runtime cannot be repaired",
+            )
+
+    monkeypatch.setattr(controller_module, "RouterInstaller", FakeInstaller)
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ControllerError, match="separately confirmed"):
+        controller.load_connection_state(refresh_servers=True)
+
+    assert controller.store.companion_enabled is True
+    assert router.read_calls == ["monitor", "check"]
 
 
 def test_endpoint_favorite_fresh_reads_and_does_not_require_companion(
@@ -529,6 +798,221 @@ def test_endpoint_favorite_malformed_snapshot_performs_no_write(
     with pytest.raises(ValueError, match="favorite record"):
         controller.set_endpoint_favorite(make_server(), None, enabled=False)
     assert router.write_calls == []
+
+
+def test_endpoint_favorites_bulk_add_uses_one_fresh_read_and_one_cas(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    current = "1:999:80:1:5:1,9999:456:53:0:5:9999"
+
+    def server(server_id: int) -> AstrillServer:
+        return AstrillServer(
+            id=server_id,
+            name=f"Endpoint {server_id}",
+            nodes=(
+                AstrillNode(
+                    id=server_id + 10,
+                    weight=1,
+                    endpoints=(
+                        AstrillEndpoint(
+                            encoded_ip=server_id * 100 + 2,
+                            port="443",
+                            mode=0,
+                            protocol_code=134,
+                            port_index=0,
+                            protocol_original=5,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    first, second, third = server(1), server(2), server(3)
+
+    def native_settings() -> NativeAstrillSettings:
+        router.read_calls.append("native_settings")
+        return NativeAstrillSettings.from_dict({"astrill_favlist": current})
+
+    router.native_astrill_settings = native_settings  # type: ignore[method-assign]
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+    controller.server_catalog = ServerCatalog((first, second, third), {})
+
+    settings = controller.set_endpoint_favorites(
+        (third, first, second),
+        2,
+        enabled=True,
+    )
+
+    replacement = current + ",3:302:443:0:6:13,2:202:443:0:6:12"
+    assert router.read_calls == ["native_settings"]
+    assert router.write_calls == [
+        (
+            "favorites",
+            {
+                "expected_current": current,
+                "replacement": replacement,
+            },
+        )
+    ]
+    assert settings.get("astrill_favlist") == replacement
+
+
+def test_endpoint_favorites_bulk_remove_is_catalog_and_protocol_independent(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    current = "1:123:443:0:6:7,9999:456:53:0:5:9999,2:202:443:0:6:12"
+
+    def native_settings() -> NativeAstrillSettings:
+        router.read_calls.append("native_settings")
+        return NativeAstrillSettings.from_dict({"astrill_favlist": current})
+
+    router.native_astrill_settings = native_settings  # type: ignore[method-assign]
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+
+    settings = controller.set_endpoint_favorites(
+        (make_server(), AstrillServer(700, "Missing", ())),
+        None,
+        enabled=False,
+    )
+
+    replacement = "9999:456:53:0:5:9999,2:202:443:0:6:12"
+    assert router.read_calls == ["native_settings"]
+    assert router.write_calls == [
+        (
+            "favorites",
+            {
+                "expected_current": current,
+                "replacement": replacement,
+            },
+        )
+    ]
+    assert settings.get("astrill_favlist") == replacement
+
+
+def test_endpoint_favorites_bulk_validation_is_atomic_and_noops_skip_cas(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    current = "9999:456:53:0:5:9999"
+
+    def native_settings() -> NativeAstrillSettings:
+        router.read_calls.append("native_settings")
+        return NativeAstrillSettings.from_dict({"astrill_favlist": current})
+
+    router.native_astrill_settings = native_settings  # type: ignore[method-assign]
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+    existing = AstrillServer(1, "Existing without loaded protocol data", ())
+    unsupported = AstrillServer(
+        2,
+        "Unsupported",
+        (
+            AstrillNode(
+                12,
+                1,
+                (
+                    AstrillEndpoint(
+                        encoded_ip=202,
+                        port="443",
+                        mode=0,
+                        protocol_code=6,
+                        port_index=0,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    controller.server_catalog = ServerCatalog((make_server(), unsupported), {})
+    with pytest.raises(ValueError, match="does not support"):
+        controller.set_endpoint_favorites(
+            (make_server(), unsupported),
+            2,
+            enabled=True,
+        )
+    assert router.read_calls == ["native_settings"]
+    assert router.write_calls == []
+
+    router.read_calls.clear()
+    current = "1:123:443:0:6:7"
+    controller.server_catalog = ServerCatalog((), {})
+    settings = controller.set_endpoint_favorites(
+        (existing,),
+        2,
+        enabled=True,
+    )
+    assert settings.get("astrill_favlist") == current
+    assert router.read_calls == ["native_settings"]
+    assert router.write_calls == []
+
+    router.read_calls.clear()
+    with pytest.raises(ValueError, match="at least one"):
+        controller.set_endpoint_favorites((), 2, enabled=True)
+    with pytest.raises(ValueError, match="duplicate server ID"):
+        controller.set_endpoint_favorites(
+            (existing, existing),
+            2,
+            enabled=True,
+        )
+    with pytest.raises(ValueError, match="select an Astrill protocol"):
+        controller.set_endpoint_favorites((existing,), True, enabled=True)
+    assert router.read_calls == []
+    assert router.write_calls == []
+
+
+def test_connection_favorite_changes_fresh_merge_without_catalog_overwrite(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    router = FakeRouter()
+    current = "9999:456:53:0:5:9999,1:123:443:0:6:7"
+
+    def native_settings() -> NativeAstrillSettings:
+        router.read_calls.append("native_settings")
+        return NativeAstrillSettings.from_dict({"astrill_favlist": current})
+
+    router.native_astrill_settings = native_settings  # type: ignore[method-assign]
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+    added = AstrillFavorite(2, 202, "443", 0, 6, 12)
+
+    settings = controller.apply_endpoint_favorite_changes(((1, None), (2, added)))
+
+    replacement = "9999:456:53:0:5:9999,2:202:443:0:6:12"
+    assert router.read_calls == ["native_settings"]
+    assert router.write_calls == [
+        (
+            "favorites",
+            {
+                "expected_current": current,
+                "replacement": replacement,
+            },
+        )
+    ]
+    assert settings.get("astrill_favlist") == replacement
 
 
 def test_local_policy_service_and_device_mutations_are_saved_atomically(

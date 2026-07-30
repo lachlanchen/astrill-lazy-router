@@ -327,6 +327,67 @@ def serialize_astrill_favorites(
     return ",".join(favorite.to_native() for favorite in ordered.values())
 
 
+def update_astrill_favorite_list_batch(
+    value: str,
+    changes: Iterable[tuple[int, AstrillFavorite | None]],
+) -> str:
+    """Apply several favorite membership changes to one native snapshot.
+
+    Every change is validated before the result is built. Existing records
+    keep their value and order, removals affect only their requested server
+    IDs, and new records are appended in request order.
+    """
+
+    requested = tuple(changes)
+    validated: list[tuple[int, AstrillFavorite | None]] = []
+    requested_ids: set[int] = set()
+    for server_id, favorite in requested:
+        if (
+            not isinstance(server_id, int)
+            or isinstance(server_id, bool)
+            or server_id <= 0
+        ):
+            raise ValueError("Astrill favorite server ID must be positive")
+        if server_id in requested_ids:
+            raise ValueError(
+                f"Astrill favorite batch contains duplicate server ID {server_id}"
+            )
+        requested_ids.add(server_id)
+        if favorite is not None:
+            if not isinstance(favorite, AstrillFavorite):
+                raise TypeError(
+                    "Astrill favorite change must contain a favorite record"
+                )
+            favorite._validate()
+            if favorite.server_id != server_id:
+                raise ValueError(
+                    "Astrill favorite server ID does not match the selection"
+                )
+        validated.append((server_id, favorite))
+
+    favorites = list(parse_astrill_favorites(value))
+    if not validated:
+        return value
+
+    changes_by_id = dict(validated)
+    existing_ids = {favorite.server_id for favorite in favorites}
+    updated = [
+        favorite
+        for favorite in favorites
+        if not (
+            favorite.server_id in changes_by_id
+            and changes_by_id[favorite.server_id] is None
+        )
+    ]
+    changed = len(updated) != len(favorites)
+    for server_id, favorite in validated:
+        if favorite is not None and server_id not in existing_ids:
+            updated.append(favorite)
+            changed = True
+
+    return serialize_astrill_favorites(updated) if changed else value
+
+
 def update_astrill_favorite_list(
     value: str,
     server_id: int,
@@ -339,25 +400,10 @@ def update_astrill_favorite_list(
     the transport details stored by Astrill for that favorite.
     """
 
-    if not isinstance(server_id, int) or isinstance(server_id, bool) or server_id <= 0:
-        raise ValueError("Astrill favorite server ID must be positive")
-    favorites = list(parse_astrill_favorites(value))
-    existing = next(
-        (item for item in favorites if item.server_id == server_id),
-        None,
+    return update_astrill_favorite_list_batch(
+        value,
+        ((server_id, favorite),),
     )
-    if favorite is None:
-        if existing is None:
-            return value
-        favorites.remove(existing)
-        return serialize_astrill_favorites(favorites)
-    favorite._validate()
-    if favorite.server_id != server_id:
-        raise ValueError("Astrill favorite server ID does not match the selection")
-    if existing is not None:
-        return value
-    favorites.append(favorite)
-    return serialize_astrill_favorites(favorites)
 
 
 def parse_applet(payload: bytes) -> tuple[AstrillServer, ...]:

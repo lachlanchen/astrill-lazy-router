@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.2.10 - 2026-07-30
+
+- Add a dedicated native Windows Connection view with endpoint-aware protocol
+  and port choices, favorite, cipher, MTU, resilience controls, and verified
+  Save, Connect, Apply & Reconnect, and Disconnect actions.
+- Reorganize the Windows Astrill view into seven human-readable sections while
+  preserving every allowlisted native setting, validation rule, dirty draft,
+  and read-only guard.
+- Add durable endpoint checkboxes, Ctrl/Command and Shift row selection, exact
+  country filtering, semantic header ordering, and selected/visible/all
+  manual latency scopes.
+- Add atomic bulk Favorite and Unfavorite actions that fresh-read
+  `astrill_favlist`, preserve unrelated and unknown records, commit at most
+  once, and verify the complete readback.
+- Add service category, profile, and provider-country filters plus durable
+  multiselection and an explicit Suggested, Direct, or Astrill
+  **Add to Policies** flow; show local-versus-applied policy state clearly.
+- Allow the Windows endpoint and Connection views to use the native
+  transactional connection path when the optional companion is not installed,
+  including verified rollback after a failed connection.
+- Fresh-merge Connection-page favorite edits through the same compare-before-
+  write path as endpoint batches, report any later partial failure explicitly,
+  and prevent the Connection and Astrill editors from holding overlapping
+  writable drafts.
+- Reconcile a missing companion runtime before refreshing the Connection page
+  after a router reboot instead of silently presenting a native-only fallback.
+- Upgrade the router companion to `0.2.4`: place its explicit policy rules
+  before native Astrill rules, remove obsolete companion preferences, allow
+  60 seconds for Astrill startup, and reduce maintenance from a 15-second
+  ensure/5-minute refresh cycle to a 60-second ensure/30-minute refresh cycle;
+  failed switches now restore both the previous selection and its original
+  connected or disconnected state and report distinctly when recovery cannot
+  be verified.
+
 ## 0.2.9 - 2026-07-30
 
 - Add native Astrill favorite synchronization to the Ubuntu and Windows
