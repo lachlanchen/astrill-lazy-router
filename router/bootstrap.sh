@@ -23,7 +23,9 @@ done
 ACTUAL=$(md5sum "$ARCHIVE" | awk '{print $1}')
 [ -n "$EXPECTED" ] && [ "$ACTUAL" = "$EXPECTED" ] || exit 1
 mkdir -p "$BASE"
-[ ! -x "$BASE/alctl" ] || "$BASE/alctl" stop >/dev/null 2>&1
+if [ -x "$BASE/alctl" ]; then
+    "$BASE/alctl" stop >/dev/null 2>&1 || exit 1
+fi
 watchdog_pids() {
     ps w | awk '$0 ~ /\/tmp\/astrill-lazy\/alctl watchdog-loop[[:space:]]*$/ { print $1 }'
 }

@@ -102,9 +102,17 @@ website text is edited over SSH in the native app, not interpolated into
 - Private/local destinations return before policy marking.
 - Direct and VPN marks use bits outside Astrill's mask.
 - The plugin uses separate policy tables and does not flush Astrill chains.
-- VPN policy has a blackhole default when `tun0` is down.
+- Policy-rule preferences are allocated and verified after Astrill's native
+  rules settle. Cleanup normally uses the recorded preferences; if that record
+  is missing, only exact companion mark, mask, and table signatures are
+  recovered.
+- VPN table `212` retains a lower-priority blackhole fallback while `tun0` is
+  active and the blackhole becomes its only default while disconnected.
+- An unmanaged native undercut stays fail-closed, degraded, and rebase-required
+  until observed down or explicitly reconnected; automatic repair does not
+  ratchet the owned preferences downward.
 - A/B activation leaves the previous chain live until the new chain is ready.
-- The watchdog repairs applet/firewall restarts within 15 seconds.
+- The watchdog checks applet/firewall restarts every 60 seconds.
 - `alctl stop` removes only plugin-owned objects.
 - Automatic reconciliation checks version and runtime markers before any
   install, and compares the deterministic package fingerprint before recovery,
@@ -114,9 +122,11 @@ website text is edited over SSH in the native app, not interpolated into
   Recommendations are displayed before a separate apply action; incomplete
   comparisons retain the current route.
 
-Domain matching still depends on known, resolved service domains. Unknown CDN
-hostnames follow the router's ordinary Astrill behavior rather than being
-magically attributed to a company.
+Domain matching still depends on known, resolved service domains. Unknown CDN,
+dynamic ICE relay, and peer-to-peer destinations follow the router's ordinary
+Astrill behavior rather than being magically attributed to a company. A
+source-device rule or process-aware device-local backend is safer than adding
+broad hosting-provider CIDRs.
 
 ## Application Helper
 

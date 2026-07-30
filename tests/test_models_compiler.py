@@ -50,9 +50,20 @@ def test_core_catalog_contains_requested_services() -> None:
         "website",
     }
     assert all(item.source.startswith("https://") for item in catalog.services)
+    uu_remote = catalog.services_by_id["uu-remote"]
+    assert "a56.gdl.netease.com" in uu_remote.domains
+    assert set(uu_remote.networks) == {
+        "115.236.122.145/32",
+        "223.252.194.149/32",
+    }
     nutstore = catalog.services_by_id["nutstore"]
     assert nutstore.default_route is RouteTarget.DIRECT
-    assert {"app.jianguoyun.com", "comet.jianguoyun.com"} <= set(nutstore.domains)
+    assert {
+        "app.jianguoyun.com",
+        "comet.jianguoyun.com",
+        "dav.jianguoyun.com",
+    } <= set(nutstore.domains)
+    assert not nutstore.networks
 
 
 def test_default_uu_rule_compiles_complete_global_direct_profile() -> None:
@@ -65,11 +76,49 @@ def test_default_uu_rule_compiles_complete_global_direct_profile() -> None:
         "sig-3303-d.nrd.nie.163.com",
         "relay-mg-3303-d.nrd.nie.163.com",
         "online-logger.webapp.163.com",
+        "a56.gdl.netease.com",
         "115.236.122.145/32",
         "223.252.194.149/32",
     } <= selectors
     assert all(compiled.target is RouteTarget.DIRECT for compiled in compilation.rules)
+    assert all(compiled.protocol is Protocol.ANY for compiled in compilation.rules)
+    assert all(compiled.ports == "-" for compiled in compilation.rules)
     assert all(compiled.origin == "uu-remote-direct" for compiled in compilation.rules)
+
+
+def test_nutstore_compiles_official_webdav_host_without_port_restriction() -> None:
+    rule = Rule.create(
+        name="Nutstore",
+        match_kind=MatchKind.SERVICE,
+        selector="nutstore",
+        target=RouteTarget.DIRECT,
+        region="direct",
+    )
+    compilation = compile_rules([rule], load_catalog())
+
+    assert "dav.jianguoyun.com" in {compiled.selector for compiled in compilation.rules}
+    assert all(compiled.protocol is Protocol.ANY for compiled in compilation.rules)
+    assert all(compiled.ports == "-" for compiled in compilation.rules)
+    assert all(compiled.target is RouteTarget.DIRECT for compiled in compilation.rules)
+
+
+def test_uu_and_nutstore_direct_profiles_fit_router_contract() -> None:
+    nutstore_rule = Rule(
+        id="nutstore-direct",
+        name="Nutstore",
+        match_kind=MatchKind.SERVICE,
+        selector="nutstore",
+        target=RouteTarget.DIRECT,
+        region="direct",
+        priority=7600,
+    )
+    compilation = compile_rules(
+        [default_uu_rule(), nutstore_rule],
+        load_catalog(),
+    )
+
+    assert len(compilation.rules) == 24
+    assert len(compilation.to_tsv().encode("ascii")) <= MAX_COMPILED_BYTES
 
 
 def test_service_rule_expands_every_seed_domain() -> None:

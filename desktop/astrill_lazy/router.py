@@ -90,10 +90,10 @@ class RouterClient:
 
     def status(self) -> dict[str, Any]:
         result = self._run_alctl(["status", "--json"])
-        try:
-            return json.loads(_last_json_line(result.stdout))
-        except json.JSONDecodeError as exc:
-            raise RouterError(f"router returned invalid status JSON: {exc}") from exc
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid status JSON",
+        )
 
     def rules(self) -> str:
         return self._run_alctl(["rules"]).stdout
@@ -102,18 +102,24 @@ class RouterClient:
         result = self._run_alctl(
             ["apply", "-"], input_bytes=rules_tsv.encode(), timeout=120
         )
-        try:
-            return json.loads(_last_json_line(result.stdout))
-        except json.JSONDecodeError as exc:
-            raise RouterError(f"router returned invalid apply result: {exc}") from exc
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid apply result",
+        )
 
     def rollback(self) -> dict[str, Any]:
         result = self._run_alctl(["rollback", "--json"])
-        return json.loads(_last_json_line(result.stdout))
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid rollback result",
+        )
 
     def refresh(self) -> dict[str, Any]:
         result = self._run_alctl(["refresh", "--json"], timeout=DOMAIN_REFRESH_TIMEOUT)
-        return json.loads(_last_json_line(result.stdout))
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid refresh result",
+        )
 
     def clients(self) -> list[dict[str, Any]]:
         result = self._run_alctl(["clients", "--json"])
@@ -231,10 +237,13 @@ done
         raw_companion = values.get("companion_status", "").strip()
         if raw_companion:
             try:
-                candidate = json.loads(_last_json_line(raw_companion))
-            except (json.JSONDecodeError, RouterError):
+                candidate = _decode_status_document(
+                    raw_companion,
+                    error_prefix="router returned invalid monitor status",
+                )
+            except RouterError:
                 candidate = None
-            if isinstance(candidate, dict):
+            else:
                 parsed_companion = candidate
 
         return RouterMonitorSnapshot(
@@ -275,15 +284,22 @@ done
         # 65 seconds to stop a late tunnel, and 60 seconds to verify restoration
         # of a previously connected endpoint.
         result = self._run_alctl(arguments, timeout=210)
-        return json.loads(_last_json_line(result.stdout))
+        return _decode_status_document(
+            result.stdout,
+            error_prefix="router returned invalid Astrill switch result",
+        )
 
     def set_astrill_connection(
         self, connected: bool, *, companion_enabled: bool
     ) -> dict[str, Any]:
         if companion_enabled:
             command = "astrill-connect" if connected else "astrill-disconnect"
-            result = self._run_alctl([command], timeout=80)
-            return json.loads(_last_json_line(result.stdout))
+            timeout = 210 if connected else 80
+            result = self._run_alctl([command], timeout=timeout)
+            return _decode_status_document(
+                result.stdout,
+                error_prefix="router returned invalid Astrill connection result",
+            )
 
         action = "start" if connected else "stop"
         expected = "up" if connected else "down"
@@ -332,12 +348,10 @@ printf ',"rules_count":0,"origin_count":0,"direct_rules":0,"vpn_rules":0'
 printf ',"resolved_addresses":0,"unresolved_domains":0,"last_apply":0,"rules":[]}\n'
 """
         result = self.run_script(script)
-        try:
-            return json.loads(_last_json_line(result))
-        except json.JSONDecodeError as exc:
-            raise RouterError(
-                f"router returned invalid native Astrill status JSON: {exc}"
-            ) from exc
+        return _decode_status_document(
+            result,
+            error_prefix="router returned invalid native Astrill status JSON",
+        )
 
     def native_astrill_settings(self) -> NativeAstrillSettings:
         keys = " ".join(shlex.quote(key) for key in SAFE_NATIVE_ASTRILL_KEYS)
@@ -684,6 +698,77 @@ def _last_json_line(output: str) -> str:
         if stripped.startswith(("{", "[")):
             return stripped
     raise RouterError("router response did not contain JSON")
+
+
+def _decode_status_document(
+    output: str,
+    *,
+    error_prefix: str,
+) -> dict[str, Any]:
+    """Decode status JSON while accepting a defensive nested result envelope."""
+
+    try:
+        candidate = json.loads(_last_json_line(output))
+    except json.JSONDecodeError as exc:
+        raise RouterError(f"{error_prefix}: {exc}") from exc
+    if not isinstance(candidate, dict):
+        raise RouterError(f"{error_prefix}: expected a JSON object")
+
+    nested = candidate.get("status")
+    if isinstance(nested, dict):
+        merged = dict(nested)
+        merged.update(
+            (key, value) for key, value in candidate.items() if key != "status"
+        )
+        candidate = merged
+
+    normalized = dict(candidate)
+    for key in (
+        "precedence_ok",
+        "vpn_fail_closed",
+    ):
+        parsed = _status_bool(normalized.get(key))
+        if parsed is not None:
+            normalized[key] = parsed
+    for key in (
+        "native_min_pref",
+        "direct_pref",
+        "vpn_pref",
+        "enabled_origin_count",
+    ):
+        parsed = _status_int(normalized.get(key))
+        if parsed is not None:
+            normalized[key] = parsed
+    readiness = normalized.get("table_readiness")
+    if isinstance(readiness, dict):
+        normalized["table_readiness"] = {
+            str(name): parsed
+            for name, value in readiness.items()
+            if (parsed := _status_bool(value)) is not None
+        }
+    return normalized
+
+
+def _status_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    return None
+
+
+def _status_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def _clean_ssh_stderr(output: str) -> str:

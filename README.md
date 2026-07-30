@@ -36,7 +36,7 @@ deployment are deliberately enabled.
 | Catalog | 261 maintained profiles with search and provider-country, category, and profile-type filters |
 | Batch workflow | Durable checkbox/Ctrl/Command/Shift selection, Select visible, and explicit Suggested, Direct, or Astrill policy creation |
 | Native sync | Bidirectional routing, DNS, endpoint, protocol, port, transport, favorite, and resilience settings |
-| Windows 0.2.11 | Compact Endpoints workspace, safe favorite merging across unrelated drafts, and an on-demand latency dialog |
+| Windows 0.2.12 | Verified post-connect policy precedence, compiled-capacity preflight, and explicit local-versus-applied state |
 | Native-only audit | Read-only status, settings, endpoints, and LAN clients with no companion or router writes |
 | Router safety | Validated input, separate marks/tables, transactional A/B activation, rollback, and watchdog recovery |
 | Recovery | One action removes every companion-owned object and restores native Astrill-only operation |
@@ -61,9 +61,18 @@ maintainable decision layer for workflows such as:
 - compare Direct and Astrill paths before explicitly accepting a recommendation.
 
 The policy layer is incremental. The companion uses separate high firewall
-mark bits and routing tables, installs its explicit marked lookups ahead of
-native Astrill's policy rules, and leaves unmatched traffic with the native
-applet.
+mark bits and routing tables. After Astrill creates its native policy rules,
+the companion allocates and verifies an owned pair of free lookups immediately
+ahead of them. It leaves unmatched traffic with the native applet. If an
+unmanaged native reconnect undercuts that pair, the companion keeps policy
+health degraded and rebase-required instead of allocating progressively lower
+preferences. An observed disconnect or explicit managed reconnect performs the
+safe rebase with companion lookups absent during Astrill startup.
+
+Tunnel state and policy health are separate. A connected tunnel with an
+unverified overlay is reported as degraded instead of presenting the bypass as
+healthy. While disconnected, the VPN policy remains fail-closed and the owned
+route lookups are intentionally absent until native rules exist again.
 
 ## Architecture
 
@@ -102,15 +111,37 @@ behavior:
 
 Rows with an existing policy show its actual route. Other rows show the
 catalog suggestion, so the list retains its intended mixed Direct/Astrill
-view. **Add to Policies** saves the selected rules locally; the separate
-**Apply policies** confirmation is what changes the router. The Policies view
-shows local enabled rules beside the count returned by the most recent router
-refresh.
+view. **Add to Policies** saves the selected rules locally; only a separately
+confirmed **Apply policies** or **Apply selected** operation changes the router.
+With companion `0.2.5`, the Policies view compares the exact enabled local and
+applied origin-ID sets; count-only comparison remains a compatibility fallback
+for older companions. These are deliberately different states: an Apply
+rejection leaves the router's complete previous policy active and never
+installs a partial subset.
+
+The compiled router document is limited to 6,144 bytes. Service rules expand
+to their seed domains and literal endpoint networks, so the compiled row and
+byte estimate—not the number of local service rows—is the deployment capacity.
+**Apply policies** preflights and replaces the router document with every saved
+local policy, including disabled records. When that full document is too large,
+select a smaller explicit set in the Policies table and use **Apply selected**.
+The selected set becomes the complete router document; unselected policies
+remain saved locally. Neither action silently truncates or partially installs
+its chosen scope.
 
 For example, search for **UU Remote**, select it, choose **Direct**, and select
 **Add to Policies**. That creates a local Direct policy which can then be
 reviewed and explicitly applied. UU Remote is not seeded or applied by
 default.
+
+UU Remote also uses dynamic UDP ICE, relay, and peer destinations that may not
+resolve from a maintained service hostname. A destination-domain profile
+therefore covers known control and relay hosts but cannot promise every media
+path. Use a narrowly scoped source-device Direct rule when routing the whole
+device is acceptable, or a process-aware device-local routing backend when
+only UU should bypass. Do not add broad hosting-provider networks to a service
+profile. Nutstore includes its documented `dav.jianguoyun.com` WebDAV host,
+but both profiles intentionally keep protocol and port unrestricted.
 
 ### Policies and countries
 
@@ -201,13 +232,23 @@ per-application WFP backend; see the
 ## Safety model
 
 - The companion never edits Astrill applet files.
-- Companion `0.2.4` installs its marked Direct/Astrill lookups at priorities
-  `28000` and `28001`, ahead of observed native Astrill rules, and removes only
-  matching former companion entries at `29000` and `29001`.
+- Companion `0.2.5` removes its recorded lookups before a managed Astrill
+  start, waits for the native rules to settle, then allocates and verifies two
+  free adjacent preferences immediately ahead of the native minimum. It
+  uses recorded preferences when available; if that record is missing, cleanup
+  scans only exact companion mark, mask, and table signatures and preserves
+  unrelated rules.
 - Direct and Astrill policies use separate high mark bits and tables.
-- VPN-targeted policy is fail-closed while `tun0` is unavailable.
+- VPN table `212` retains a lower-priority blackhole fallback while `tun0` is
+  active and uses the blackhole as its only default while disconnected, so
+  VPN-targeted traffic remains fail-closed across tunnel loss.
+- An unmanaged native undercut remains visibly degraded and rebase-required;
+  the watchdog does not ratchet companion preferences downward.
 - A/B activation leaves the previous ruleset active until the replacement is
   complete.
+- The 6,144-byte compiled-policy limit is checked for the complete Apply-all or
+  Apply-selected scope before router mutation; a failed preflight leaves the
+  previously applied document unchanged.
 - Domain refresh retains prior addresses when a transient lookup fails.
 - Automatic reconciliation does not rewrite healthy or fingerprint-identical
   router packages.
@@ -222,6 +263,9 @@ per-application WFP backend; see the
   reconnecting the tunnel.
 - Router-local maintenance ensures runtime every 60 seconds and performs the
   domain refresh every 30 minutes; the Windows desktop does not poll over SSH.
+- After changing policy, reconnect only the affected applications so their
+  new connections receive the new route; do not clear router-wide connection
+  tracking.
 - `Restore Astrill Only` removes companion state without changing the selected
   Astrill endpoint, protocol, or connection state.
 - Catalog extensions are declarative data and never execute on the router.

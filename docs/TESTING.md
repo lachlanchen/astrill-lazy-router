@@ -70,8 +70,9 @@ Tests cover:
   and native/companion transactional controller paths;
 - seven-section Windows Astrill rendering, complete safe-key coverage, and
   section changes that preserve draft/dirty state;
-- companion `0.2.4` policy preferences, owned legacy-priority cleanup,
-  60-second connect boundary, and reduced ensure/refresh cadence;
+- companion `0.2.5` executable coverage for post-connect allocation,
+  no-ratchet undercut handling, persistent table `212` blackhole fallback,
+  exact owned-rule cleanup, stale-lock recovery, and degraded-state reporting;
 - route probe parsing, noise thresholds, minimum bypasses, and service-aware
   recommendations;
 - complete native-only removal and preserved Astrill state.
@@ -86,9 +87,9 @@ The following checks were performed against the Linksys E4200:
 
 - router package installation and repeated idempotent upgrade;
 - startup/MyPage preservation;
-- overlay policy preferences `28000` and `28001`, their companion-before-native
-  precedence guard, exact owned cleanup of former `29000`/`29001` and legacy
-  `32000`/`32001` rules, and preservation of unrelated policy entries;
+- the legacy fixed-preference undercut that motivated dynamic post-connect
+  allocation, plus exact owned cleanup and preservation of unrelated policy
+  entries;
 - WAN table `213` and tunnel table `212`;
 - default empty chain with no traffic effect;
 - the explicit `UU Remote -> Direct` workflow scenario, compilation, and DNS
@@ -174,6 +175,42 @@ The following checks were performed against the Linksys E4200:
   `astrill_autocycle=1`, `astrill_autostart=0`, and the tunnel up;
 - post-test HTTPS responses from Google (`204`), YouTube (`200`), and Instagram
   (`200`), with the UU Remote bridge and GameViewer server processes active.
+
+### 2026-07-30 Windows UU, Nutstore, And Companion 0.2.5 Check
+
+The finalized companion archive was 16,598 bytes, encoded into 13 NVRAM chunks.
+Before installation, Astrill was down, `tun0` and companion RPDB rules were
+absent, and a full DD-WRT NVRAM plus runtime backup was captured. After the
+upgrade, 8,935 NVRAM bytes remained free. Status reported companion `0.2.5`,
+`policy_health=ready`, verified precedence, one watchdog, the active mangle
+jump, no rebase marker, and the VPN-mark fail-closed guard. Table `213`
+contained only the WAN default through `vlan2`; table `212` contained only
+`blackhole default metric 32767`.
+
+The Windows selected-apply path then replaced the router document with exactly
+`uu-remote-18bc36c7` and `nutstore-jianguoyun-7ebf346c`. The two enabled local
+rules compiled to 24 Direct rows and 2,688 bytes, resolved to 43 addresses with
+zero unresolved domains, and included both `a56.gdl.netease.com` and
+`dav.jianguoyun.com`. The active Windows flows were UU Remote at
+`223.252.194.149:443` and Nutstore at `160.19.208.29:80`. Controlled TCP probes
+left four packets / 172 bytes on the UU Direct mark and return pair and 26
+packets / 2,179 bytes on the active Nutstore pair.
+
+Two managed connects allocated the same verified ordering each time: Direct
+preference `32762`, VPN-policy preference `32763`, and native Astrill minimum
+`32764`. While connected, table `212` held the usable
+`default via 198.18.64.1 dev tun0` plus the worse-priority metric-32767
+blackhole fallback. The final managed disconnect removed both companion RPDB
+rules, restored the filter fail guard and blackhole-only VPN table, retained
+both applied origins, and reported healthy/ready with Astrill down after later
+watchdog and GUI reconciliation checks.
+
+The native Windows `0.2.12` bundle was rebuilt from the verified source instead
+of reusing the stale bundle, installed per-user, and launched without a console
+child. Its Desktop and Startup shortcuts target the installed GUI, the legacy
+Start Menu shortcut is absent, the Settings page reports
+`Astrill Lazy Router 0.2.12`, and the bundled router/catalog data reports
+companion `0.2.5` plus the UU and Nutstore additions.
 
 ### 2026-07-29 UU And Endpoint Check
 

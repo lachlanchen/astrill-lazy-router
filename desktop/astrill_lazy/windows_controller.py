@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +17,10 @@ from .astrill import (
     update_astrill_favorite_list_batch,
 )
 from .catalog import Catalog, load_catalog
-from .compiler import compile_rules
+from .compiler import MAX_COMPILED_BYTES, compile_rules
 from .detector import MINIMUM_BYPASS_SERVICES
 from .installer import EnsureResult, InstallResult, RouterInstaller
-from .models import MatchKind, RouteTarget, Rule
+from .models import Compilation, MatchKind, RouteTarget, Rule
 from .native_settings import NativeAstrillSettings
 from .router import AstrillConnectionResult, RouterClient
 from .service_policy import ServiceRouteMode, service_policy_route
@@ -35,6 +35,10 @@ from .windows_ssh_setup import (
 
 SSH_HOST_RE = re.compile(r"^[a-zA-Z0-9._:\[\]-]{1,255}$")
 SSH_USER_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
+COMPILED_CAPACITY_RE = re.compile(
+    r"compiled policy is ([\d,]+) bytes; the router limit is ([\d,]+)",
+    re.IGNORECASE,
+)
 
 
 class ControllerError(RuntimeError):
@@ -51,6 +55,175 @@ class ServiceChangeSummary:
 class ServerCatalog:
     servers: tuple[AstrillServer, ...]
     groups: dict[str, tuple[AstrillServer, ...]]
+
+
+@dataclass(frozen=True)
+class PolicyCompilationSummary:
+    """A non-throwing preview of the exact document offered to DD-WRT."""
+
+    rule_ids: tuple[str, ...]
+    rule_count: int
+    enabled_count: int
+    compiled_rows: int
+    compiled_bytes: int | None
+    limit_bytes: int = MAX_COMPILED_BYTES
+    warnings: tuple[str, ...] = ()
+    error: str | None = None
+    compilation: Compilation | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def can_apply(self) -> bool:
+        return self.error is None and self.compilation is not None
+
+    @property
+    def remaining_bytes(self) -> int | None:
+        if self.compiled_bytes is None:
+            return None
+        return self.limit_bytes - self.compiled_bytes
+
+
+@dataclass(frozen=True)
+class PolicyRuntimeSummary:
+    """Backward-compatible interpretation of optional companion health fields."""
+
+    state: str
+    precedence_ok: bool | None
+    native_min_pref: int | None
+    direct_pref: int | None
+    vpn_pref: int | None
+    table_readiness: dict[str, bool]
+    last_error: str
+    vpn_fail_closed: bool | None
+
+    @property
+    def degraded(self) -> bool:
+        return self.state == "degraded"
+
+
+@dataclass(frozen=True)
+class PolicyOriginComparison:
+    """Exact enabled-origin agreement when router rule detail is available."""
+
+    local_enabled_ids: frozenset[str]
+    applied_enabled_ids: frozenset[str] | None
+    fallback_applied_count: int | None
+
+    @property
+    def exact(self) -> bool:
+        return self.applied_enabled_ids is not None
+
+    @property
+    def applied_count(self) -> int | None:
+        if self.applied_enabled_ids is not None:
+            return len(self.applied_enabled_ids)
+        return self.fallback_applied_count
+
+    @property
+    def missing_ids(self) -> frozenset[str]:
+        if self.applied_enabled_ids is None:
+            return frozenset()
+        return self.local_enabled_ids - self.applied_enabled_ids
+
+    @property
+    def extra_ids(self) -> frozenset[str]:
+        if self.applied_enabled_ids is None:
+            return frozenset()
+        return self.applied_enabled_ids - self.local_enabled_ids
+
+    @property
+    def matches(self) -> bool | None:
+        if self.applied_enabled_ids is None:
+            return None
+        return not self.missing_ids and not self.extra_ids
+
+
+def summarize_policy_runtime(status: dict[str, Any]) -> PolicyRuntimeSummary:
+    """Interpret both current and older companion status documents."""
+
+    raw_health = str(status.get("policy_health", "")).strip().casefold()
+    if raw_health in {"ready", "healthy", "ok"}:
+        state = "ready"
+    elif raw_health in {"degraded", "failed", "error"}:
+        state = "degraded"
+    else:
+        state = "unknown"
+
+    precedence_ok = _optional_bool(status.get("precedence_ok"))
+    last_error = str(status.get("last_reconcile_error") or "").strip()
+    raw_tables = status.get("table_readiness")
+    table_readiness = (
+        {
+            str(name): ready
+            for name, value in raw_tables.items()
+            if (ready := _optional_bool(value)) is not None
+        }
+        if isinstance(raw_tables, dict)
+        else {}
+    )
+    if (
+        precedence_ok is False
+        or bool(last_error)
+        or (
+            state == "unknown"
+            and status.get("vpn_state") == "up"
+            and any(not ready for ready in table_readiness.values())
+        )
+    ):
+        state = "degraded"
+
+    return PolicyRuntimeSummary(
+        state=state,
+        precedence_ok=precedence_ok,
+        native_min_pref=_optional_int(status.get("native_min_pref")),
+        direct_pref=_optional_int(status.get("direct_pref")),
+        vpn_pref=_optional_int(status.get("vpn_pref")),
+        table_readiness=table_readiness,
+        last_error=last_error,
+        vpn_fail_closed=_optional_bool(status.get("vpn_fail_closed")),
+    )
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _enabled_origins_from_status(
+    status: dict[str, Any],
+) -> frozenset[str] | None:
+    if "rules" not in status:
+        return None
+    rows = status.get("rules")
+    if not isinstance(rows, list):
+        return None
+    enabled_origins: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        origin = row.get("origin")
+        enabled = _optional_bool(row.get("enabled"))
+        if not isinstance(origin, str) or not origin.strip() or enabled is None:
+            return None
+        if enabled:
+            enabled_origins.add(origin.strip())
+    return frozenset(enabled_origins)
 
 
 @dataclass(frozen=True)
@@ -200,6 +373,25 @@ class WindowsController:
             return self.router.status()
         return self.router.native_astrill_status()
 
+    def policy_origin_comparison(
+        self,
+        status: dict[str, Any],
+    ) -> PolicyOriginComparison:
+        local_ids = frozenset(rule.id for rule in self.store.rules if rule.enabled)
+        applied_ids = _enabled_origins_from_status(status)
+        count_value = status.get(
+            "enabled_origin_count",
+            status.get("origin_count"),
+        )
+        fallback_count = _optional_int(count_value)
+        if fallback_count is not None and fallback_count < 0:
+            fallback_count = None
+        return PolicyOriginComparison(
+            local_enabled_ids=local_ids,
+            applied_enabled_ids=applied_ids,
+            fallback_applied_count=fallback_count,
+        )
+
     def reconcile_status(
         self,
         *,
@@ -250,10 +442,25 @@ class WindowsController:
             return check.status
         if check.action == "repair":
             result = installer.ensure(allow_install=False)
-            self.recovery_notice = (
-                "The validated companion runtime was restored from router NVRAM "
-                "after reboot."
-            )
+            if result.action == "degraded":
+                reason = str(
+                    result.status.get("last_reconcile_error")
+                    or "policy precedence or routing-table verification failed"
+                ).strip()
+                self.recovery_notice = (
+                    "The companion runtime is present, but policy routing remains "
+                    f"degraded: {reason}. Astrill tunnel state was preserved."
+                )
+            elif result.action == "repaired":
+                self.recovery_notice = (
+                    "The validated companion runtime was restored from router "
+                    "NVRAM after reboot."
+                )
+            else:
+                self.recovery_notice = (
+                    "The companion runtime became healthy during recovery; no "
+                    "rewrite was needed."
+                )
             return result.status
 
         installed = check.installed_version or "unknown"
@@ -573,10 +780,108 @@ class WindowsController:
         except StopIteration as exc:
             raise KeyError(rule_id) from exc
 
-    def apply_rules(self) -> dict[str, Any]:
+    def policy_preflight(
+        self,
+        rule_ids: Iterable[str] | None = None,
+    ) -> PolicyCompilationSummary:
+        """Compile a policy scope without raising for validation or capacity errors."""
+
+        if rule_ids is None:
+            selected = list(self.store.rules)
+        else:
+            requested = tuple(dict.fromkeys(str(rule_id) for rule_id in rule_ids))
+            if not requested:
+                return PolicyCompilationSummary(
+                    rule_ids=(),
+                    rule_count=0,
+                    enabled_count=0,
+                    compiled_rows=0,
+                    compiled_bytes=None,
+                    error=(
+                        "Select at least one policy for Apply selected. Use the "
+                        "full Apply policies action to intentionally install an "
+                        "empty policy document."
+                    ),
+                )
+            by_id = {rule.id: rule for rule in self.store.rules}
+            missing = tuple(rule_id for rule_id in requested if rule_id not in by_id)
+            if missing:
+                names = ", ".join(missing)
+                return PolicyCompilationSummary(
+                    rule_ids=requested,
+                    rule_count=0,
+                    enabled_count=0,
+                    compiled_rows=0,
+                    compiled_bytes=None,
+                    error=f"Selected policy no longer exists: {names}.",
+                )
+            selected = [by_id[rule_id] for rule_id in requested]
+
+        selected_ids = tuple(rule.id for rule in selected)
+        compiled_rows = self._compiled_row_count(selected)
+        try:
+            compilation = compile_rules(selected, self.catalog)
+        except ValueError as exc:
+            original = str(exc).strip() or "Policy compilation failed."
+            match = COMPILED_CAPACITY_RE.search(original)
+            if match is not None:
+                compiled_bytes = int(match.group(1).replace(",", ""))
+                limit_bytes = int(match.group(2).replace(",", ""))
+                error = (
+                    f"Compiled policy needs {compiled_bytes:,} bytes, but this "
+                    f"router accepts at most {limit_bytes:,}. Select a smaller "
+                    "set in the policy table and use Apply selected; all other "
+                    "policies will remain saved locally."
+                )
+            else:
+                compiled_bytes = None
+                limit_bytes = MAX_COMPILED_BYTES
+                error = f"Policies cannot be compiled: {original}"
+            return PolicyCompilationSummary(
+                rule_ids=selected_ids,
+                rule_count=len(selected),
+                enabled_count=sum(rule.enabled for rule in selected),
+                compiled_rows=compiled_rows,
+                compiled_bytes=compiled_bytes,
+                limit_bytes=limit_bytes,
+                error=error,
+            )
+
+        payload = compilation.to_tsv()
+        return PolicyCompilationSummary(
+            rule_ids=selected_ids,
+            rule_count=len(selected),
+            enabled_count=sum(rule.enabled for rule in selected),
+            compiled_rows=len(compilation.rules),
+            compiled_bytes=len(payload.encode("ascii")),
+            warnings=compilation.warnings,
+            compilation=compilation,
+        )
+
+    def apply_rules(
+        self,
+        rule_ids: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
         self._require_companion_write("applying router policies")
-        compilation = compile_rules(self.store.rules, self.catalog)
-        return self.router.apply_rules(compilation.to_tsv())
+        preflight = self.policy_preflight(rule_ids)
+        if not preflight.can_apply or preflight.compilation is None:
+            raise ControllerError(preflight.error or "Policies cannot be compiled.")
+        return self.router.apply_rules(preflight.compilation.to_tsv())
+
+    def _compiled_row_count(self, rules: Iterable[Rule]) -> int:
+        rows = 0
+        services = self.catalog.services_by_id
+        for rule in rules:
+            if rule.match_kind is MatchKind.SERVICE:
+                service = services.get(rule.selector)
+                if service is not None:
+                    rows += len(service.domains) + len(service.networks)
+            elif (
+                rule.match_kind is not MatchKind.PROCESS
+                or str(rule.metadata.get("namespace_ip", "")).strip()
+            ):
+                rows += 1
+        return rows
 
     def install_companion(self) -> InstallResult:
         self._require_write("installing the router companion")

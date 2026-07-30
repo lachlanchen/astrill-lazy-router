@@ -175,6 +175,8 @@ def test_router_reconcile_skips_current_runtime() -> None:
                 "version": ROUTER_VERSION,
                 "jump_installed": True,
                 "watchdog": True,
+                "policy_health": "ready",
+                "precedence_ok": True,
             }
 
     result = RouterInstaller(CurrentClient()).ensure()  # type: ignore[arg-type]
@@ -211,11 +213,43 @@ def test_companion_check_reuses_preloaded_healthy_snapshot() -> None:
             "version": ROUTER_VERSION,
             "jump_installed": True,
             "watchdog": True,
+            "policy_health": "ready",
+            "precedence_ok": True,
         },
     )
 
     assert check.action == "none"
     assert check.installed_version == ROUTER_VERSION
+
+
+def test_companion_check_repairs_a_present_but_degraded_runtime() -> None:
+    class SnapshotOnlyClient:
+        def companion_presence(self) -> dict[str, object]:
+            raise AssertionError("presence must come from the monitor snapshot")
+
+        def status(self) -> dict[str, object]:
+            raise AssertionError("status must come from the monitor snapshot")
+
+    degraded = {
+        "version": ROUTER_VERSION,
+        "jump_installed": True,
+        "watchdog": True,
+        "policy_health": "degraded",
+        "precedence_ok": False,
+        "vpn_state": "up",
+    }
+    check = RouterInstaller(SnapshotOnlyClient()).check(  # type: ignore[arg-type]
+        presence={
+            "installed": True,
+            "version": ROUTER_VERSION,
+            "runtime": True,
+        },
+        status=degraded,
+    )
+
+    assert check.action == "repair"
+    assert check.status == degraded
+    assert "policy routing" in check.reason
 
 
 def test_automatic_reconcile_cannot_install_without_confirmation(
@@ -255,10 +289,12 @@ def test_router_reconcile_repairs_runtime_before_reinstalling() -> None:
                 "version": ROUTER_VERSION,
                 "jump_installed": self.repaired,
                 "watchdog": self.repaired,
+                "policy_health": "ready" if self.repaired else "degraded",
+                "precedence_ok": self.repaired,
             }
 
         def raw(self, _arguments: list[str], *, timeout: int) -> str:
-            assert timeout == 30
+            assert timeout == 75
             self.repaired = True
             return ""
 
@@ -266,6 +302,69 @@ def test_router_reconcile_repairs_runtime_before_reinstalling() -> None:
     result = RouterInstaller(client).ensure()  # type: ignore[arg-type]
     assert result.action == "repaired"
     assert client.repaired
+
+
+def test_router_reconcile_repairs_a_connected_but_degraded_policy_runtime() -> None:
+    class DegradedClient:
+        def __init__(self) -> None:
+            self.repaired = False
+
+        def status(self) -> dict[str, object]:
+            return {
+                "version": ROUTER_VERSION,
+                "jump_installed": True,
+                "watchdog": True,
+                "policy_health": "ready" if self.repaired else "degraded",
+                "precedence_ok": self.repaired,
+                "vpn_state": "up",
+            }
+
+        def raw(self, arguments: list[str], *, timeout: int) -> str:
+            assert arguments == ["/tmp/astrill-lazy/alctl", "start"]
+            assert timeout == 75
+            self.repaired = True
+            return ""
+
+    client = DegradedClient()
+    result = RouterInstaller(client).ensure()  # type: ignore[arg-type]
+
+    assert result.action == "repaired"
+    assert result.status["policy_health"] == "ready"
+    assert client.repaired
+
+
+def test_router_reconcile_returns_live_degraded_status_after_best_effort() -> None:
+    class StillDegradedClient:
+        def __init__(self) -> None:
+            self.start_calls = 0
+
+        def status(self) -> dict[str, object]:
+            return {
+                "version": ROUTER_VERSION,
+                "jump_installed": True,
+                "watchdog": True,
+                "policy_health": "degraded",
+                "precedence_ok": False,
+                "vpn_state": "up",
+                "last_reconcile_error": "native rules did not stabilize",
+            }
+
+        def raw(self, arguments: list[str], *, timeout: int) -> str:
+            assert arguments == ["/tmp/astrill-lazy/alctl", "start"]
+            assert timeout == 75
+            self.start_calls += 1
+            return ""
+
+    client = StillDegradedClient()
+    result = RouterInstaller(client).ensure(  # type: ignore[arg-type]
+        allow_install=False
+    )
+
+    assert result.action == "degraded"
+    assert result.status["vpn_state"] == "up"
+    assert result.status["policy_health"] == "degraded"
+    assert result.status["last_reconcile_error"] == ("native rules did not stabilize")
+    assert client.start_calls == 1
 
 
 def test_router_reconcile_reconstructs_current_stored_package(
@@ -283,6 +382,8 @@ def test_router_reconcile_reconstructs_current_stored_package(
                 "version": ROUTER_VERSION,
                 "jump_installed": True,
                 "watchdog": True,
+                "policy_health": "ready",
+                "precedence_ok": True,
             }
 
         def ping(self) -> bool:
@@ -299,7 +400,7 @@ def test_router_reconcile_reconstructs_current_stored_package(
 
         def run_script(self, script: str, *, timeout: int) -> str:
             assert script == "nvram get astrill_lazy_bootstrap | sh\n"
-            assert timeout == 45
+            assert timeout == 75
             self.reconstructed = True
             return ""
 
@@ -324,11 +425,13 @@ def test_router_reconcile_does_not_rewrite_identical_broken_package(
                 "version": ROUTER_VERSION,
                 "jump_installed": False,
                 "watchdog": False,
+                "policy_health": "degraded",
+                "precedence_ok": False,
             }
 
         def raw(self, arguments: list[str], *, timeout: int | None = None) -> str:
             if arguments == ["/tmp/astrill-lazy/alctl", "start"]:
-                assert timeout == 30
+                assert timeout == 75
                 raise RouterError("start failed")
             assert timeout is None
             values = {
@@ -387,6 +490,7 @@ def test_router_uninstall_audits_cleanup_and_preserves_native_state() -> None:
     assert "astrill_lazy_pkg_1" in client.script
     assert "rm -rf /tmp/astrill-lazy" in client.script
     assert "iptables -w 10 -t mangle -S" in client.script
+    assert "iptables -w 10 -t filter -S" in client.script
     assert "lookup (212|213)" in client.script
     assert "native-page" in client.script
     assert "/tmp/astrill-lazy/alpage" not in next(

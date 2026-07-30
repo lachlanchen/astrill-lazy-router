@@ -14,15 +14,17 @@ from astrill_lazy.astrill import (
 )
 from astrill_lazy.catalog import load_catalog
 from astrill_lazy.installer import CompanionCheck, EnsureResult, InstallResult
-from astrill_lazy.models import MatchKind, RouteTarget
+from astrill_lazy.models import MatchKind, RouteTarget, Rule
 from astrill_lazy.native_settings import NativeAstrillSettings
 from astrill_lazy.router import AstrillConnectionResult, RouterMonitorSnapshot
 from astrill_lazy.service_policy import ServiceRouteMode
 from astrill_lazy.store import ConfigStore
 from astrill_lazy.windows_controller import (
     ControllerError,
+    PolicyCompilationSummary,
     ServerCatalog,
     WindowsController,
+    summarize_policy_runtime,
 )
 from astrill_lazy.windows_ssh_setup import (
     WindowsHostKey,
@@ -36,14 +38,16 @@ class FakeRouter:
         self.write_calls: list[tuple[str, object]] = []
         self.monitor_presence: dict[str, Any] = {
             "installed": True,
-            "version": "0.2.4",
+            "version": "0.2.5",
             "runtime": True,
         }
         self.monitor_companion_status: dict[str, Any] | None = {
             "health": "healthy",
-            "version": "0.2.4",
+            "version": "0.2.5",
             "jump_installed": True,
             "watchdog": True,
+            "policy_health": "ready",
+            "precedence_ok": True,
             "vpn_state": "up",
             "astrill_server_id": 1,
             "astrill_protocol": 2,
@@ -1102,6 +1106,188 @@ def test_local_policy_service_and_device_mutations_are_saved_atomically(
         google.id,
         device.id,
     }
+
+
+def test_policy_preflight_blocks_oversize_full_apply_without_router_io(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    store.companion_enabled = True
+    store.rules = [
+        Rule(
+            id=f"capacity-{index:03d}",
+            name=f"Capacity policy {index:03d}",
+            match_kind=MatchKind.DOMAIN,
+            selector=f"host-{index:03d}.example.com",
+            target=RouteTarget.DIRECT,
+            region="direct",
+            priority=100 + index,
+        )
+        for index in range(120)
+    ]
+    router = FakeRouter()
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+
+    preview = controller.policy_preflight()
+
+    assert isinstance(preview, PolicyCompilationSummary)
+    assert preview.rule_count == 120
+    assert preview.enabled_count == 120
+    assert preview.compiled_rows == 120
+    assert preview.compiled_bytes is not None
+    assert preview.compiled_bytes > preview.limit_bytes == 6144
+    assert preview.can_apply is False
+    assert "Select a smaller set" in str(preview.error)
+    with pytest.raises(ControllerError, match="router accepts at most 6,144"):
+        controller.apply_rules()
+    assert router.write_calls == []
+
+
+def test_selected_policy_apply_preserves_oversize_local_catalog(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    store.read_only = False
+    store.companion_enabled = True
+    store.rules = [
+        Rule(
+            id=f"selected-{index:03d}",
+            name=f"Selected policy {index:03d}",
+            match_kind=MatchKind.DOMAIN,
+            selector=f"selected-{index:03d}.example.com",
+            target=RouteTarget.DIRECT,
+            region="direct",
+            priority=100 + index,
+        )
+        for index in range(120)
+    ]
+    router = FakeRouter()
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=router,  # type: ignore[arg-type]
+    )
+    selected_ids = ("selected-000", "selected-001")
+
+    empty_preview = controller.policy_preflight(())
+    assert empty_preview.can_apply is False
+    assert "Select at least one policy" in str(empty_preview.error)
+    with pytest.raises(ControllerError, match="Select at least one policy"):
+        controller.apply_rules(())
+    assert router.write_calls == []
+
+    preview = controller.policy_preflight(selected_ids)
+    result = controller.apply_rules(selected_ids)
+
+    assert preview.can_apply is True
+    assert preview.rule_count == preview.enabled_count == preview.compiled_rows == 2
+    assert preview.compiled_bytes is not None
+    assert preview.compiled_bytes < preview.limit_bytes
+    assert result["ok"] is True
+    assert len(store.rules) == 120
+    assert router.write_calls[0][0] == "apply"
+    payload = str(router.write_calls[0][1])
+    assert payload.startswith("# astrill-lazy-rules-v1\n")
+    assert "\tselected-000\n" in payload
+    assert "\tselected-001\n" in payload
+    assert "selected-002" not in payload
+
+
+def test_policy_runtime_summary_accepts_new_and_legacy_status_fields() -> None:
+    legacy = summarize_policy_runtime({"health": "healthy", "vpn_state": "up"})
+    assert legacy.state == "unknown"
+    assert legacy.precedence_ok is None
+
+    ready = summarize_policy_runtime(
+        {
+            "policy_health": "ready",
+            "precedence_ok": "true",
+            "native_min_pref": "27998",
+            "direct_pref": 27996,
+            "vpn_pref": "27997",
+            "table_readiness": {
+                "direct": "true",
+                "vpn": 1,
+                "native": False,
+            },
+            "vpn_fail_closed": "1",
+        }
+    )
+    assert ready.state == "ready"
+    assert ready.precedence_ok is True
+    assert ready.native_min_pref == 27998
+    assert ready.direct_pref == 27996
+    assert ready.vpn_pref == 27997
+    assert ready.table_readiness == {
+        "direct": True,
+        "vpn": True,
+        "native": False,
+    }
+    assert ready.vpn_fail_closed is True
+
+    degraded = summarize_policy_runtime(
+        {
+            "vpn_state": "up",
+            "policy_health": "degraded",
+            "precedence_ok": False,
+            "last_reconcile_error": "native rules did not stabilize",
+        }
+    )
+    assert degraded.degraded is True
+    assert degraded.last_error == "native rules did not stabilize"
+
+
+def test_policy_origin_comparison_prefers_exact_enabled_rule_detail(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path / "config.json")
+    enabled = Rule(
+        id="enabled-local",
+        name="Enabled local",
+        match_kind=MatchKind.DOMAIN,
+        selector="enabled.example.com",
+        target=RouteTarget.DIRECT,
+        region="direct",
+    )
+    disabled = Rule(
+        id="disabled-local",
+        name="Disabled local",
+        match_kind=MatchKind.DOMAIN,
+        selector="disabled.example.com",
+        target=RouteTarget.DIRECT,
+        region="direct",
+        enabled=False,
+    )
+    store.rules = [enabled, disabled]
+    controller = WindowsController(
+        store=store,
+        catalog=load_catalog(),
+        router=FakeRouter(),  # type: ignore[arg-type]
+    )
+
+    exact = controller.policy_origin_comparison(
+        {
+            "enabled_origin_count": 99,
+            "rules": [
+                {"origin": enabled.id, "enabled": True},
+                {"origin": enabled.id, "enabled": True},
+                {"origin": disabled.id, "enabled": False},
+            ],
+        }
+    )
+    assert exact.exact is True
+    assert exact.applied_count == 1
+    assert exact.matches is True
+
+    fallback = controller.policy_origin_comparison({"enabled_origin_count": "1"})
+    assert fallback.exact is False
+    assert fallback.applied_count == 1
+    assert fallback.matches is None
 
 
 def test_read_operations_choose_native_or_companion_without_writes(

@@ -53,6 +53,17 @@ def test_novnc_service_is_rendered_from_the_checked_out_repository() -> None:
     assert "restarting the noVNC stack" in runner
 
 
+def test_router_upgrade_aborts_when_existing_runtime_cleanup_fails() -> None:
+    bootstrap = (ROOT / "router" / "bootstrap.sh").read_text(encoding="ascii")
+    guarded_stop = '"$BASE/alctl" stop >/dev/null 2>&1 || exit 1'
+    extraction = 'tar -xzf "$ARCHIVE" -C /tmp || exit 1'
+
+    assert 'if [ -x "$BASE/alctl" ]; then' in bootstrap
+    assert guarded_stop in bootstrap
+    assert bootstrap.index(guarded_stop) < bootstrap.index(extraction)
+    assert '[ ! -x "$BASE/alctl" ] ||' not in bootstrap
+
+
 def test_desktop_installer_selects_a_supported_python_and_opt_in_autostart() -> None:
     installer = (ROOT / "scripts" / "install-desktop.sh").read_text(encoding="utf-8")
 
@@ -85,17 +96,17 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "eval " not in helper
     assert "--set-xmark" in controller
     assert "0xc000000" in controller
-    assert "DIRECT_PREF=28000" in controller
-    assert "VPN_PREF=28001" in controller
-    assert "PREVIOUS_DIRECT_PREF=29000" in controller
-    assert "PREVIOUS_VPN_PREF=29001" in controller
-    assert "LEGACY_DIRECT_PREF=32000" in controller
-    assert "LEGACY_VPN_PREF=32001" in controller
-    assert "ensure_companion_precedence" in controller
+    assert "RPDB_PREF_FLOOR=100" in controller
+    assert "VPN_BLACKHOLE_METRIC=32767" in controller
+    assert "RPDB_RECONCILE_ATTEMPTS" not in controller
+    assert "ASTRILL_NATIVE_STABLE_ATTEMPTS=12" in controller
+    assert "ASTRILL_NATIVE_STABLE_SAMPLES=2" in controller
+    assert "select_owned_prefs" in controller
+    assert "wait_for_native_rules_stable" in controller
+    assert "record_owned_prefs" in controller
     assert "remove_exact_ip_rule" in controller
-    direct_pref = int(re.search(r"^DIRECT_PREF=(\d+)$", controller, re.MULTILINE)[1])
-    vpn_pref = int(re.search(r"^VPN_PREF=(\d+)$", controller, re.MULTILINE)[1])
-    assert 0 < direct_pref < vpn_pref < 29998
+    assert "DIRECT_PREF=" not in controller
+    assert "VPN_PREF=" not in controller
     assert "WATCHDOG_INTERVAL=60" in controller
     assert "WATCHDOG_REFRESH_CYCLES=30" in controller
     assert "ASTRILL_CONNECT_ATTEMPTS=60" in controller
@@ -110,6 +121,13 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert 'kill -9 "$pid"' in controller
     assert 'wait "$watchdog_sleep_pid"' in controller
     assert '[ "$watchdog" = true ] || health=degraded' in controller
+    assert '"policy_health":"%s","precedence_ok":%s' in controller
+    assert '"native_min_pref":%s,"direct_pref":%s,"vpn_pref":%s' in controller
+    assert '"table_readiness":{"direct":%s,"vpn":%s,"native":%s}' in controller
+    assert '"last_reconcile_error":null' in controller
+    assert '"rebase_required":%s' in controller
+    assert "VPN_FAIL_CHAIN=AL_LAZY_VPN_FAIL" in controller
+    assert '-m mark --mark "$VPN_MARK/$MARK_MASK" -j DROP' in controller
     assert "astrill-connect)" in controller
     assert "astrill-disconnect)" in controller
     assert "/dev/astrill/astrillvpn stop" in controller
@@ -119,7 +137,7 @@ def test_failed_astrill_switch_restores_settings_and_original_tunnel_state() -> 
     controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
     match = re.search(
         r"^switch_astrill\(\) \{\n(?P<body>.*?)"
-        r"^\}\n\nset_astrill_connection\(\)",
+        r"^\}\n\nrestart_astrill_for_managed_rebase\(\)",
         controller,
         re.MULTILINE | re.DOTALL,
     )
@@ -171,11 +189,112 @@ def test_failed_astrill_switch_restores_settings_and_original_tunnel_state() -> 
     assert '[ "$rollback_connected" = true ]' in connected_rollback
 
     assert "rollback_verified=$rollback_stopped" in switch
-    assert switch.count('rm -f "$rollback_file"') == 3
+    assert switch.count('rm -f "$rollback_file"') == 4
     assert "could not verify the original connection state" in switch
     assert switch.index("ensure_routes >/dev/null 2>&1") < switch.index(
         original_failure
     )
+
+
+def test_router_policy_precedence_follows_astrill_lifecycle() -> None:
+    controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
+
+    prepare = re.search(
+        r"^prepare_for_astrill_start\(\) \{\n(?P<body>.*?)^\}\n",
+        controller,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert prepare is not None
+    assert prepare["body"].index("ensure_vpn_fail_closed") < prepare["body"].index(
+        "remove_owned_ip_rules"
+    )
+    assert "clear_rebase_required" in prepare["body"]
+
+    switch = re.search(
+        r"^switch_astrill\(\) \{\n(?P<body>.*?)"
+        r"^\}\n\nrestart_astrill_for_managed_rebase\(\)",
+        controller,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert switch is not None
+    assert switch["body"].index("prepare_for_astrill_start") < switch["body"].index(
+        "/dev/astrill/astrillvpn start"
+    )
+    assert switch["body"].count("prepare_for_astrill_start") == 2
+    assert switch["body"].index("prepare_for_astrill_stop") < switch["body"].index(
+        "/dev/astrill/astrillvpn stop"
+    )
+
+    connection = re.search(
+        r"^set_astrill_connection\(\) \{\n(?P<body>.*?)^\}\n\nusage\(\)",
+        controller,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert connection is not None
+    already_connected = connection["body"].index("ensure_runtime")
+    prepare_start = connection["body"].index("prepare_for_astrill_start")
+    native_start = connection["body"].index("/dev/astrill/astrillvpn start")
+    assert already_connected < prepare_start < native_start
+    assert "ensure_runtime >/dev/null 2>&1 || true" not in connection["body"]
+
+    routes = re.search(
+        r"^ensure_routes\(\) \{\n(?P<body>.*?)^\}\n\napply_runtime\(\)",
+        controller,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert routes is not None
+    assert "if ! tunnel_is_up; then" in routes["body"]
+    assert routes["body"].index("ensure_vpn_fail_closed") < routes["body"].index(
+        "remove_owned_ip_rules"
+    )
+    assert "wait_for_native_rules_stable" in routes["body"]
+    assert routes["body"].count("install_owned_overlay") == 1
+    assert "disable_vpn_fail_closed" in routes["body"]
+    assert "rebase_is_required" in routes["body"]
+    assert "mark_recorded_overlay_for_rebase" in routes["body"]
+
+    down_branch = connection["body"][connection["body"].index("down)") :]
+    assert down_branch.index("prepare_for_astrill_stop") < down_branch.index(
+        "/dev/astrill/astrillvpn stop"
+    )
+    assert "restart_astrill_for_managed_rebase" in connection["body"]
+
+
+def test_router_removes_only_exact_companion_rules_and_idles_when_ready() -> None:
+    controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
+
+    delete_lines = [
+        line.strip() for line in controller.splitlines() if "ip rule del" in line
+    ]
+    assert delete_lines == [
+        'ip rule del pref "$pref" fwmark "$mark/$MARK_MASK" lookup "$table" ||'
+    ]
+    assert "lookup (110|111|112|113|114)" in controller
+    assert 'ip rule del pref "$pref" 2>/dev/null' not in controller
+
+    fail_closed = re.search(
+        r"^ensure_vpn_fail_closed\(\) \{\n(?P<body>.*?)^\}\n",
+        controller,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert fail_closed is not None
+    body = fail_closed["body"].lstrip()
+    assert body.startswith("vpn_fail_closed_is_ready && return 0")
+    assert '-I FORWARD 1 -j "$VPN_FAIL_CHAIN"' in body
+
+    overlay = re.search(
+        r"^owned_overlay_is_valid\(\) \{\n(?P<body>.*?)^\}\n",
+        controller,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert overlay is not None
+    assert "load_owned_pref_state" in overlay["body"]
+    assert '[ "$owned_vpn_pref" -lt "$current_native_pref" ]' in overlay["body"]
+
+    stop = controller[controller.index("    stop)") :]
+    stop = stop[: stop.index("    watchdog-loop)")]
+    assert "cleanup_policy ||" in stop
+    assert 'fail "could not completely remove the companion policy runtime"' in stop
 
 
 def test_ddwrt_banner_is_removed_from_ssh_errors() -> None:

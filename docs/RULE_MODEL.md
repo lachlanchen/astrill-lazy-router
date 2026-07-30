@@ -40,9 +40,29 @@ Only `domain`, `cidr`, and `device` reach the router. Labels are URL encoded;
 identifiers and selectors are constrained to small ASCII grammars. The router
 does not use `eval` or construct a shell command from a rule.
 
-Compiled documents are limited to 6,144 bytes. Before activation, the
-controller verifies that NVRAM can retain both the new document and its rollback
-predecessor with at least 2 KB of headroom.
+Compiled documents are limited to 6,144 bytes. The limit applies after service
+expansion, so one local service policy can consume several compiled domain and
+network rows. Disabled rules are serialized with `enabled=false` and still
+consume document capacity.
+
+**Apply policies** preflights all saved local records and replaces the complete
+router document. **Apply selected** preflights the explicit multi-row selection
+and replaces the router document with only that chosen scope; unchosen records
+remain saved locally. Both operations report compiled rows and bytes and
+neither silently selects, truncates, or partially installs a scope. Before
+activation, the controller also verifies that NVRAM can retain both the new
+document and its rollback predecessor with at least 2 KB of headroom.
+
+Local and applied are separate states. Editing or adding a policy updates the
+desktop document only. A successful explicit Apply transactionally replaces the
+complete router document with its chosen scope; a compilation, capacity,
+transport, or router validation failure leaves the previously applied document
+active.
+
+Current companion status exposes the `origin` and `enabled` value for every
+serialized rule. The desktop compares exact enabled origin-ID sets, so equal
+counts with different policies are not presented as synchronized. Count-only
+comparison is a compatibility fallback for older status documents.
 
 ## Precedence
 
@@ -63,13 +83,32 @@ first. Other laptop traffic uses Astrill.
 DD-WRT resolves domain seeds through its LAN DNS address:
 
 - up to 16 unique IPv4 addresses are retained per domain;
-- refresh occurs every five minutes;
+- refresh occurs every 30 minutes;
 - an unsuccessful refresh reuses the prior addresses when available;
 - unresolved domains are counted and shown in both UIs.
 
 Without firmware `ipset` support, a domain policy cannot automatically learn
 every future CDN hostname. Catalogs therefore list primary and common service
 domains, and users can add observed domains as explicit rules.
+
+This limitation is especially important for applications such as UU Remote
+that negotiate UDP paths with ICE and can use dynamic relay or peer addresses.
+A destination profile covers maintained control, file, and relay hostnames,
+not every possible media destination. When all traffic from one LAN client may
+bypass, use a later, higher-numeric-priority source-device Direct rule as a
+fallback. When only one process may bypass, use a process-aware device-local
+backend such as the Ubuntu isolated application identity. Do not approximate
+one service with broad hosting-provider CIDRs.
+
+Private and non-routable destinations return before compiled policy matching,
+so the source-device fallback does not redirect RFC 1918 LAN traffic.
+
+## Existing Connections
+
+Changing the active rules does not move an existing NAT/connection-tracked flow
+onto a different path. After Apply, reconnect only the affected application so
+it creates new flows under the new policy. Do not flush router-wide connection
+tracking for this purpose.
 
 ## Countries
 
@@ -122,5 +161,7 @@ On first run:
 }
 ```
 
-The core catalog maps that service to its primary app, signaling, relay,
-logging, and file hosts plus observed literal fallback endpoints.
+The core catalog maps that service to its primary app, signaling, known relay,
+logging, updater, and file hosts plus narrow observed literal fallback
+endpoints. The profile deliberately leaves protocol and port unrestricted
+because control and media can use both TCP and dynamic UDP.

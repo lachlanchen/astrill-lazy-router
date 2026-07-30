@@ -15,7 +15,7 @@ The native Windows application provides:
 
 - native-only status, Astrill settings, endpoint, and LAN-client inspection;
 - local Direct/Astrill policies for services, domains, IPv4 networks, and LAN
-  devices;
+  devices, with explicit Apply-all and multi-select Apply-selected scopes;
 - the 261-profile service catalog with category, profile-type, and
   provider-country filters, durable checkbox/Ctrl/Command/Shift selection,
   **Select visible**, and Suggested, Direct, or Astrill batch policy actions;
@@ -31,10 +31,10 @@ The native Windows application provides:
   optional DD-WRT companion;
 - a local read-only guard that is enabled for every fresh configuration.
 
-Version `0.2.11` has nine views: Policies, Services, Countries, Devices,
+Version `0.2.12` has nine views: Policies, Services, Countries, Devices,
 Connection, Endpoints, Astrill, Router, and Settings. Local policy edits are
 saved immediately, but they do not affect traffic until the companion is
-installed and **Apply policies** succeeds.
+installed and either **Apply policies** or **Apply selected** succeeds.
 
 ## Requirements
 
@@ -253,15 +253,32 @@ The app never silently installs or rewrites a missing or incompatible
 companion; that still requires the separate **Install / upgrade**
 confirmation.
 
-### Companion 0.2.4 runtime boundaries
+### Companion 0.2.5 runtime boundaries
 
-Companion `0.2.4` owns marked Direct and Astrill lookups at policy priorities
-`28000` and `28001`. These lower numbers place explicit companion decisions
-ahead of the native Astrill policy range observed on supported E4200
-installations. Upgrade/ensure removes old companion rules at `29000` and
-`29001` only when their mark and table exactly match; an unrelated policy rule
-at either number is preserved. The earlier legacy `32000`/`32001` cleanup uses
-the same ownership check.
+Companion `0.2.5` does not assume a fixed safe policy-priority range. Before a
+managed Astrill start it removes only its recorded owned Direct/Astrill pair.
+After Astrill's native rules settle, it allocates two adjacent free preferences
+immediately ahead of the current native minimum and verifies the entire RPDB
+ordering. This is necessary because Linux can assign an unnumbered Astrill rule
+immediately before an already installed companion rule.
+
+The router records the dynamically owned preferences. Cleanup uses those
+records when available. If they are missing, it scans only exact companion
+mark, mask, and table signatures, so unrelated policy rules are preserved. The
+router-local watchdog does not chase an Astrill reconnect outside the Windows
+app to progressively lower preferences. An undercut remains fail-closed,
+degraded, and rebase-required until the tunnel is observed down or an explicit
+managed reconnect safely recreates the native rules. If it cannot find or
+verify a safe pair, status remains degraded rather than claiming that
+Direct/Astrill policy precedence is healthy.
+
+Connection success and policy health are independent. The app can therefore
+report Astrill as connected while showing the policy overlay as degraded with
+the router's reconciliation error. While disconnected, null owned preferences
+and no native table are intentional; Direct-table readiness, the VPN blackhole
+table, and VPN-mark forwarding fail-close determine whether that down state is
+safe. While connected, VPN table `212` retains a lower-priority blackhole
+fallback beneath the preferred `tun0` default.
 
 Endpoint switch and explicit connect paths allow 60 seconds for both native
 connected state and a `tun0` route. A timeout is still an error and the
@@ -284,16 +301,36 @@ rows.
 Choose **Suggested**, **Direct**, or **Astrill**, then select **Add to
 Policies**. Suggested preserves each catalog profile's maintained route.
 Adding saves or updates the selected policies in the Windows configuration;
-it does not write the router. The Policies page distinguishes:
+it does not write the router. With companion `0.2.5`, the Policies page compares
+the exact enabled origin-ID sets in the Windows configuration and latest router
+status. It reports which identities exist only locally or only on the router.
+Count-only comparison is retained solely for older companion status documents
+that do not expose rule origins.
 
-- the enabled local count in the Windows configuration; and
-- the applied origin count returned by the latest router refresh.
+**Apply policies** is the separate confirmed Apply-all operation. It preflights
+every saved local record, including disabled rows, then replaces the complete
+router document. **Apply selected** is available for an explicit multi-row
+selection: it preflights only those chosen policies and replaces the complete
+router document with that selection. Unchosen policies remain saved in the
+Windows configuration and can be selected for a later deployment.
 
-**Apply policies** is the separate confirmed operation that sends the current
-local document to the companion. For example, searching for **UU Remote**,
+Service policies first expand to their seed domains and literal endpoint
+networks, and every chosen compiled TSV is limited to 6,144 bytes. Capacity is
+therefore reported as compiled rows and bytes, not just the number of local
+service records. An oversized Apply-all or Apply-selected scope is rejected
+before SSH mutation; the router retains its previous complete document.
+Neither operation silently truncates its scope or installs only the portion
+that fits.
+
+For example, searching for **UU Remote**,
 selecting **Direct**, and choosing **Add to Policies** creates a reviewable
 local Direct rule. It is not a product default and reaches the router only
 after the explicit Apply confirmation.
+
+After a successful policy change, exit and reconnect only affected applications
+such as UU Remote or Nutstore. Their existing NAT/connection-tracking entries
+can remain bound to the route chosen when each flow began; the application does
+not flush connection tracking for unrelated LAN clients.
 
 Recommended first-use sequence:
 
@@ -313,7 +350,9 @@ Recommended first-use sequence:
    **Start automatically after router boot** mirror the corresponding native
    Astrill settings. These controls change DD-WRT only; they do not connect a
    VPN or change routing on the Windows PC.
-7. Apply policies only through the separate confirmation when intended.
+7. Use the separately confirmed **Apply policies** for every saved record, or
+   select the intended rows and use **Apply selected** for a scoped router
+   document.
 
 Guarded remote write operations include native Astrill setting changes,
 connection changes, companion installation, policy application, endpoint
@@ -483,7 +522,7 @@ change the router.
 ## Human-Readable Astrill Settings
 
 The **Astrill** view uses the same effective native controls as the Ubuntu
-frontend instead of presenting an editable raw NVRAM table. Version `0.2.11`
+frontend instead of presenting an editable raw NVRAM table. Version `0.2.12`
 uses seven spacious tabs: **Overview**, **Connection**, **Routing**, **Privacy
 & DNS**, **Devices**, **Resilience**, and **Advanced**. Boolean values use
 checkboxes, validated modes use named choices, MTU uses a bounded number
@@ -544,6 +583,11 @@ Other intentional boundaries:
 - one router Astrill tunnel means one active VPN endpoint for all VPN policies;
 - routing enforcement occurs on DD-WRT, not in the Windows network stack;
 - the policy engine is currently IPv4;
+- destination-domain profiles cannot discover every dynamic ICE relay or
+  peer-to-peer address used by UU Remote. A source-device Direct policy is the
+  router-side fallback when all traffic from that device may bypass. Precise
+  per-process bypass requires a separately designed, signed Windows Filtering
+  Platform backend; broad hosting-provider CIDRs are not a safe substitute;
 - Windows login startup is installer-managed rather than exposed as an in-app
   switch; the Windows UI does not expose Polkit helpers, extension management,
   route detection, or namespace lifecycle controls;

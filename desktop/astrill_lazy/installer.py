@@ -103,6 +103,14 @@ class RouterInstaller:
                 status,
                 "The router companion is current and healthy.",
             )
+        if status is not None and self._runtime_is_present(status):
+            return CompanionCheck(
+                "repair",
+                self.expected_version,
+                str(installed_version),
+                status,
+                "The companion is running, but policy routing needs repair.",
+            )
         if self._stored_package_is_current():
             return CompanionCheck(
                 "repair",
@@ -136,17 +144,22 @@ class RouterInstaller:
         if self._runtime_is_current(status):
             return EnsureResult(status, "none")
         if status.get("version") == self.expected_version:
+            latest = status
             try:
                 self.client.raw(
                     ["/tmp/astrill-lazy/alctl", "start"],
-                    timeout=30,
+                    timeout=75,
                 )
-                repaired = self.client.status()
+                latest = self.client.status()
             except RouterError:
-                pass
-            else:
-                if self._runtime_is_current(repaired):
-                    return EnsureResult(repaired, "repaired")
+                try:
+                    latest = self.client.status()
+                except RouterError:
+                    latest = status
+            if self._runtime_is_current(latest):
+                return EnsureResult(latest, "repaired")
+            if self._runtime_is_present(latest):
+                return EnsureResult(latest, "degraded")
             if self._stored_package_is_current():
                 raise RouterError(
                     "the current router package is installed but its runtime "
@@ -170,7 +183,7 @@ class RouterInstaller:
         try:
             self.client.run_script(
                 "nvram get astrill_lazy_bootstrap | sh\n",
-                timeout=45,
+                timeout=75,
             )
             status = self.client.status()
         except RouterError as exc:
@@ -178,12 +191,14 @@ class RouterInstaller:
                 "the current router package is stored but could not be "
                 "reconstructed; use Install / Upgrade for an explicit rewrite"
             ) from exc
-        if not self._runtime_is_current(status):
-            raise RouterError(
-                "the current router package was reconstructed but its runtime "
-                "is not healthy"
-            )
-        return EnsureResult(status, "repaired")
+        if self._runtime_is_current(status):
+            return EnsureResult(status, "repaired")
+        if self._runtime_is_present(status):
+            return EnsureResult(status, "degraded")
+        raise RouterError(
+            "the current router package was reconstructed but its runtime "
+            "is not healthy"
+        )
 
     def _stored_package_is_current(self) -> bool:
         return (
@@ -193,6 +208,13 @@ class RouterInstaller:
         )
 
     def _runtime_is_current(self, status: dict[str, Any]) -> bool:
+        return (
+            self._runtime_is_present(status)
+            and status.get("policy_health") == "ready"
+            and status.get("precedence_ok") is True
+        )
+
+    def _runtime_is_present(self, status: dict[str, Any]) -> bool:
         return (
             status.get("version") == self.expected_version
             and status.get("jump_installed") is True
@@ -254,7 +276,8 @@ class RouterInstaller:
         status = self.client.status()
         if not self._runtime_is_current(status):
             raise RouterError(
-                "router package installed but its jump or watchdog is not healthy"
+                "router package installed but its controller, watchdog, or "
+                "policy routing is not ready"
             )
 
         policy_page = pages.index(PAGE_COMMANDS[0]) + 1
@@ -307,6 +330,7 @@ class RouterInstaller:
                 "! nvram get rc_startup | grep -Fq 'astrill_lazy_bootstrap'",
                 "! nvram get mypage_scripts | grep -Fq '/tmp/astrill-lazy/'",
                 "! iptables -w 10 -t mangle -S 2>/dev/null | grep -q 'AL_LAZY_'",
+                "! iptables -w 10 -t filter -S 2>/dev/null | grep -q 'AL_LAZY_'",
                 "! ip rule show | grep -Eq 'lookup (212|213)$'",
                 "! ps w | grep '/tmp/astrill-lazy/alctl watchdog-loop' | grep -vq grep",
             ]
