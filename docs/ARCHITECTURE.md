@@ -47,26 +47,39 @@ these marks and returns:
 
 | Target | Mark | Mask | Preference | Table |
 | --- | --- | --- | --- | --- |
-| Direct | `0x4000000` | `0xc000000` | `29000` | `213` |
-| Astrill | `0x8000000` | `0xc000000` | `29001` | `212` |
+| Direct | `0x4000000` | `0xc000000` | Runtime-owned first slot | `213` |
+| Astrill | `0x8000000` | `0xc000000` | Runtime-owned second slot | `212` |
 
-Astrill uses mask `0x3000000`, tables `110` through `114`, and observed
-preferences `29998` through `30001`. The companion uses separate high bits and
-the earlier preferences `29000` and `29001`. An explicit companion match
-therefore overlays the native result without rewriting Astrill's own list.
-Deleting or disabling that companion rule reveals the unchanged native result
-again. This reversible overlay is the basis of the incremental extension
-model.
+Astrill uses mask `0x3000000` and tables `110` through `114`. Its current
+applet does not assign a stable numeric preference: Linux can place a newly
+added rule immediately before the first existing non-local rule. A fixed
+companion range is therefore unsafe because Astrill can undercut it whenever
+the tunnel reconnects.
 
-The controller refuses to apply if a future Astrill build occupies an equal or
-earlier preference for tables `110` through `114`. Upgrades remove only the
-companion's exact legacy `32000` and `32001` rules; an unrelated rule at either
-preference is left untouched.
+The managed connect lifecycle removes the companion's owned pair before
+Astrill starts, waits for the native rules to settle, selects two free adjacent
+preferences immediately ahead of the current native minimum, installs the
+Direct rule followed by the fail-closed Astrill rule, and verifies the complete
+RPDB order. If an unmanaged Astrill reconnect creates native rules ahead of the
+recorded companion pair, the watchdog enables fail-closed protection but does
+not install another lower pair. Status remains degraded and rebase-required
+until the tunnel is observed down or an explicit managed reconnect starts
+Astrill with the companion lookups absent. This prevents preference ratcheting.
+If no safe pair exists or precedence cannot be verified, the controller
+likewise refuses to claim that policy routing is healthy.
 
-Table `213` contains the DD-WRT WAN default. Table `212` contains the `tun0`
-default while Astrill is connected. When `tun0` is unavailable, table `212`
-contains `blackhole default`, so a VPN-targeted rule cannot silently leak to
-WAN.
+An explicit companion match can therefore overlay the native result without
+rewriting Astrill's own list. Deleting or disabling that companion rule reveals
+the unchanged native result again. Cleanup uses recorded preferences when they
+exist. If the record is missing, it scans only exact companion mark, mask, and
+table signatures; unrelated policy rules are preserved. This reversible
+ownership model is the basis of the incremental extension.
+
+Table `213` contains the DD-WRT WAN default. While Astrill is connected, table
+`212` contains the preferred `tun0` default plus a lower-priority blackhole
+fallback. If the tunnel route disappears, lookup terminates at that fallback
+instead of continuing to the WAN. While disconnected, the blackhole is the
+table's only default.
 
 ## Transactional Apply
 
@@ -84,15 +97,52 @@ It then:
 An invalid document or failed chain build leaves the previous jump active.
 Rollback applies the same transaction in the opposite direction.
 
+The desktop owns a local editable document while the router owns the last
+successfully applied document. A service rule expands to every maintained seed
+domain and literal endpoint network before transmission. **Apply policies**
+preflights all saved local records, including disabled rows, and transactionally
+replaces the complete router document. **Apply selected** preflights only the
+explicit selection and replaces the router document with that selected scope;
+unchosen records remain saved locally. Each compiled TSV is limited to 6,144
+bytes. An oversized scope is rejected before router mutation and is never
+truncated to a partial policy.
+
+Current status returns every serialized rule's `origin` and `enabled` value.
+The desktop compares exact enabled origin-ID sets when deciding whether local
+and applied policy agree. Older companions without that identity information
+fall back to a count-only compatibility display.
+
 ## Runtime Recovery
 
-`alctl watchdog-loop` runs locally on DD-WRT every 15 seconds. It repairs
-missing policy rules, tables, chains, and the `PREROUTING` hook. Every 20
-cycles it re-resolves domain rules through DD-WRT's local DNS service and
-performs an A/B refresh. This router-local watchdog and five-minute DNS cycle
-are not desktop SSH polling.
+`alctl watchdog-loop` runs locally on DD-WRT every 60 seconds. It repairs
+missing policy objects, tables, chains, and the `PREROUTING` hook. It does not
+chase an unmanaged native undercut to a lower preference; that condition stays
+fail-closed and rebase-required. Every 30 cycles it re-resolves domain rules
+through DD-WRT's local DNS service and performs an A/B refresh. This
+router-local watchdog and 30-minute DNS cycle are not desktop SSH polling.
 Status is degraded whenever this watchdog is absent, the active jump is
-missing, or a VPN policy is enabled while the tunnel is down.
+missing, or the runtime contract for the current tunnel state cannot be
+verified. A disconnected state is ready when the Direct table, VPN blackhole
+table, and owned VPN-mark forwarding fail-close guard are verified; native and
+owned RPDB preferences are intentionally absent in that state.
+
+Connection state and policy-overlay health are reported independently. A
+tunnel can be connected while policy precedence is degraded; that partial
+success must not be rendered as a healthy bypass. The status contract exposes:
+
+| Field | Meaning |
+| --- | --- |
+| `policy_health` | `ready` only when the policy runtime is safe for the current tunnel state; otherwise `degraded` |
+| `precedence_ok` | The owned RPDB pair is verified ahead of the current native minimum |
+| `native_min_pref` | Current minimum native Astrill preference, or null while native rules are absent |
+| `direct_pref` / `vpn_pref` | Recorded owned preferences, or null while intentionally absent |
+| `table_readiness` | Independent readiness for Direct, VPN/fail-closed, and native tables |
+| `vpn_fail_closed` | VPN-marked forwarding is blocked when the tunnel is unavailable |
+| `last_reconcile_error` | Exact current reconciliation failure, or null |
+
+A disconnected ready state intentionally has no owned RPDB preferences and no
+native table. Its Direct table, VPN blackhole table, and VPN-mark forwarding
+fail-close remain ready.
 
 The package lives on tmpfs at `/tmp/astrill-lazy`. A gzip archive is base64
 encoded into bounded NVRAM chunks. `rc_startup` reconstructs the archive,
@@ -230,6 +280,15 @@ bus endpoints.
   assignments; Astrill endpoints are the concrete server choices.
 - Domain rules use periodically resolved A records because this firmware has no
   `ipset` support. Catalog seeds improve coverage but cannot identify every
-  changing CDN hostname owned by a company.
+  changing CDN hostname, dynamic ICE relay, or peer-to-peer destination used by
+  a company. UU Remote is one such case. Prefer a narrowly scoped source-device
+  Direct rule when all traffic from that device may bypass, or a process-aware
+  device-local backend when only one application may bypass; do not substitute
+  broad hosting-provider CIDRs.
+- Local and non-routable destinations still return before policy matching, so
+  those broader source-device fallbacks do not reroute RFC 1918 LAN traffic.
+- NAT and connection tracking bind an existing application flow to its prior
+  route. After applying a policy change, reconnect the affected application
+  rather than flushing connection tracking for every LAN client.
 - Application identities require an Ethernet parent that supports macvlan.
   Other transports can be added as launcher providers.

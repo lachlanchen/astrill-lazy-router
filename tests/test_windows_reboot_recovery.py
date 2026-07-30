@@ -58,6 +58,7 @@ def install_fake_installer(
     check: CompanionCheck,
     *,
     repaired_status: dict[str, Any] | None = None,
+    repair_action: str = "repaired",
 ) -> list[bool]:
     ensure_calls: list[bool] = []
 
@@ -79,7 +80,7 @@ def install_fake_installer(
             ensure_calls.append(allow_install)
             if repaired_status is None:
                 raise AssertionError("unexpected companion repair")
-            return EnsureResult(repaired_status, "repaired")
+            return EnsureResult(repaired_status, repair_action)
 
     monkeypatch.setattr(controller_module, "RouterInstaller", FakeInstaller)
     return ensure_calls
@@ -138,6 +139,45 @@ def test_reconcile_restores_only_the_validated_stored_runtime(
     assert ensure_calls == [False]
     assert controller.store.companion_enabled is True
     assert "restored from router NVRAM" in str(controller.recovery_notice)
+
+
+def test_reconcile_surfaces_a_present_but_degraded_policy_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = RecoveryRouter()
+    controller = make_controller(tmp_path / "config.json", router)
+    degraded = {
+        "health": "degraded",
+        "version": "0.2.3",
+        "jump_installed": True,
+        "watchdog": True,
+        "vpn_state": "up",
+        "policy_health": "degraded",
+        "precedence_ok": False,
+        "last_reconcile_error": "native rules did not stabilize",
+    }
+    ensure_calls = install_fake_installer(
+        monkeypatch,
+        router,
+        CompanionCheck(
+            "repair",
+            "0.2.3",
+            "0.2.3",
+            degraded,
+            "policy routing needs repair",
+        ),
+        repaired_status=degraded,
+        repair_action="degraded",
+    )
+
+    assert controller.reconcile_status() == degraded
+    assert ensure_calls == [False]
+    assert controller.store.companion_enabled is True
+    notice = str(controller.recovery_notice)
+    assert "policy routing remains degraded" in notice
+    assert "native rules did not stabilize" in notice
+    assert "restored from router NVRAM" not in notice
 
 
 def test_reconcile_falls_back_to_native_when_companion_was_not_retained(

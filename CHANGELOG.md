@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.2.12 - 2026-07-30
+
+- Upgrade the router companion to `0.2.5` and replace the unsafe fixed
+  policy-priority range with a post-connect lifecycle that removes only owned
+  lookups, waits for Astrill's native rules, allocates a free adjacent pair
+  immediately ahead of them, and verifies precedence. An unmanaged native
+  undercut now remains fail-closed, degraded, and rebase-required until an
+  observed disconnect or explicit managed reconnect instead of ratcheting
+  preferences downward.
+- Separate tunnel state from policy health. Report the native and owned
+  preferences, table readiness, fail-closed state, and last reconciliation
+  error so a connected tunnel cannot hide a degraded bypass overlay. Retain a
+  lower-priority blackhole fallback in VPN table `212` while the tunnel is up.
+- Reclaim stale watchdog locks, propagate exact cleanup failures across
+  mangle, filter, RPDB, and dedicated tables, and abort an upgrade before
+  extraction when the previous runtime cannot be removed completely.
+- Preflight either all saved policies or an explicit multi-row selection
+  against the 6,144-byte router contract, including disabled serialized rows.
+  Apply all or replace the router document with the chosen selection while
+  unchosen policies remain saved locally; no scope is silently truncated.
+- Compare exact enabled local and applied origin-ID sets when the current
+  companion status is available, using count-only display solely for older
+  status documents.
+- Add Nutstore's documented `dav.jianguoyun.com` WebDAV endpoint and UU
+  Remote's observed `a56.gdl.netease.com` updater while retaining unrestricted
+  protocol/port matching and narrow literal endpoints.
+- Document dynamic UU ICE/relay/peer coverage limits, safe source-device or
+  process-aware alternatives, and application reconnection after policy
+  changes without a router-wide connection-tracking flush.
+
 ## 0.2.11 - 2026-07-30
 
 - Fix the Windows **Favorite selected** action when an unrelated Connection

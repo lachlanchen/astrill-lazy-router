@@ -82,6 +82,93 @@ def test_astrill_switch_timeout_covers_verified_failure_recovery(
     ) == {"health": "healthy"}
 
 
+def test_companion_connect_allows_reconcile_and_preserves_degraded_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+
+    def run_alctl(
+        arguments: list[str],
+        *,
+        input_bytes: bytes | None = None,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        assert arguments == ["astrill-connect"]
+        assert input_bytes is None
+        assert timeout == 210
+        return CommandResult(
+            json.dumps(
+                {
+                    "ok": True,
+                    "partial": True,
+                    "status": {
+                        "vpn_state": "up",
+                        "health": "degraded",
+                        "policy_health": "degraded",
+                        "precedence_ok": "false",
+                        "native_min_pref": "27998",
+                        "direct_pref": "27996",
+                        "vpn_pref": 27997,
+                        "enabled_origin_count": "2",
+                        "table_readiness": {
+                            "direct": "true",
+                            "vpn": 1,
+                            "native": False,
+                        },
+                        "last_reconcile_error": "native rules did not stabilize",
+                    },
+                }
+            ),
+            "",
+            0,
+        )
+
+    monkeypatch.setattr(client, "_run_alctl", run_alctl)
+
+    status = client.set_astrill_connection(True, companion_enabled=True)
+
+    assert status["ok"] is True
+    assert status["partial"] is True
+    assert status["vpn_state"] == "up"
+    assert status["policy_health"] == "degraded"
+    assert status["precedence_ok"] is False
+    assert status["native_min_pref"] == 27998
+    assert status["direct_pref"] == 27996
+    assert status["vpn_pref"] == 27997
+    assert status["enabled_origin_count"] == 2
+    assert status["table_readiness"] == {
+        "direct": True,
+        "vpn": True,
+        "native": False,
+    }
+
+
+def test_companion_disconnect_keeps_shorter_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+
+    def run_alctl(
+        arguments: list[str],
+        *,
+        input_bytes: bytes | None = None,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        assert arguments == ["astrill-disconnect"]
+        assert input_bytes is None
+        assert timeout == 80
+        return CommandResult(
+            '{"vpn_state":"down","policy_health":"ready"}\n',
+            "",
+            0,
+        )
+
+    monkeypatch.setattr(client, "_run_alctl", run_alctl)
+    status = client.set_astrill_connection(False, companion_enabled=True)
+
+    assert status == {"vpn_state": "down", "policy_health": "ready"}
+
+
 def test_remote_timeout_is_reported_as_a_router_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

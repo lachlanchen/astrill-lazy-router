@@ -40,8 +40,11 @@ The installer:
 9. requires the expected version, installed jump, and watchdog before reporting
    success.
 
-Overall status can still be degraded when an enabled VPN policy is fail-closed
-because Astrill is disconnected. That is not an installation failure.
+A disconnected companion is ready when its Direct table, table `212` blackhole
+default, VPN-mark forwarding guard, active policy jump, and watchdog are all
+verified. Native and companion RPDB preferences are intentionally absent in
+that safe down state. Degradation means one of those protections could not be
+verified; disconnection alone is not an installation failure.
 
 In-place upgrades stop the old watchdog, replace the tmpfs package, restore the
 same persisted rules, and start a new watchdog process.
@@ -61,9 +64,9 @@ reconciliation reports the error instead of repeatedly writing NVRAM; use
 Install/Upgrade to request an explicit rewrite.
 
 Removing the desktop timer does not remove the installed companion's own
-router-local recovery. Its watchdog still runs every 15 seconds on DD-WRT, and
-its domain rules still refresh locally every 20 watchdog cycles (five
-minutes). Neither operation opens a desktop SSH session.
+router-local recovery. Its watchdog still runs every 60 seconds on DD-WRT, and
+its domain rules still refresh locally every 30 watchdog cycles (approximately
+30 minutes). Neither operation opens a desktop SSH session.
 
 Current integration values:
 

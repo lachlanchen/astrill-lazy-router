@@ -80,7 +80,14 @@ from .native_settings import NativeAstrillSettings
 from .router import AstrillConnectionResult, _openssh_config_path
 from .service_policy import ServiceRouteMode
 from .windows_connection_page import ConnectionDraft, WindowsConnectionPage
-from .windows_controller import ServerCatalog, WindowsConnectionState, WindowsController
+from .windows_controller import (
+    PolicyCompilationSummary,
+    PolicyRuntimeSummary,
+    ServerCatalog,
+    WindowsConnectionState,
+    WindowsController,
+    summarize_policy_runtime,
+)
 from .windows_native_page import WindowsNativeSettingsPage
 from .windows_ssh_setup import WindowsHostKey, WindowsKeyAuthorization
 
@@ -733,6 +740,7 @@ class MainWindow(QMainWindow):
         self._tasks: set[BackgroundTask] = set()
         self.busy_count = 0
         self.router_status: dict[str, Any] = {}
+        self.policy_preflight: PolicyCompilationSummary | None = None
         self.clients: list[dict[str, Any]] = []
         self._selected_service_ids: set[str] = set()
         self._syncing_service_selection = False
@@ -951,6 +959,13 @@ class MainWindow(QMainWindow):
 
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Traffic policies"))
+        self.apply_selected_button = QPushButton("Apply selected")
+        self.apply_selected_button.setToolTip(
+            "Install only the selected policy rows on this router. Other policies "
+            "remain saved in the Windows configuration."
+        )
+        self.apply_selected_button.clicked.connect(self._apply_selected_policies)
+        toolbar.addWidget(self.apply_selected_button)
         toolbar.addStretch(1)
         add_service = QPushButton("Add service…")
         add_service.setObjectName("primary")
@@ -982,6 +997,10 @@ class MainWindow(QMainWindow):
         self.policy_empty_note.setWordWrap(True)
         self.policy_empty_note.setProperty("class", "muted")
         layout.addWidget(self.policy_empty_note)
+        self.policy_capacity_state = QLabel("")
+        self.policy_capacity_state.setWordWrap(True)
+        self.policy_capacity_state.setProperty("class", "muted")
+        layout.addWidget(self.policy_capacity_state)
         self.policy_sync_state = QLabel("")
         self.policy_sync_state.setWordWrap(True)
         self.policy_sync_state.setProperty("class", "muted")
@@ -994,8 +1013,9 @@ class MainWindow(QMainWindow):
         self.policy_tree.setAlternatingRowColors(True)
         self.policy_tree.setRootIsDecorated(False)
         self.policy_tree.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
+            QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self.policy_tree.itemSelectionChanged.connect(self._policy_selection_changed)
         self.policy_tree.itemDoubleClicked.connect(
             lambda _item, _column: self._edit_policy()
         )
@@ -1898,21 +1918,54 @@ class MainWindow(QMainWindow):
             self.policy_empty_note.show()
 
     def _update_policy_metric(self) -> None:
-        local_count = sum(rule.enabled for rule in self.controller.store.rules)
-        applied_value = self.router_status.get("origin_count")
-        applied_count = (
-            int(applied_value)
-            if isinstance(applied_value, int) and not isinstance(applied_value, bool)
+        comparison = self.controller.policy_origin_comparison(self.router_status)
+        local_count = len(comparison.local_enabled_ids)
+        self.policy_preflight = self.controller.policy_preflight()
+        self._render_policy_capacity(self.policy_preflight)
+        has_enabled_applied = "enabled_origin_count" in self.router_status
+        applied_count = comparison.applied_count
+        total_value = self.router_status.get("origin_count")
+        total_count = (
+            int(total_value)
+            if (isinstance(total_value, int) and not isinstance(total_value, bool))
+            or (isinstance(total_value, str) and total_value.strip().isdigit())
             else None
         )
         applied_text = "—" if applied_count is None else str(applied_count)
         self.metric_labels["rules"].setText(f"{local_count} / {applied_text}")
+        if applied_count is None:
+            router_detail = "router applied count has not been refreshed"
+        elif comparison.exact:
+            router_detail = (
+                f"{applied_count} enabled origin IDs verified from router rule detail"
+            )
+            if total_count is not None:
+                router_detail += f"; {total_count} total origins are stored"
+        elif has_enabled_applied:
+            router_detail = f"{applied_count} enabled origins applied on the router"
+            if total_count is not None:
+                router_detail += f"; {total_count} total origins are stored"
+        else:
+            router_detail = (
+                f"{applied_count} total origins reported by an older companion"
+            )
+        exact_detail: list[str] = []
+        if comparison.missing_ids:
+            exact_detail.append(
+                "Missing IDs: " + ", ".join(sorted(comparison.missing_ids))
+            )
+        if comparison.extra_ids:
+            exact_detail.append("Extra IDs: " + ", ".join(sorted(comparison.extra_ids)))
         self.metric_labels["rules"].setToolTip(
-            f"{local_count} enabled in the Windows config; "
-            + (
-                "router applied count has not been refreshed"
-                if applied_count is None
-                else f"{applied_count} origins reported by the router"
+            f"{local_count} enabled in the Windows config; {router_detail}"
+            + (f"\n{'; '.join(exact_detail)}" if exact_detail else "")
+        )
+        action = (
+            "Use Apply policies when ready."
+            if self.policy_preflight.can_apply
+            else (
+                "The full document is too large; select the policies needed "
+                "on this router and use Apply selected."
             )
         )
         if applied_count is None:
@@ -1921,17 +1974,162 @@ class MainWindow(QMainWindow):
                 "the last applied count."
             )
             self.policy_sync_state.setStyleSheet("")
+        elif comparison.exact and comparison.matches:
+            self.policy_sync_state.setText(
+                f"Local and router enabled policy IDs agree: {local_count}."
+            )
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['green']};")
+        elif comparison.exact:
+            differences: list[str] = []
+            if comparison.missing_ids:
+                differences.append(
+                    "Missing on router: "
+                    + self._format_policy_origin_ids(comparison.missing_ids)
+                )
+            if comparison.extra_ids:
+                differences.append(
+                    "Extra on router: "
+                    + self._format_policy_origin_ids(comparison.extra_ids)
+                )
+            self.policy_sync_state.setText(
+                "Enabled policy IDs differ despite any matching count. "
+                + ". ".join(differences)
+                + f". {action}"
+            )
+            self.policy_sync_state.setStyleSheet(f"color: {COLORS['orange']};")
         elif applied_count == local_count:
             self.policy_sync_state.setText(
-                f"Local and router counts agree: {local_count} enabled."
+                f"Local and router counts agree at {local_count}; this older "
+                "status did not include rule IDs for exact verification."
             )
             self.policy_sync_state.setStyleSheet(f"color: {COLORS['green']};")
         else:
+            difference = local_count - applied_count
+            if difference > 0:
+                gap = (
+                    f"{difference} enabled local "
+                    f"polic{'y is' if difference == 1 else 'ies are'} not reflected "
+                    "in the router count."
+                )
+            else:
+                extra = abs(difference)
+                gap = (
+                    f"The router reports {extra} more origin"
+                    f"{'' if extra == 1 else 's'} than the enabled local count."
+                )
             self.policy_sync_state.setText(
                 f"{local_count} enabled locally; the router reports "
-                f"{applied_count} applied. Use Apply policies when ready."
+                f"{applied_count} "
+                f"{'enabled applied' if has_enabled_applied else 'applied origins'}. "
+                f"{gap} {action}"
             )
             self.policy_sync_state.setStyleSheet(f"color: {COLORS['orange']};")
+        self._sync_policy_apply_ui()
+
+    def _format_policy_origin_ids(self, origin_ids: frozenset[str]) -> str:
+        local_names = {rule.id: rule.name for rule in self.controller.store.rules}
+        values = [
+            (
+                f"{local_names[origin_id]} [{origin_id}]"
+                if origin_id in local_names
+                else origin_id
+            )
+            for origin_id in sorted(origin_ids)
+        ]
+        visible = values[:2]
+        if len(values) > len(visible):
+            visible.append(f"+{len(values) - len(visible)} more")
+        return ", ".join(visible)
+
+    def _render_policy_capacity(
+        self,
+        summary: PolicyCompilationSummary,
+    ) -> None:
+        if summary.compiled_bytes is None:
+            self.policy_capacity_state.setText(
+                f"Capacity: unavailable / {summary.limit_bytes:,} bytes. "
+                f"{summary.error or 'The policy document is invalid.'}"
+            )
+            self.policy_capacity_state.setStyleSheet(f"color: {COLORS['red']};")
+        elif summary.can_apply:
+            percent = round(summary.compiled_bytes * 100 / summary.limit_bytes)
+            self.policy_capacity_state.setText(
+                f"Capacity: {summary.compiled_rows:,} compiled rows · "
+                f"{summary.compiled_bytes:,} / {summary.limit_bytes:,} bytes "
+                f"({percent}%)."
+            )
+            self.policy_capacity_state.setStyleSheet(
+                f"color: {COLORS['green']};"
+                if percent < 90
+                else f"color: {COLORS['orange']};"
+            )
+        else:
+            self.policy_capacity_state.setText(
+                f"Capacity: {summary.compiled_rows:,} compiled rows · "
+                f"{summary.compiled_bytes:,} / {summary.limit_bytes:,} bytes. "
+                "Full apply is blocked; use Apply selected."
+            )
+            self.policy_capacity_state.setStyleSheet(f"color: {COLORS['red']};")
+        detail = summary.error or ""
+        if summary.warnings:
+            detail = "\n".join((detail, *summary.warnings)).strip()
+        self.policy_capacity_state.setToolTip(detail)
+
+    def _selected_policy_ids(self) -> tuple[str, ...]:
+        return tuple(
+            str(item.data(0, Qt.ItemDataRole.UserRole))
+            for item in self.policy_tree.selectedItems()
+        )
+
+    def _policy_selection_changed(self) -> None:
+        self._sync_policy_apply_ui()
+
+    def _sync_policy_apply_ui(self) -> None:
+        if not hasattr(self, "apply_selected_button"):
+            return
+        summary = self.policy_preflight or self.controller.policy_preflight()
+        self.policy_preflight = summary
+        writable = (
+            not self.controller.store.read_only
+            and self.controller.store.companion_enabled
+            and self.busy_count == 0
+        )
+        self.apply_button.setEnabled(writable and summary.can_apply)
+        if summary.can_apply:
+            self.apply_button.setToolTip(
+                f"Apply all {summary.rule_count} saved policies "
+                f"({summary.compiled_rows:,} compiled rows; "
+                f"{summary.compiled_bytes:,} / {summary.limit_bytes:,} bytes)."
+            )
+        else:
+            self.apply_button.setToolTip(
+                summary.error or "The complete policy document cannot be applied."
+            )
+
+        selected_ids = self._selected_policy_ids()
+        self.apply_selected_button.setText(
+            "Apply selected" + (f" ({len(selected_ids)})" if selected_ids else "")
+        )
+        if not selected_ids:
+            self.apply_selected_button.setEnabled(False)
+            self.apply_selected_button.setToolTip(
+                "Select one or more policy rows. Applying a selection leaves "
+                "all other policies saved locally."
+            )
+            return
+        selected = self.controller.policy_preflight(selected_ids)
+        self.apply_selected_button.setEnabled(writable and selected.can_apply)
+        if selected.can_apply:
+            self.apply_selected_button.setToolTip(
+                f"Apply {selected.rule_count} selected policies "
+                f"({selected.compiled_rows:,} compiled rows; "
+                f"{selected.compiled_bytes:,} / {selected.limit_bytes:,} bytes). "
+                "Unselected policies remain saved locally."
+            )
+        else:
+            self.apply_selected_button.setToolTip(
+                selected.error or "The selected policies cannot be applied."
+            )
 
     def _selected_rule(self) -> Rule | None:
         item = self.policy_tree.currentItem()
@@ -3673,9 +3871,9 @@ class MainWindow(QMainWindow):
             force_native_page=False,
             force_connection_page=False,
         )
-        self.connection_page.set_action_status(
+        self._set_connection_outcome_status(
+            result.status,
             "Connection settings, status, and endpoint capabilities refreshed.",
-            level="success",
         )
 
     def _connection_draft(self) -> ConnectionDraft | None:
@@ -3874,7 +4072,8 @@ class MainWindow(QMainWindow):
             force_native_page=False,
             force_connection_page=True,
         )
-        self.connection_page.set_action_status(
+        self._set_connection_outcome_status(
+            result.status,
             "Astrill connected and every changed connection value verified"
             + (
                 "; favorite edits were fresh-merged with DD-WRT"
@@ -3882,7 +4081,6 @@ class MainWindow(QMainWindow):
                 else ""
             )
             + ".",
-            level="success",
         )
 
     def _disconnect_connection_page(self) -> None:
@@ -3909,12 +4107,33 @@ class MainWindow(QMainWindow):
         connected: bool,
     ) -> None:
         self._status_loaded(result)
-        self.connection_page.set_action_status(
-            "Astrill connected with the saved settings."
-            if connected
-            else "Astrill disconnected; saved settings and policies were preserved.",
-            level="success",
+        self._set_connection_outcome_status(
+            self.router_status,
+            (
+                "Astrill connected with the saved settings."
+                if connected
+                else (
+                    "Astrill disconnected; saved settings and policies were preserved."
+                )
+            ),
         )
+
+    def _set_connection_outcome_status(
+        self,
+        status: dict[str, Any],
+        success_message: str,
+    ) -> None:
+        policy = summarize_policy_runtime(status)
+        if policy.degraded:
+            self.connection_page.set_action_status(
+                self._policy_degraded_message(
+                    policy,
+                    connected=status.get("vpn_state") == "up",
+                ),
+                level="warning",
+            )
+            return
+        self.connection_page.set_action_status(success_message, level="success")
 
     def _load_native_settings(self) -> None:
         if self._native_settings_loading:
@@ -4052,6 +4271,15 @@ class MainWindow(QMainWindow):
             json.dumps(self.router_status, indent=2, sort_keys=True)
         )
         self._update_status_metrics()
+        policy = summarize_policy_runtime(self.router_status)
+        if policy.degraded:
+            self.connection_page.set_action_status(
+                self._policy_degraded_message(
+                    policy,
+                    connected=self.router_status.get("vpn_state") == "up",
+                ),
+                level="warning",
+            )
         self._render_endpoints()
         self._render_countries()
         if self.controller.recovery_notice:
@@ -4065,10 +4293,15 @@ class MainWindow(QMainWindow):
         status = self.router_status
         healthy = status.get("health") == "healthy"
         native = not self.controller.store.companion_enabled
+        policy = summarize_policy_runtime(status)
         self.metric_labels["controller"].setText(
             "Native Astrill"
             if native and healthy
-            else ("Healthy" if healthy else "Needs attention")
+            else (
+                "Policy degraded"
+                if policy.degraded
+                else ("Healthy" if healthy else "Needs attention")
+            )
         )
         tunnel = status.get("vpn_state") == "up"
         self.metric_labels["tunnel"].setText("Connected" if tunnel else "Disconnected")
@@ -4087,42 +4320,207 @@ class MainWindow(QMainWindow):
             else "No active tunnel"
         )
         self._update_policy_metric()
-        if healthy:
+        if tunnel and policy.degraded:
+            self.sidebar_status.setText("Astrill connected; policy routing degraded")
+        elif policy.degraded:
             self.sidebar_status.setText(
-                "Native Astrill · connected" if native else "Router companion · healthy"
+                "Astrill disconnected · policy routing degraded"
             )
+        elif healthy:
+            sidebar = (
+                f"Native Astrill · {'connected' if tunnel else 'disconnected'}"
+                if native
+                else (
+                    "Router companion · "
+                    f"{'connected' if tunnel else 'tunnel disconnected'}"
+                    + (" · policy ready" if policy.state == "ready" else "")
+                )
+            )
+            self.sidebar_status.setText(sidebar)
         else:
-            self.sidebar_status.setText("Router needs attention")
+            self.sidebar_status.setText(
+                "Router needs attention · "
+                f"Astrill {'connected' if tunnel else 'disconnected'}"
+            )
+        policy_label = (
+            "policy ready"
+            if policy.state == "ready"
+            else ("policy degraded" if policy.degraded else "policy status unavailable")
+        )
         self.router_connection_label.setText(
             f"{'Connected' if tunnel else 'Disconnected'} · "
             f"server {server_id} · protocol "
             f"{status.get('astrill_protocol', 'unknown')}"
+            + (f" · {policy_label}" if not native else "")
         )
         if native:
             self.companion_label.setText(
                 "Native-only mode · the optional companion is not enabled."
             )
+            self.companion_label.setToolTip("")
         else:
-            self.companion_label.setText(
-                f"Version {status.get('version', 'unknown')} · "
-                f"{status.get('active_chain') or 'no active chain'} · "
-                f"{'watchdog active' if status.get('watchdog') else 'watchdog stopped'}"
+            runtime_parts = [
+                f"Version {status.get('version', 'unknown')}",
+                str(status.get("active_chain") or "no active chain"),
+                ("watchdog active" if status.get("watchdog") else "watchdog stopped"),
+                policy_label,
+            ]
+            preferences = self._policy_preference_text(policy)
+            if preferences:
+                runtime_parts.append(preferences)
+            self.companion_label.setText(" · ".join(runtime_parts))
+            self.companion_label.setToolTip(
+                self._policy_runtime_detail(policy, connected=tunnel)
             )
         self._sync_access_ui()
 
+    @staticmethod
+    def _policy_preference_text(policy: PolicyRuntimeSummary) -> str:
+        values = (
+            ("native", policy.native_min_pref),
+            ("direct", policy.direct_pref),
+            ("VPN", policy.vpn_pref),
+        )
+        available = [f"{name} {value}" for name, value in values if value is not None]
+        return f"priorities {' / '.join(available)}" if available else ""
+
+    @classmethod
+    def _policy_runtime_detail(
+        cls,
+        policy: PolicyRuntimeSummary,
+        *,
+        connected: bool,
+    ) -> str:
+        details = [
+            f"Policy routing: {policy.state}",
+            (
+                "Precedence: verified"
+                if policy.precedence_ok is True
+                else (
+                    "Precedence: not verified"
+                    if policy.precedence_ok is False
+                    else "Precedence: not reported"
+                )
+            ),
+        ]
+        preferences = cls._policy_preference_text(policy)
+        if preferences:
+            details.append(preferences.capitalize())
+        if policy.table_readiness:
+            details.append(
+                "Tables: "
+                + ", ".join(
+                    f"{name} {'ready' if ready else 'not ready'}"
+                    for name, ready in sorted(policy.table_readiness.items())
+                )
+            )
+        if policy.vpn_fail_closed is not None:
+            if policy.vpn_fail_closed:
+                fail_closed = "verified"
+            elif connected and not policy.degraded:
+                fail_closed = "inactive while the VPN tunnel is up"
+            else:
+                fail_closed = "not verified"
+            details.append(f"VPN-mark fail-closed: {fail_closed}")
+        if policy.last_error:
+            details.append(f"Last reconcile error: {policy.last_error}")
+        return "\n".join(details)
+
+    @classmethod
+    def _policy_degraded_message(
+        cls,
+        policy: PolicyRuntimeSummary,
+        *,
+        connected: bool,
+    ) -> str:
+        reason = policy.last_error
+        if not reason and policy.precedence_ok is False:
+            reason = "companion policy rules do not precede Astrill's native rules"
+        if not reason:
+            unavailable = [
+                name for name, ready in policy.table_readiness.items() if not ready
+            ]
+            if unavailable:
+                reason = "routing tables not ready: " + ", ".join(unavailable)
+        suffix = f": {reason}" if reason else ""
+        if connected:
+            return (
+                "Astrill connected, but policy routing is degraded"
+                f"{suffix}. The VPN tunnel is up; bypass/VPN policy selection may "
+                "not be enforced."
+            )
+        return (
+            "Astrill disconnected, but policy fail-closed is degraded"
+            f"{suffix}. The tunnel is down; VPN-targeted traffic may not be "
+            "blocked as intended."
+        )
+
     def _apply_policies(self) -> None:
+        self._apply_policy_scope(None)
+
+    def _apply_selected_policies(self) -> None:
+        selected_ids = self._selected_policy_ids()
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                "Apply selected policies",
+                "Select one or more policy rows first.",
+            )
+            return
+        self._apply_policy_scope(selected_ids)
+
+    def _apply_policy_scope(
+        self,
+        rule_ids: tuple[str, ...] | None,
+    ) -> None:
+        preflight = self.controller.policy_preflight(rule_ids)
+        if not preflight.can_apply:
+            QMessageBox.warning(
+                self,
+                "Policies exceed router capacity"
+                if preflight.compiled_bytes is not None
+                else "Policies cannot be compiled",
+                preflight.error or "The policy document cannot be applied.",
+            )
+            self.policy_preflight = self.controller.policy_preflight()
+            self._render_policy_capacity(self.policy_preflight)
+            self._sync_policy_apply_ui()
+            return
+
+        selected_scope = rule_ids is not None
+        subject = (
+            f"the {preflight.rule_count} selected policies"
+            if selected_scope
+            else f"all {preflight.rule_count} saved policies"
+        )
+        local_note = (
+            "\n\nUnselected policies remain saved in Windows but will not be "
+            "installed on this router."
+            if selected_scope
+            else ""
+        )
+        warning_note = (
+            "\n\nCompiler notes:\n- " + "\n- ".join(preflight.warnings)
+            if preflight.warnings
+            else ""
+        )
         if (
             QMessageBox.question(
                 self,
                 "Apply policies",
-                "Compile and transactionally install all enabled policies on DD-WRT?",
+                f"Transactionally install {subject} on DD-WRT?\n\n"
+                f"{preflight.enabled_count} enabled policies compile to "
+                f"{preflight.compiled_rows:,} rows and "
+                f"{preflight.compiled_bytes:,} / "
+                f"{preflight.limit_bytes:,} bytes."
+                f"{local_note}{warning_note}",
             )
             != QMessageBox.StandardButton.Yes
         ):
             return
         self._run_task(
             "Applying router policies",
-            self.controller.apply_rules,
+            lambda: self.controller.apply_rules(rule_ids),
             self._status_loaded,
         )
 
@@ -4466,7 +4864,7 @@ class MainWindow(QMainWindow):
         self._syncing_access = False
         writable = not read_only and self.busy_count == 0
         companion_writable = writable and self.controller.store.companion_enabled
-        self.apply_button.setEnabled(companion_writable)
+        self._sync_policy_apply_ui()
         self.native_page.set_read_only(read_only)
         self.native_page.set_busy(self.busy_count != 0)
         self.connection_page.set_read_only(read_only)
