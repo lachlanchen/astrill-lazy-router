@@ -15,8 +15,8 @@
 - Add low-frequency, opt-in recovery across frontends. Windows verifies an
   enabled exact deployment every 15 minutes only while idle; Ubuntu reacts to
   startup, refresh, and network return; the portable service uses a 15-minute
-  status interval with bounded unavailable-router retries. Matching state
-  performs no router write.
+  status interval with bounded unavailable/not-ready boot retries. Matching
+  state performs no router write.
 - Add strict catalog-only policy bundles, mandatory SHA-256 for apply,
   HTTPS-only remote fetch and redirects, atomic replace/merge behavior, and
   export that omits device, process, path, SSH, and credential data.
@@ -34,20 +34,29 @@
   the optional hybrid helper and page under the package-bound controller lock.
 - Admit up to 640 effective metadata rows so the measured Ubuntu and macOS
   overlays can coexist. Keep the stricter 1,536 generated-match limit, 8 MiB
-  free-memory floor, bounded build time, source isolation, and transactional
-  rollback unchanged.
+  free-memory floor, source isolation, and transactional rollback unchanged.
+  Collapse exact duplicate runtime matches while preserving origin metadata
+  and allow a bounded 300-second build for two-owner E4200 composition.
 - Compact the persistent package and startup launcher without weakening
   digest verification. The final 18,347-byte package uses 14 NVRAM chunks,
   MD5 `62084ec42351966c633697d452ea1629`, and SHA-256
   `f8bc8ea8ec0231150f8ad6891f061674fadb8899624388211e65a3df08bee897`.
-  The final read-only live preflight observed 2,693 bytes free, projected 243
-  bytes of growth and 2,450 bytes free after upgrade, above the enforced
+  The final locked live preflight observed 2,754 bytes free, projected 243
+  bytes of growth and 2,511 bytes free after upgrade, above the enforced
   2,048-byte reserve.
 - Add an explicit router SSH fingerprint row to the Ubuntu GUI, use the shared
   balanced deployment for GUI apply and application launchers, and reconcile
-  only an exact current companion package.
+  only an exact current companion package. Request one-time SSH authorization
+  only after an actual authentication failure, never after a timeout or slow
+  router operation.
 - Sanitize portable policy provenance to ID, version, and SHA-256 so a local
   path or tokenized source URL cannot enter a generated deployment bundle.
+- Verify a physical E4200 reboot with Astrill autostart and favorite failover,
+  automatic core reconstruction, independent Ubuntu/macOS agent restoration,
+  one active PREROUTING reference, no transaction journal, and exact Direct
+  packet counters for both source/MAC bindings. Final two-owner status was 566
+  metadata rows, 66,546 bytes, 892 generated matches, 37,720 KiB available
+  memory, and 2,374 NVRAM bytes free.
 
 ## 0.2.13 - 2026-07-30
 

@@ -31,8 +31,9 @@ DEFAULT_RETRY_INTERVAL = 30
 MIN_VERIFY_INTERVAL = 300
 MAX_VERIFY_INTERVAL = 3600
 MAX_RETRY_INTERVAL = 300
+MAX_NOT_READY_RETRIES = 10
 COMMAND_TIMEOUT = 45
-MUTATION_TIMEOUT = 360
+MUTATION_TIMEOUT = 420
 MAX_HELPER_BYTES = 128 * 1024
 MAX_OVERLAY_BYTES = 32_768
 HOST_RE = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
@@ -87,6 +88,19 @@ class AgentError(RuntimeError):
 
 class RouterUnavailable(AgentError):
     pass
+
+
+class RouterNotReady(AgentError):
+    pass
+
+
+def _openssh_config_path(path: Path) -> str:
+    """Escape whitespace in a path embedded in an OpenSSH -o value."""
+
+    return "".join(
+        "\\%s" % character if character in {" ", "\t"} else character
+        for character in str(path)
+    )
 
 
 class Agent:
@@ -210,6 +224,7 @@ class Agent:
         verify_interval = int(self.manifest["verify_interval_seconds"])
         retry_interval = int(self.manifest["retry_interval_seconds"])
         stopping = {"value": False}
+        not_ready_retries = 0
 
         def stop(_signum: int, _frame: Any) -> None:
             stopping["value"] = True
@@ -220,11 +235,23 @@ class Agent:
         while not stopping["value"]:
             try:
                 result = self.reconcile()
+                not_ready_retries = 0
                 state = str(result.get("action", "unknown"))
                 if state != last_state or result.get("last_error"):
                     self._log("INFO", result)
                 last_state = state
                 delay = verify_interval + random.randint(0, 30)
+            except RouterNotReady as exc:
+                not_ready_retries += 1
+                state = "router-not-ready"
+                if state != last_state:
+                    self._log("WARN", {"action": state, "error": str(exc)})
+                last_state = state
+                delay = (
+                    retry_interval
+                    if not_ready_retries <= MAX_NOT_READY_RETRIES
+                    else verify_interval
+                )
             except RouterUnavailable as exc:
                 state = "router-unavailable"
                 if state != last_state:
@@ -483,7 +510,9 @@ class Agent:
             "ServerAliveCountMax=2",
             "-o",
             "UserKnownHostsFile=%s"
-            % self._configured_path(self.manifest["known_hosts_file"]),
+            % _openssh_config_path(
+                self._configured_path(self.manifest["known_hosts_file"])
+            ),
             "-p",
             str(self.manifest["router_port"]),
             "-i",
@@ -670,7 +699,7 @@ temporary=
         if stored is not None and str(stored).casefold() != package:
             raise AgentError("router stored/running package identities differ")
         if status.get("policy_health") != "ready":
-            raise AgentError(
+            raise RouterNotReady(
                 "router policy runtime is not ready; overlay restore was skipped"
             )
         if status.get("precedence_ok") is not True:

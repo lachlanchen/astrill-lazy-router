@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from astrill_lazy.router import _clean_ssh_stderr
+from astrill_lazy.router import _clean_ssh_stderr, is_ssh_authentication_failure
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -718,6 +718,35 @@ def test_ddwrt_banner_is_removed_from_ssh_errors() -> None:
         "actual failure\n"
     )
     assert _clean_ssh_stderr(output) == "actual failure"
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "root@192.168.1.1: Permission denied (publickey,password).",
+        "Permission denied, please try again.",
+        "No supported authentication methods available",
+        "Authentication failed",
+    ),
+)
+def test_ssh_authentication_failure_is_detected(message: str) -> None:
+    assert is_ssh_authentication_failure(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "router command timed out after 30 seconds",
+        "Connection timed out",
+        "Connection refused",
+        "Host key verification failed.",
+        "policy runtime is not ready",
+    ),
+)
+def test_non_authentication_router_errors_do_not_request_password(
+    message: str,
+) -> None:
+    assert not is_ssh_authentication_failure(message)
 
 
 @pytest.mark.skipif(SHELL is None, reason="POSIX shell is unavailable")

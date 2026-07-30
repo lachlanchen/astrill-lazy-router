@@ -21,7 +21,7 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-381 tests passed, 6 skipped
+393 tests passed, 6 skipped
 Ruff lint and format: all checks passed
 Catalog: 261 profiles, 19 categories, 731 seeds / 652 unique
 ```
@@ -212,6 +212,39 @@ The following checks were performed against the Linksys E4200:
   `astrill_autocycle=1`, `astrill_autostart=0`, and the tunnel up;
 - post-test HTTPS responses from Google (`204`), YouTube (`200`), and Instagram
   (`200`), with the UU Remote bridge and GameViewer server processes active.
+
+### 2026-07-31 Cross-Platform Reboot And Routing Check
+
+The live E4200 was upgraded transactionally to companion `0.2.12` with package
+MD5 `62084ec42351966c633697d452ea1629`. Its locked preflight measured 2,754
+NVRAM bytes free, 243 bytes of projected growth, and 2,511 bytes projected
+afterward. Adding the dedicated Mac public key and enabling Astrill's native
+router-boot autostart left 2,374 bytes free, 326 bytes above the enforced
+reserve.
+
+A physical reboot produced epoch
+`e8ad8e3b9cd1424348d5a8f94e94775b`. The six-origin/68-row/5,959-byte core
+reconstructed before either workstation overlay, and Astrill connected
+through favorite failover to server `1413` using protocol `2`. The Mac
+LaunchAgent restored owner `controller-d4d5c36098b74162a6daf4ee8aaf6e6f`
+for `192.168.1.99/32` plus `d8:9e:f3:06:c6:2a`; Ubuntu's systemd user agent
+restored owner `controller-a61c95f887e547b992f331b159d20783` for
+`192.168.1.100/32` plus `d0:8e:79:0d:26:99`. Both generation-1 overlays had
+83 origins, 249 rows, 21,589 bytes, and identical expected document hashes.
+
+The resulting 566-row/66,546-byte effective document had hash
+`md5:66ca0bf4f2a5ee102a28a2531341ee3a` and 892 generated matches after fresh
+DNS. Final checks found one active PREROUTING reference, no transaction
+journal, 37,720 KiB available memory, healthy policy precedence, and an active
+Astrill tunnel. Google and YouTube returned HTTP 204; Instagram, UU Remote,
+and Nutstore returned HTTP 200 from both computers. Controlled traffic added
+seven packets to each computer's exact source/MAC Direct mark and return pair.
+
+The first Mac check occurred while the companion was still booting and
+correctly made no mutation. The agent now retries that reachable-but-not-ready
+state every 30 seconds for at most ten attempts before returning to its
+15-minute healthy interval. A separate GUI regression test confirmed that
+router timeouts no longer open the one-time SSH password dialog.
 
 ### 2026-07-30 Companion 0.2.11 Hybrid Staging And Live Check
 

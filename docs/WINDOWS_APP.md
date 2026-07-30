@@ -374,10 +374,11 @@ memory, and deadline, dry-runs it with `iptables-restore --noflush --test`,
 commits that same document once with `--noflush`, and verifies the exact
 rule-count/topology readback before the A/B jump can change.
 
-Hybrid policy mutations allow up to 240 seconds on the router and 330 seconds
-in the desktop client. The final full manual load completed in 277.82 seconds
-including client-side work; the ordinary optimized status path takes about
-seven seconds instead of the earlier more-than-90-second validation path.
+Hybrid policy mutations allow up to 300 seconds on the router and 390 seconds
+in the desktop client. Exact duplicate runtime matches are collapsed without
+discarding per-origin status metadata. The ordinary optimized status path
+takes about seven seconds instead of the earlier more-than-90-second
+validation path.
 
 The RAM action changes only the matching computer's traffic. It cannot shadow
 the global core or replace another controller's overlay. **Remove this

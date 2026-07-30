@@ -11,7 +11,7 @@ MAX_EFFECTIVE_BYTES=131072
 MAX_EFFECTIVE_ROWS=640
 MAX_GENERATED_MATCHES=1536
 MIN_POLICY_FREE_KIB=8192
-MAX_POLICY_APPLY_SECONDS=240
+MAX_POLICY_APPLY_SECONDS=300
 MAX_RESTORE_BYTES=524288
 HYBRID_DNS_BATCH=8
 HYBRID_DNS_QUERY_SECONDS=5
@@ -756,6 +756,13 @@ build_chain() {
             return 1
         }
     done < "$file"
+    hybrid_unique_plan=$BASE/hybrid-plan.unique.$$.tsv
+    if ! awk '!seen[$0]++' "$hybrid_plan" > "$hybrid_unique_plan" ||
+       ! mv "$hybrid_unique_plan" "$hybrid_plan"; then
+        rm -f "$hybrid_plan" "$hybrid_unique_plan" "$new_resolved" \
+            "$hybrid_unresolved" "$hybrid_generated_file"
+        return 1
+    fi
     hybrid_free=$(hybrid_policy_free_kib)
     is_uint "$hybrid_free" &&
         [ "$hybrid_free" -ge "$MIN_POLICY_FREE_KIB" ] &&

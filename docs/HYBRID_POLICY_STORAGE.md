@@ -60,8 +60,8 @@ compressed bootstrap payload, and the small core. The normalized bootstrap is
 bytes in 14 chunks, with MD5 `62084ec42351966c633697d452ea1629`
 and SHA-256
 `f8bc8ea8ec0231150f8ad6891f061674fadb8899624388211e65a3df08bee897`.
-The final read-only E4200 preflight observed 2,693 bytes free, projected 243
-bytes of growth and 2,450 bytes free, 402 bytes above the 2,048-byte reserve.
+The final locked E4200 preflight observed 2,754 bytes free, projected 243
+bytes of growth and 2,511 bytes free, 463 bytes above the 2,048-byte reserve.
 Every install recomputes the projection from the router's current snapshot.
 
 The package stored in NVRAM contains the base `alctl` runtime. The larger
@@ -258,7 +258,7 @@ Companion `0.2.12` retains these E4200 bounds:
 | Effective document | 131,072 bytes / 640 rows |
 | Generated iptables matches | 1,536 |
 | Minimum reclaimable policy memory | 8,192 KiB |
-| Whole policy transaction | 240 seconds |
+| Whole policy transaction | 300 seconds |
 | Parallel DNS lookups | 8 |
 | Per-domain DNS lookup | 5 seconds |
 | Resolved addresses per domain | 16 |
@@ -269,10 +269,12 @@ unusually low `MemAvailable` despite substantial reclaimable memory. It checks
 memory before the build and again after the candidate chain exists.
 
 Generated matches are counted while the plan is built, not only after an
-oversized chain has consumed resources. Duration is checked during DNS
-prefetch, planning, restore testing, and commit; memory is checked before
-planning and again around candidate publication. A rejection discards the
-inactive candidate chain and retains the previous active policy.
+oversized chain has consumed resources. Exact equivalent runtime matches from
+overlapping company/app profiles are collapsed after origin metadata is
+retained in the effective document. Duration is checked during DNS prefetch,
+planning, restore testing, and commit; memory is checked before planning and
+again around candidate publication. A rejection discards the inactive
+candidate chain and retains the previous active policy.
 
 Device-selector rows are rejected from owner overlays. The overlay chain
 already provides the source condition; silently combining it with another
@@ -388,13 +390,45 @@ document hash. Final readback showed one active reference, no inactive
 reference, no transaction journal, 2,494 free NVRAM bytes, and Astrill
 disconnected.
 
+### 2026-07-31 Two-Computer Reboot Acceptance
+
+Companion `0.2.12` was then verified with the balanced `0.3.0` policy on
+Ubuntu and macOS simultaneously. The persistent generation-1 core contained
+six origins, 68 rows, 5,959 bytes, and hash
+`md5:62bb6ac328240e6f7a2322210e9ebdc2`. Each computer owned an independent
+generation-1 overlay with 83 origins, 249 rows, 21,589 bytes, and hash
+`md5:99d3741ae2dd9d004767bdb333140388`:
+
+| Computer | Source | MAC |
+| --- | --- | --- |
+| Ubuntu 7090 | `192.168.1.100/32` | `d0:8e:79:0d:26:99` |
+| macOS 7050 | `192.168.1.99/32` | `d8:9e:f3:06:c6:2a` |
+
+A physical reboot created epoch
+`e8ad8e3b9cd1424348d5a8f94e94775b`. The verified core reconstructed before
+either overlay, and native Astrill autostart plus favorite failover connected
+server `1413` with protocol `2`. The Mac LaunchAgent and Ubuntu systemd user
+agent then restored only their own saved source/MAC owners. One Mac check
+landed while DD-WRT was still reconciling; the portable agent now classifies
+that state as a bounded boot retry instead of sleeping for a full healthy
+interval.
+
+Final composition retained 566 metadata rows and 66,546 bytes with hash
+`md5:66ca0bf4f2a5ee102a28a2531341ee3a`. Fresh DNS produced 892 generated
+matches, below the 1,536 limit. Readback showed one active PREROUTING
+reference, no transaction journal, 37,720 KiB available memory, and 2,374
+NVRAM bytes free after the dedicated Mac key and Astrill autostart setting.
+Google and YouTube returned HTTP 204, while Instagram, UU Remote, and Nutstore
+returned HTTP 200 on both computers. Controlled requests incremented each
+computer's source-and-MAC-bound Direct mark `0x4000000`.
+
 ## Failure Matrix
 
 | Event | Result |
 | --- | --- |
 | Router boots while every PC is off | Verified core-only policy is active |
 | GUI observes a new epoch | Its opted-in overlay is restored at most once |
-| GUI starts before DD-WRT is ready | No tight loop; manual refresh remains |
+| Agent starts before DD-WRT is ready | Ten bounded 30-second retries, then the normal 15-minute interval |
 | Overlay upload is invalid or interrupted | Previous effective chain remains |
 | Core/overlay generation is stale | Write is rejected without replacement |
 | Source or MAC differs | Automatic restore is blocked for review |

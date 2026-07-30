@@ -115,6 +115,22 @@ def test_portable_agent_stays_python_39_parseable() -> None:
     )
 
 
+def test_ssh_known_hosts_path_escapes_macos_application_support(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "Application Support" / "Astrill Lazy Router"
+    bundle.mkdir(parents=True)
+    module, _manifest, manifest_path = write_agent_bundle(bundle)
+
+    arguments = module.Agent(manifest_path)._ssh_arguments()
+    known_hosts_option = next(
+        value for value in arguments if value.startswith("UserKnownHostsFile=")
+    )
+
+    assert "Application\\ Support" in known_hosts_option
+    assert "Astrill\\ Lazy\\ Router" in known_hosts_option
+
+
 def test_explicit_enrollment_records_router_source_and_mac(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -225,6 +241,18 @@ def test_restore_refuses_a_changed_live_owner(
     saved = json.loads(manifest_path.read_text(encoding="ascii"))
     assert saved["last_attempt_epoch"] == "epoch-drift"
     assert "different document" in saved["last_error"]
+
+
+def test_booting_policy_runtime_uses_bounded_retry_state(tmp_path: Path) -> None:
+    module, _manifest, manifest_path = write_agent_bundle(tmp_path)
+    agent = module.Agent(manifest_path)
+    status = status_document("epoch-booting")
+    status["policy_health"] = "degraded"
+
+    with pytest.raises(module.RouterNotReady, match="not ready"):
+        agent._validate_router_status(status)
+
+    assert module.MAX_NOT_READY_RETRIES == 10
 
 
 def test_manifest_rejects_group_readable_private_key(tmp_path: Path) -> None:

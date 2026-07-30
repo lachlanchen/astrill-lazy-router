@@ -53,7 +53,11 @@ from .models import MatchKind, Region, RouteTarget, Rule, Service
 from .native_page import NativeSettingsPage
 from .native_settings import NativeAstrillSettings
 from .policy_controller import BalancedDeploymentResult, PolicyController
-from .router import AstrillConnectionResult, RouterClient
+from .router import (
+    AstrillConnectionResult,
+    RouterClient,
+    is_ssh_authentication_failure,
+)
 from .service_policy import ServiceRouteMode, service_policy_route
 from .ssh_setup import authorize_router_key, ensure_local_identity
 from .store import ConfigStore
@@ -3783,6 +3787,7 @@ class MainWindow(Adw.ApplicationWindow):
             if (
                 prefix == "Could not check router setup"
                 and not self._ssh_setup_prompted
+                and is_ssh_authentication_failure(message)
             ):
                 self._ssh_setup_prompted = True
                 self.confirm_authorize_router_key()

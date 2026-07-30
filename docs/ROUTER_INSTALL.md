@@ -67,8 +67,8 @@ On the documented E4200 deployment, the `0.2.12` 18,347-byte package encodes
 to exactly 24,464 base64 bytes in 14 NVRAM chunks. Its MD5 is
 `62084ec42351966c633697d452ea1629`; its SHA-256 is
 `f8bc8ea8ec0231150f8ad6891f061674fadb8899624388211e65a3df08bee897`.
-The final read-only live preflight observed 2,693 NVRAM bytes free, projected
-243 bytes of growth and 2,450 bytes free afterward, 402 bytes above the
+The final locked live preflight observed 2,754 NVRAM bytes free, projected
+243 bytes of growth and 2,511 bytes free afterward, 463 bytes above the
 enforced 2,048-byte reserve. These are snapshot measurements, not durable
 capacity guarantees. The installer recomputes the projection under the
 controller lock immediately before mutation. The prior `0.2.11` physical
@@ -275,6 +275,14 @@ free, no policy transaction journal remained, and Astrill remained
 disconnected.
 Astrill's existing `astrill_autostart=0` setting was deliberately preserved;
 the plugin does not decide whether the upstream VPN should connect at boot.
+
+The subsequent `0.3.0` two-computer acceptance enabled Astrill's native
+autostart through the validated settings API. A physical reboot reconstructed
+the six-origin core, connected native Astrill through favorite failover, and
+then accepted independent Ubuntu and macOS source/MAC overlays. Final status
+had one active PREROUTING reference, no transaction journal, 566 effective
+rows, 892 generated matches, 37,720 KiB available memory, and 2,374 NVRAM
+bytes free.
 
 For future hybrid acceptance runs, repeat the same order: reboot with Astrill
 disconnected, confirm the core before any GUI starts, then confirm exactly one

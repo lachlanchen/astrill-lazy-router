@@ -256,6 +256,37 @@ printf 'batched-restore\n'
     assert result.stdout == "batched-restore\n"
 
 
+def test_runtime_plan_deduplicates_equivalent_source_scoped_matches(
+    tmp_path: Path,
+) -> None:
+    result = _run(
+        tmp_path,
+        r"""
+load_hybrid_helper || exit 8
+cat > "$BASE/effective.tsv" <<'EOF'
+# astrill-lazy-effective-v1
+first	1	10	cidr	2.2.2.2/32	direct	any	-	First	first-origin	192.168.1.50/32	aa:bb:cc:dd:ee:ff
+second	1	20	cidr	2.2.2.2/32	direct	any	-	Second	second-origin	192.168.1.50/32	aa:bb:cc:dd:ee:ff
+EOF
+TRACE=$BASE/iptables.trace
+: > "$TRACE"
+ensure_chain_shell() { return 0; }
+iptables() {
+    printf '%s\n' "$*" >> "$TRACE"
+    return 0
+}
+build_chain AL_TEST "$BASE/effective.tsv" || exit 9
+[ "$(cat "$GENERATED_MATCHES_FILE")" -eq 1 ] || exit 10
+[ "$(grep -c 'MARK --set-xmark' "$TRACE")" -eq 1 ] || exit 11
+[ "$(grep -c 'origin' "$BASE/effective.tsv")" -eq 2 ] || exit 12
+printf 'runtime-plan-deduplicated\n'
+""",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "runtime-plan-deduplicated\n"
+
+
 def test_restore_topology_accepts_cold_start_and_misordered_bare_hook(
     tmp_path: Path,
 ) -> None:
@@ -1100,7 +1131,7 @@ date() {
     calls=$(cat "$BASE/date-calls")
     calls=$((calls + 1))
     printf '%s\n' "$calls" > "$BASE/date-calls"
-    [ "$calls" -lt 4 ] && printf '0\n' || printf '241\n'
+    [ "$calls" -lt 4 ] && printf '0\n' || printf '301\n'
 }
 hybrid_policy_free_kib() { printf '50000\n'; }
 ensure_chain_shell() { printf 'ensure %s\n' "$1" >> "$BASE/mutations"; }

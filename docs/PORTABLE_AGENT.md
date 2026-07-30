@@ -118,10 +118,12 @@ overlay causes no write. Missing or changed identity fails closed and does not
 replace another overlay.
 
 The service checks at startup and every 15 minutes by default, with up to
-30 seconds of jitter. An unreachable router is retried every 30 seconds.
-Ordinary checks are read-only SSH status calls. The DNS/firewall overlay build
-runs only when a new router runtime lacks the enrolled layer. This avoids a
-high-frequency polling burden.
+30 seconds of jitter. An unreachable router is retried every 30 seconds. If
+DD-WRT answers while the companion is still reconciling its boot runtime, the
+agent also retries every 30 seconds for at most ten attempts, then returns to
+the 15-minute interval. Ordinary checks are read-only SSH status calls. The
+DNS/firewall overlay build runs only when a new router runtime lacks the
+enrolled layer. This avoids a high-frequency polling burden.
 
 ## Status, Upgrade, And Removal
 
