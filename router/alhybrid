@@ -11,7 +11,7 @@ MAX_EFFECTIVE_BYTES=131072
 MAX_EFFECTIVE_ROWS=512
 MAX_GENERATED_MATCHES=1536
 MIN_POLICY_FREE_KIB=8192
-MAX_POLICY_APPLY_SECONDS=120
+MAX_POLICY_APPLY_SECONDS=240
 MAX_RESTORE_BYTES=524288
 HYBRID_DNS_BATCH=8
 HYBRID_DNS_QUERY_SECONDS=5
@@ -23,15 +23,71 @@ hybrid_dns_list=
 runtime_metadata_snapshot_active=false
 
 hybrid_validate_rules() {
-    hybrid_saved_limit=$MAX_RULE_BYTES
-    MAX_RULE_BYTES=$MAX_OVERLAY_BYTES
-    validate_rules "$1"
-    hybrid_valid=$?
-    MAX_RULE_BYTES=$hybrid_saved_limit
-    [ "$hybrid_valid" -eq 0 ] || return 1
-    awk -F '\t' '
-        $0 !~ /^#/ {
-            if ($4 == "device" || seen[$1]++) exit 1
+    [ "$(wc -c < "$1" 2>/dev/null || printf 0)" \
+        -le "$MAX_OVERLAY_BYTES" ] || return 1
+    awk -F '\t' -v maximum="$MAX_OVERLAY_ROWS" '
+        function uint(value) {
+            return value ~ /^[0-9]+$/
+        }
+        function identifier(value) {
+            return length(value) >= 1 && length(value) <= 64 &&
+                value ~ /^[A-Za-z0-9._-]+$/
+        }
+        function ipv4_network(value, fields, address, prefix, count, octets, i) {
+            count = split(value, fields, "/")
+            if (count < 1 || count > 2) return 0
+            address = fields[1]
+            prefix = count == 2 ? fields[2] : "32"
+            if (!uint(prefix) || prefix > 32) return 0
+            if (split(address, octets, ".") != 4) return 0
+            for (i = 1; i <= 4; i++)
+                if (!uint(octets[i]) || octets[i] > 255) return 0
+            return 1
+        }
+        function domain(value) {
+            return length(value) >= 1 && length(value) <= 253 &&
+                value !~ /^\./ && value !~ /\.$/ &&
+                index(value, "..") == 0 &&
+                value ~ /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z0-9-]+$/
+        }
+        function ports(value, entries, count, i, bounds, parts, first, last) {
+            if (value == "-") return 1
+            count = split(value, entries, ",")
+            if (count < 1 || count > 15) return 0
+            for (i = 1; i <= count; i++) {
+                parts = split(entries[i], bounds, ":")
+                if (parts < 1 || parts > 2) return 0
+                first = bounds[1]
+                last = parts == 2 ? bounds[2] : first
+                if (!uint(first) || !uint(last) ||
+                    first < 1 || first > 65535 ||
+                    last < 1 || last > 65535 || first > last) return 0
+            }
+            return 1
+        }
+        NR == 1 {
+            if ($0 != "# astrill-lazy-rules-v1") exit 1
+            saw_header = 1
+            next
+        }
+        /^#/ { next }
+        NF != 10 { exit 1 }
+        {
+            rows++
+            if (rows > maximum || !identifier($1) || seen[$1]++ ||
+                !identifier($10) || ($2 != "0" && $2 != "1") ||
+                !uint($3) || $3 > 9999 ||
+                ($4 != "domain" && $4 != "cidr") ||
+                ($4 == "domain" && !domain($5)) ||
+                ($4 == "cidr" && !ipv4_network($5)) ||
+                ($6 != "direct" && $6 != "vpn") ||
+                ($7 != "any" && $7 != "tcp" && $7 != "udp") ||
+                !ports($8) || ($8 != "-" && $7 == "any") ||
+                length($9) < 1 || length($9) > 360 ||
+                $9 !~ /^[A-Za-z0-9%._~-]+$/) exit 1
+        }
+        END {
+            if (!saw_header) exit 1
         }
     ' "$1"
 }
@@ -1007,32 +1063,47 @@ hybrid_validate_effective() {
     hybrid_effective=$1
     [ "$(wc -c < "$hybrid_effective")" -le "$MAX_EFFECTIVE_BYTES" ] ||
         return 1
-    [ "$(sed -n '1p' "$hybrid_effective")" = \
-        "# astrill-lazy-effective-v1" ] || return 1
-    hybrid_count=$(
-        awk -F '\t' '
-            NR > 1 && $0 !~ /^#/ {
-                if (NF != 12) exit 2
-                count++
-            }
-            END { print count + 0 }
-        ' "$hybrid_effective"
-    ) || return 1
-    is_uint "$hybrid_count" &&
-        [ "$hybrid_count" -le "$MAX_EFFECTIVE_ROWS" ] || return 1
-    while IFS="$TAB" read -r \
-        hybrid_id _ _ hybrid_kind _ _ _ _ _ _ \
-        hybrid_scope hybrid_scope_mac; do
-        case $hybrid_id in ''|\#*) continue ;; esac
-        if [ "$hybrid_scope" = - ]; then
-            [ "$hybrid_scope_mac" = - ] || return 1
-        else
-            valid_ipv4_network "$hybrid_scope" &&
-                [ "$hybrid_kind" != device ] || return 1
-            [ "$hybrid_scope_mac" = - ] ||
-                valid_mac "$hybrid_scope_mac" || return 1
-        fi
-    done < "$hybrid_effective"
+    awk -F '\t' -v maximum="$MAX_EFFECTIVE_ROWS" '
+        function uint(value) {
+            return value ~ /^[0-9]+$/
+        }
+        function ipv4_network(value, fields, address, prefix, count, octets, i) {
+            count = split(value, fields, "/")
+            if (count < 1 || count > 2) return 0
+            address = fields[1]
+            prefix = count == 2 ? fields[2] : "32"
+            if (!uint(prefix) || prefix > 32) return 0
+            if (split(address, octets, ".") != 4) return 0
+            for (i = 1; i <= 4; i++)
+                if (!uint(octets[i]) || octets[i] > 255) return 0
+            return 1
+        }
+        function mac(value, octets, i) {
+            if (split(value, octets, ":") != 6) return 0
+            for (i = 1; i <= 6; i++)
+                if (length(octets[i]) != 2 ||
+                    octets[i] !~ /^[[:xdigit:]][[:xdigit:]]$/) return 0
+            return 1
+        }
+        NR == 1 {
+            if ($0 != "# astrill-lazy-effective-v1") exit 1
+            saw_header = 1
+            next
+        }
+        /^#/ { next }
+        NF != 12 { exit 1 }
+        {
+            rows++
+            if (rows > maximum) exit 1
+            if ($11 == "-") {
+                if ($12 != "-") exit 1
+            } else if (!ipv4_network($11) || $4 == "device" ||
+                ($12 != "-" && !mac($12))) exit 1
+        }
+        END {
+            if (!saw_header) exit 1
+        }
+    ' "$hybrid_effective"
 }
 
 hybrid_cleanup_composition() {
@@ -1895,7 +1966,14 @@ hybrid_origin_ids_json() {
 }
 
 hybrid_print_layered_status() {
-    hybrid_runtime=$(current_runtime_document) || return 1
+    hybrid_runtime=$CURRENT
+    for hybrid_status_meta in "$OVERLAY_DIR"/*.meta; do
+        [ -f "$hybrid_status_meta" ] || continue
+        [ -f "$EFFECTIVE" ] &&
+            hybrid_validate_effective "$EFFECTIVE" || return 1
+        hybrid_runtime=$EFFECTIVE
+        break
+    done
     hybrid_core_hash=$(document_hash "$CURRENT") || return 1
     hybrid_effective_hash=$(document_hash "$hybrid_runtime") || return 1
     hybrid_core_rows=$(rule_row_count "$CURRENT")

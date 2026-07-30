@@ -25,14 +25,15 @@ The Windows library on the verified workstation currently expands as follows:
 
 | Scope | Origins | Compiled rows | ASCII bytes |
 | --- | ---: | ---: | ---: |
-| Complete enabled library | 88 | 313 | 28,373 |
-| UU Remote + Nutstore/Jianguoyun + WeChat core | 3 | 38 | 3,846 |
+| Complete enabled library | 88 | 316 | 28,686 |
+| UU Remote + Nutstore/Jianguoyun + WeChat core | 3 | 41 | 4,135 |
 | Remaining computer overlay | 85 | 275 | 24,551 |
 
 The complete document cannot fit the persistent 6,144-byte contract. The
 three high-value Direct policies do fit and remain useful while every computer
 is offline. The rest can be restored into RAM for only the computer that owns
-them.
+them. Adding the overlay source/MAC scope fields produces a 316-row,
+38,455-byte effective runtime document.
 
 A read-only E4200 snapshot showed 58,708 KiB total RAM and roughly 6.3 KiB of
 free NVRAM after the earlier companion was installed. Those figures motivated
@@ -55,9 +56,13 @@ matches, rather than TSV bytes alone, are the important runtime cost.
 The persistent footprint is deliberately limited to the base package, the
 compressed bootstrap payload, and the small core. The normalized bootstrap is
 6,502 bytes; deterministic gzip plus base64 reduces its stored NVRAM value to
-2,560 bytes. On the documented E4200 preflight snapshot, the live upgrade
-projection started with 6,284 bytes free, added 2,772 bytes, and left 3,512
-bytes free—1,464 bytes above the enforced 2,048-byte reserve. Every install
+2,560 bytes. The deployed base package is 19,960 bytes, exactly 26,616 base64
+bytes in 15 chunks, with MD5 `3552747bcb9a06a8f6b64dcbb1ce0675`
+and SHA-256
+`2f0dbbda03af55a54ebf75fa6a06d2f47ffcd071310082544202edac4422a4be`.
+The locked E4200 preflight started with 3,115 bytes free, projected 608 bytes of
+growth and 2,507 bytes free—459 bytes above the 2,048-byte reserve. The
+physical-reboot readback was 2,494 bytes free, a 446-byte margin. Every install
 recomputes the projection from the router's current snapshot.
 
 The package stored in NVRAM contains the base `alctl` runtime. The larger
@@ -251,7 +256,7 @@ Companion `0.2.11` starts with these E4200 bounds:
 | Effective document | 131,072 bytes / 512 rows |
 | Generated iptables matches | 1,536 |
 | Minimum reclaimable policy memory | 8,192 KiB |
-| Whole policy transaction | 120 seconds |
+| Whole policy transaction | 240 seconds |
 | Parallel DNS lookups | 8 |
 | Per-domain DNS lookup | 5 seconds |
 | Resolved addresses per domain | 16 |
@@ -308,24 +313,24 @@ rather than silently overwritten.
 
 ```json
 {
-  "runtime_epoch": "opaque-md5",
-  "package_md5": "base-package-md5",
-  "stored_package_md5": "base-package-md5",
+  "runtime_epoch": "c838dc8397a57cd936a1f9e7e3649caa",
+  "package_md5": "3552747bcb9a06a8f6b64dcbb1ce0675",
+  "stored_package_md5": "3552747bcb9a06a8f6b64dcbb1ce0675",
   "helper_md5": "ram-helper-md5",
   "core": {
     "generation": 1,
-    "hash": "md5hex",
+    "hash": "md5:b9651667705f05dbd97019aa529bc256",
     "storage": "compressed-nvram",
     "origins": 3,
-    "rows": 38,
-    "bytes": 3846,
+    "rows": 41,
+    "bytes": 4135,
     "origin_ids": ["..."]
   },
   "overlays": [
     {
       "owner": "controller-id",
       "generation": 1,
-      "hash": "md5hex",
+      "hash": "md5:6d6fe09c400bb103e0af5a168236f1d6",
       "source": "192.168.1.166/32",
       "mac": "54:bf:64:80:aa:23",
       "origins": 85,
@@ -335,17 +340,51 @@ rather than silently overwritten.
     }
   ],
   "effective": {
-    "hash": "md5hex",
-    "rows": 313,
-    "bytes": 28400,
-    "generated_matches": 640
+    "hash": "md5:383499271b38e263b709040abbed1da8",
+    "rows": 316,
+    "bytes": 38455,
+    "generated_matches": 693
   }
 }
 ```
 
-Values above illustrate the schema; DNS results determine the actual generated
-match count and effective byte total. Status never exposes passwords, private
-keys, or Astrill credentials.
+The numeric measurements and policy hashes reflect the final post-reboot
+observation; the owner and helper values remain schema placeholders. DNS
+results determine the generated match count and can vary without changing the
+document hash. Status never exposes passwords, private keys, or Astrill
+credentials.
+
+## Live E4200 Deployment Result
+
+The persistent core installed at generation 1 with three origins, 41 rows,
+4,135 bytes, and hash `md5:b9651667705f05dbd97019aa529bc256`.
+The Windows controller loaded 85 remaining origins as a generation-1,
+275-row/24,551-byte overlay with hash
+`md5:6d6fe09c400bb103e0af5a168236f1d6`, source
+`192.168.1.166/32`, and MAC `54:bf:64:80:aa:23`. The resulting 316-row,
+38,455-byte effective document had hash
+`md5:383499271b38e263b709040abbed1da8`.
+
+The first live attempt used the original 120-second helper limit and timed out
+safely: the previous active chain stayed selected and no transaction residue
+remained. With a 240-second helper deadline and 330-second desktop allowance,
+the complete manual operation succeeded in 277.82 seconds including client
+work. Its DNS snapshot produced 694 generated matches and 1,394 chain rules
+(`2 * 694 + 6`), with one active reference and no inactive reference.
+Single-process validation and committed-effective readback subsequently reduced
+ordinary status retrieval from more than 90 seconds to about seven seconds.
+
+A physical reboot created epoch
+`c838dc8397a57cd936a1f9e7e3649caa`. Before Windows restoration, the persistent
+core was already active while the helper and overlay were absent as designed.
+The opted-in Windows one-shot path then staged the helper and restored the
+overlay once in about 200 seconds; the GUI remained responsive, and the saved
+epoch, attempt epoch, source, MAC, generation, and hashes all matched with no
+recorded error. Fresh DNS produced 693 generated matches and 1,392 chain rules,
+one rule pair fewer than the pre-reboot snapshot without changing the policy
+document hash. Final readback showed one active reference, no inactive
+reference, no transaction journal, 2,494 free NVRAM bytes, and Astrill
+disconnected.
 
 ## Failure Matrix
 

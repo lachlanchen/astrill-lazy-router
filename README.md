@@ -128,6 +128,13 @@ source address and observed bridge MAC, performs no NVRAM commit, and can be
 restored once after a router reboot when the user has opted in. Neither path
 silently truncates or partially installs its chosen scope.
 
+The verified E4200 deployment uses a 3-origin/41-row persistent core and an
+85-origin/275-row Windows overlay. Its 316-row effective document restored once
+after physical reboot into source `192.168.1.166/32` and MAC
+`54:bf:64:80:aa:23`; fresh DNS produced 693 generated matches and 1,392 chain
+rules. The GUI remained responsive during the roughly 200-second one-shot
+restore, NVRAM remained at 2,494 free bytes, and Astrill was left disconnected.
+
 For example, search for **UU Remote**, select it, choose **Direct**, and select
 **Add to Policies**. That creates a local Direct policy which can then be
 reviewed and explicitly applied. UU Remote is not seeded or applied by

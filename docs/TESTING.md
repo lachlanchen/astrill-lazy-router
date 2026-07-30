@@ -20,14 +20,15 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-416 tests passed, 2 skipped
+433 tests passed, 5 skipped
 Ruff lint and format: all checks passed
 Catalog: 261 profiles, 19 categories, 731 seeds / 652 unique
 ```
 
 The release pytest result was produced by the full Windows build virtual
-environment with Git's POSIX shell on `PATH` and `python -m pytest`. The two
-skips are Ubuntu-only provider tests.
+environment with `python -m pytest`. Two skips are Ubuntu-only provider tests;
+three parameterized integrity-probe cases require a `sh` executable on
+`PATH`. The router shell suites used Git's detected POSIX shell and passed.
 
 Tests cover:
 
@@ -202,7 +203,7 @@ The following checks were performed against the Linksys E4200:
 - post-test HTTPS responses from Google (`204`), YouTube (`200`), and Instagram
   (`200`), with the UU Remote bridge and GameViewer server processes active.
 
-### 2026-07-30 Companion 0.2.11 Hybrid Staging Check
+### 2026-07-30 Companion 0.2.11 Hybrid Staging And Live Check
 
 Before persistent installation, the new `alctl` and RAM-only `alhybrid`
 extension were syntax-checked by the E4200's actual BusyBox `/bin/sh` and
@@ -222,21 +223,46 @@ The staged contract verified:
   the larger of `MemAvailable` and `MemFree + Buffers + Cached`; and
 - an unchanged NVRAM-value digest across the isolated overlay exercise.
 
-The hardened deterministic boot archive at this check is 19,506 bytes, or
-26,008 base64 bytes in 15 chunks, below the 20,000-byte archive ceiling. The
-normalized bootstrap is 6,502 bytes; deterministic gzip plus base64 stores it
-in 2,560 bytes. For this release, the canonical 2,561-byte payload-plus-LF hash
-input has MD5 `3b6a21b7fbc73107dc1fc85539e9e008`. On the documented E4200
-preflight snapshot, the live installer projection measured 6,284 bytes free
-before the upgrade, 2,772 bytes of total growth, and 3,512 bytes free
-afterward. That is 1,464 bytes above the enforced 2,048-byte reserve.
-Installation repeats the exact projection under the controller lock and
-blocks if concurrent growth removes the margin.
+The hardened deterministic boot archive installed in the live check is 19,960
+bytes, or exactly 26,616 base64 bytes in 15 chunks, below the 20,000-byte
+archive ceiling. Its MD5 is `3552747bcb9a06a8f6b64dcbb1ce0675`; its
+SHA-256 is
+`2f0dbbda03af55a54ebf75fa6a06d2f47ffcd071310082544202edac4422a4be`.
+The normalized bootstrap remains 6,502 bytes; deterministic gzip plus base64
+stores it in 2,560 bytes. Its canonical 2,561-byte payload-plus-LF hash input
+has MD5 `3b6a21b7fbc73107dc1fc85539e9e008`.
 
-This staging check is not the physical-reboot acceptance result. Persistent
-installation, core replacement, full owner-overlay admission, Windows bundle
-installation, and reboot/one-shot restoration must still pass the checklist
-in [Hybrid policy storage](HYBRID_POLICY_STORAGE.md) before release.
+The locked E4200 installer preflight measured 3,115 bytes free before the
+upgrade, 608 bytes of projected growth, and 2,507 bytes free afterward. That
+was 459 bytes above the enforced 2,048-byte reserve. Physical-reboot readback
+showed 2,494 bytes free, a 446-byte margin.
+
+The installed persistent core had three origins, 41 rows, 4,135 bytes,
+generation 1, and hash `md5:b9651667705f05dbd97019aa529bc256`.
+The generation-1 Windows overlay had 85 origins, 275 rows, 24,551 bytes, hash
+`md5:6d6fe09c400bb103e0af5a168236f1d6`, source
+`192.168.1.166/32`, and MAC `54:bf:64:80:aa:23`. The composed effective
+document had 316 rows, 38,455 bytes, and hash
+`md5:383499271b38e263b709040abbed1da8`.
+
+The first full overlay transaction exceeded the original 120-second helper
+deadline and failed safely with the prior chain active. After increasing the
+helper deadline to 240 seconds and the client allowance to 330 seconds, the
+manual load succeeded in 277.82 seconds including client work. It produced 694
+generated matches and 1,394 active-chain rules, with one active reference and
+no inactive reference. The optimized committed-effective status path reduced
+readback from more than 90 seconds to about seven seconds.
+
+Physical reboot created epoch
+`c838dc8397a57cd936a1f9e7e3649caa`, retained the core, and cleared the RAM
+helper and overlay as designed. The Windows app then restored its opted-in
+overlay exactly once in about 200 seconds while remaining responsive. The
+saved runtime and attempt epochs matched, no restore error was recorded, and
+the source/MAC/generation/hash readback was exact. Fresh DNS yielded 693
+generated matches and 1,392 chain rules, the expected one-pair variation from
+the pre-reboot answer set. Final status showed one active reference, no
+inactive reference, no transaction journal, 2,494 free NVRAM bytes, and
+Astrill disconnected.
 
 ### 2026-07-30 Windows UU, Nutstore, And Companion 0.2.5 Check
 

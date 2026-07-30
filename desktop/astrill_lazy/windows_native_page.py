@@ -145,7 +145,7 @@ class WindowsNativeSettingsPage(QWidget):
         self.section_tabs.setDocumentMode(True)
         self.section_tabs.setMovable(False)
         self.section_tabs.setUsesScrollButtons(True)
-        self.section_tabs.tabBar().setExpanding(False)
+        self.section_tabs.tabBar().setExpanding(True)
         self._section_pages: dict[str, QWidget] = {}
         self._section_layouts: dict[str, QVBoxLayout] = {}
         for section_id, title, description in SECTION_DEFINITIONS:

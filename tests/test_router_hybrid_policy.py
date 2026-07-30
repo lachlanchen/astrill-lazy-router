@@ -62,6 +62,90 @@ def _run(tmp_path: Path, scenario: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_single_pass_overlay_validator_accepts_valid_document_and_rejects_malformed(
+    tmp_path: Path,
+) -> None:
+    result = _run(
+        tmp_path,
+        r"""
+load_hybrid_helper || exit 8
+cat > "$BASE/valid-overlay.tsv" <<'EOF'
+# astrill-lazy-rules-v1
+domain-row	1	10	domain	example.com	direct	tcp	443	Domain	domain-origin
+cidr-row	1	20	cidr	203.0.113.0/24	vpn	any	-	Cidr	cidr-origin
+EOF
+hybrid_validate_rules "$BASE/valid-overlay.tsv" || exit 9
+
+: > "$BASE/empty-overlay.tsv"
+hybrid_validate_rules "$BASE/empty-overlay.tsv" && exit 10
+
+cat > "$BASE/bad-source.tsv" <<'EOF'
+# astrill-lazy-rules-v1
+bad-source	1	10	cidr	999.0.113.0/24	direct	any	-	Bad	bad-source
+EOF
+hybrid_validate_rules "$BASE/bad-source.tsv" && exit 11
+
+cat > "$BASE/device-overlay.tsv" <<'EOF'
+# astrill-lazy-rules-v1
+device-row	1	10	device	192.168.1.50/32	direct	any	-	Device	device-origin
+EOF
+hybrid_validate_rules "$BASE/device-overlay.tsv" && exit 12
+
+cat > "$BASE/bad-fields.tsv" <<'EOF'
+# astrill-lazy-rules-v1
+bad-fields	1	10	domain	example.com	direct	tcp	443	Label
+EOF
+hybrid_validate_rules "$BASE/bad-fields.tsv" && exit 13
+printf 'overlay-validator-safe\n'
+""",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "overlay-validator-safe\n"
+
+
+def test_single_pass_effective_validator_accepts_valid_scopes_and_rejects_bad_source_or_mac(
+    tmp_path: Path,
+) -> None:
+    result = _run(
+        tmp_path,
+        r"""
+load_hybrid_helper || exit 8
+cat > "$BASE/valid-effective.tsv" <<'EOF'
+# astrill-lazy-effective-v1
+core-row	1	10	cidr	1.1.1.1/32	direct	any	-	Core	core-origin	-	-
+overlay-row	1	20	domain	example.com	vpn	tcp	443	Overlay	overlay-origin	192.168.1.50/32	aa:bb:cc:dd:ee:ff
+EOF
+hybrid_validate_effective "$BASE/valid-effective.tsv" || exit 9
+
+: > "$BASE/empty-effective.tsv"
+hybrid_validate_effective "$BASE/empty-effective.tsv" && exit 10
+
+cat > "$BASE/bad-effective-source.tsv" <<'EOF'
+# astrill-lazy-effective-v1
+overlay-row	1	20	domain	example.com	vpn	tcp	443	Overlay	overlay-origin	192.168.1.999/32	aa:bb:cc:dd:ee:ff
+EOF
+hybrid_validate_effective "$BASE/bad-effective-source.tsv" && exit 11
+
+cat > "$BASE/bad-effective-mac.tsv" <<'EOF'
+# astrill-lazy-effective-v1
+overlay-row	1	20	domain	example.com	vpn	tcp	443	Overlay	overlay-origin	192.168.1.50/32	gg:bb:cc:dd:ee:ff
+EOF
+hybrid_validate_effective "$BASE/bad-effective-mac.tsv" && exit 12
+
+cat > "$BASE/mac-without-source.tsv" <<'EOF'
+# astrill-lazy-effective-v1
+overlay-row	1	20	domain	example.com	vpn	tcp	443	Overlay	overlay-origin	-	aa:bb:cc:dd:ee:ff
+EOF
+hybrid_validate_effective "$BASE/mac-without-source.tsv" && exit 13
+printf 'effective-validator-safe\n'
+""",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "effective-validator-safe\n"
+
+
 def test_ram_helper_composes_source_and_mac_guarded_matches(
     tmp_path: Path,
 ) -> None:
@@ -1010,7 +1094,7 @@ date() {
     calls=$(cat "$BASE/date-calls")
     calls=$((calls + 1))
     printf '%s\n' "$calls" > "$BASE/date-calls"
-    [ "$calls" -lt 4 ] && printf '0\n' || printf '121\n'
+    [ "$calls" -lt 4 ] && printf '0\n' || printf '241\n'
 }
 hybrid_policy_free_kib() { printf '50000\n'; }
 ensure_chain_shell() { printf 'ensure %s\n' "$1" >> "$BASE/mutations"; }

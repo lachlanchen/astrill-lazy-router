@@ -134,6 +134,11 @@ location is:
 %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Astrill Lazy Router.lnk
 ```
 
+The GUI holds a crash-recoverable per-user lock for its full lifetime. A
+second launch exits successfully before constructing another window or
+starting another reboot-reconciliation task. This prevents a double-click or
+duplicate launcher from racing the one-shot RAM-overlay restore.
+
 To install a bundle built in another directory:
 
 ```powershell
@@ -233,6 +238,13 @@ eligible startup or network event after a new router runtime can restore this
 controller's missing RAM overlay once. The runtime epoch and attempted result
 are saved locally, so a failed epoch is not hammered on every page visit or
 application restart. Manual **Restore RAM overlay now** remains available.
+
+The physical-reboot check verified this path for epoch
+`c838dc8397a57cd936a1f9e7e3649caa`. Core-only service was available before the
+GUI started; Windows then restored its missing 85-origin overlay once in about
+200 seconds while the window remained responsive. The saved runtime and
+attempt epochs, source `192.168.1.166/32`, MAC `54:bf:64:80:aa:23`,
+generation 1, and policy hashes matched, with no restore error.
 
 Successful page reads are cached for the life of the window, including a valid
 empty device result. Moving between pages therefore does not turn an empty
@@ -359,6 +371,11 @@ restore document for the unreferenced inactive chain, validates topology,
 memory, and deadline, dry-runs it with `iptables-restore --noflush --test`,
 commits that same document once with `--noflush`, and verifies the exact
 rule-count/topology readback before the A/B jump can change.
+
+Hybrid policy mutations allow up to 240 seconds on the router and 330 seconds
+in the desktop client. The final full manual load completed in 277.82 seconds
+including client-side work; the ordinary optimized status path takes about
+seven seconds instead of the earlier more-than-90-second validation path.
 
 The RAM action changes only the matching computer's traffic. It cannot shadow
 the global core or replace another controller's overlay. **Remove this

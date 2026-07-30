@@ -23,8 +23,8 @@ from .native_settings import (
 )
 from .subprocess_support import background_process_options
 
-DOMAIN_REFRESH_TIMEOUT = 180
-HYBRID_POLICY_TIMEOUT = 210
+DOMAIN_REFRESH_TIMEOUT = 330
+HYBRID_POLICY_TIMEOUT = 330
 OVERLAY_OWNER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 MD5_RE = re.compile(r"^[0-9a-f]{32}$")
 HYBRID_HELPER_PATH = "/tmp/astrill-lazy/alhybrid"
@@ -126,7 +126,7 @@ class RouterClient:
     def __init__(
         self,
         host: str = "astrill-router",
-        timeout: int = 15,
+        timeout: int = 30,
         *,
         user: str | None = None,
         port: int | None = None,

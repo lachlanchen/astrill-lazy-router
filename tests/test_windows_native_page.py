@@ -118,6 +118,7 @@ def test_page_has_clear_spacious_sections_and_keeps_controls_in_context(
     assert page.section_names == expected_names
     assert isinstance(page.section_tabs, QTabWidget)
     assert page.section_tabs.count() == len(expected_names) == 7
+    assert page.section_tabs.tabBar().expanding()
     assert (
         tuple(
             page.section_tabs.tabText(index)

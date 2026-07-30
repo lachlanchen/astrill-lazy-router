@@ -63,13 +63,16 @@ The `0.2.11` installer:
     serialized recovery logic, if bootstrap or post-install verification
     fails. Recovery refuses to overwrite a newer policy/package/startup state.
 
-On the documented E4200 preflight snapshot, the measured live projection for
-this build starts with 6,284 NVRAM bytes free. The complete package,
-compressed-bootstrap, hook, metadata, and persistent-rule migration adds 2,772
-bytes, leaving 3,512 bytes free—1,464 bytes above the enforced 2,048-byte
-reserve. This is a snapshot measurement, not a durable capacity guarantee. The
-installer recomputes the projection under the controller lock immediately
-before mutation.
+On the documented E4200 deployment, the 19,960-byte package encodes to exactly
+26,616 base64 bytes in 15 NVRAM chunks. Its MD5 is
+`3552747bcb9a06a8f6b64dcbb1ce0675`; its SHA-256 is
+`2f0dbbda03af55a54ebf75fa6a06d2f47ffcd071310082544202edac4422a4be`.
+The locked live preflight started with 3,115 NVRAM bytes free, projected 608
+bytes of growth and 2,507 bytes free afterward—459 bytes above the enforced
+2,048-byte reserve. The physical-reboot observation was 2,494 bytes free, a
+446-byte margin. These are snapshot measurements, not durable capacity
+guarantees. The installer recomputes the projection under the controller lock
+immediately before mutation.
 
 Failed-upgrade rollback does not execute the captured old bootstrap. After
 restoring the exact NVRAM snapshot, the desktop-shipped current bootstrap runs
@@ -255,17 +258,30 @@ the retained Telnet recovery path and run the same command. The complete
 pre-plugin integration values are in the encrypted backup.
 
 The bootstrap has been invoked repeatedly, upgrade recovery is verified, and
-the plugin reconstructed successfully after a physical router reboot.
+the plugin reconstructed successfully after a physical router reboot. Epoch
+`c838dc8397a57cd936a1f9e7e3649caa` first exposed the expected core-only state:
+the 3-origin/41-row/4,135-byte core remained at generation 1, while the RAM
+helper and overlay had been cleared. The opted-in Windows app then staged the
+helper and restored its 85-origin/275-row/24,551-byte overlay once in about 200
+seconds. The GUI stayed responsive and the exact `192.168.1.166/32` /
+`54:bf:64:80:aa:23` binding and generation 1 read back successfully.
+
+Fresh DNS resolution produced 693 generated matches and 1,392 active-chain
+rules after reboot, versus 694 matches and 1,394 rules during the initial
+pre-reboot load. Both runs retained exactly one active-chain reference and no
+inactive-chain reference; the one rule pair is normal DNS-time answer
+variation. The final effective document remained 316 rows / 38,455 bytes with
+hash `md5:383499271b38e263b709040abbed1da8`. NVRAM stayed at 2,494 bytes
+free, no policy transaction journal remained, and Astrill remained
+disconnected.
 Astrill's existing `astrill_autostart=0` setting was deliberately preserved;
 the plugin does not decide whether the upstream VPN should connect at boot.
 
-For the hybrid acceptance sequence, reboot with Astrill disconnected and
-confirm the core is active before any GUI starts. Then start one paired GUI,
-confirm exactly one missing-overlay restoration for the new runtime epoch,
-verify the reported owner/source/MAC/generation/hash, and compare the complete
-NVRAM digest before and after the overlay operation. A failed admission or
-restore must retain the prior core/effective chain and must not be retried in a
-tight loop. For a large overlay, also verify bounded eight-way/five-second DNS
-prefetch, test-then-commit of one `iptables-restore --noflush` document into the
-inactive chain, and exact post-commit topology/rule-count readback before the
-A/B jump changes.
+For future hybrid acceptance runs, repeat the same order: reboot with Astrill
+disconnected, confirm the core before any GUI starts, then confirm exactly one
+missing-overlay restoration for the new epoch. Verify owner, source, MAC,
+generation, hash, unchanged NVRAM, bounded eight-way/five-second DNS prefetch,
+test-then-commit of one `iptables-restore --noflush` document into the inactive
+chain, and exact topology/rule-count readback before the A/B jump changes. A
+failed admission or restore must retain the prior core/effective chain and must
+not be retried in a tight loop.
