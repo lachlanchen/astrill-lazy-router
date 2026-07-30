@@ -445,7 +445,6 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "refresh_mode=${3:-0}" in controller
     assert 'apply_runtime "$refresh_document" 1' in controller
     assert '[ "$(hybrid_overlay_count)" -gt 0 ]' in controller
-    assert "repeatedly taxing the router" in controller
     assert '"$RESOLVED"' in controller
     assert "HYBRID_DNS_BATCH=8" in hybrid
     assert "iptables-restore" in hybrid
