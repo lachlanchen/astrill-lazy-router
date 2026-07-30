@@ -14,8 +14,9 @@ from astrill_lazy.catalog import load_catalog
 from astrill_lazy.models import MatchKind, RouteTarget, Rule
 from astrill_lazy.store import ConfigStore, PolicyDeploymentManifest
 from astrill_lazy.windows_controller import WindowsController
-from astrill_lazy.windows_ui import MainWindow
-from PySide6.QtCore import Qt, QTimer
+from astrill_lazy.windows_ui import STYLE_SHEET, MainWindow
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtNetwork import QNetworkInformation
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -25,11 +26,19 @@ PEER_HASH = "md5:" + ("c" * 32)
 EFFECTIVE_HASH = "md5:" + ("d" * 32)
 COMPANION_VERSION = "1.2.3"
 SOURCE = "192.168.1.166/32"
+SOURCE_MAC = "aa:bb:cc:dd:ee:ff"
 
 
 @pytest.fixture(scope="module")
 def app() -> QApplication:
-    return QApplication.instance() or QApplication([])
+    application = QApplication.instance() or QApplication([])
+    windows_font = Path("C:/Windows/Fonts/segoeui.ttf")
+    if windows_font.is_file():
+        QFontDatabase.addApplicationFont(str(windows_font))
+        application.setFont(QFont("Segoe UI", 9))
+    application.setStyle("Fusion")
+    application.setStyleSheet(STYLE_SHEET)
+    return application
 
 
 def _rule(rule_id: str, name: str | None = None) -> Rule:
@@ -87,6 +96,7 @@ def _status(
                 "generation": 4,
                 "hash": OVERLAY_HASH,
                 "source": SOURCE,
+                "mac": SOURCE_MAC,
                 "origin_ids": ["overlay-rule"],
             }
         )
@@ -97,6 +107,7 @@ def _status(
                 "generation": 2,
                 "hash": PEER_HASH,
                 "source": "192.168.1.180/32",
+                "mac": "00:11:22:33:44:55",
                 "origin_ids": ["peer-rule"],
             }
         )
@@ -145,7 +156,8 @@ def _save_manifest(
         companion_version=COMPANION_VERSION,
         controller_id=window.controller.store.controller_id,
         source=source,
-        resolved_source=source,
+        resolved_source=SOURCE if source == "auto" else source,
+        source_mac=SOURCE_MAC if source == "auto" else None,
         core_rule_ids=("core-rule",),
         overlay_rule_ids=("overlay-rule",),
         core_hash=CORE_HASH,
@@ -174,6 +186,113 @@ def _run_synchronously(
     result = function()
     if success is not None:
         success(result)
+
+
+def _visible_policy_rows(window: MainWindow) -> float:
+    policy_viewport = window.policy_tree.viewport()
+    scroll_viewport = window.policies_scroll.viewport()
+    top = policy_viewport.mapTo(scroll_viewport, QPoint(0, 0)).y()
+    visible_height = max(
+        0,
+        min(scroll_viewport.height(), top + policy_viewport.height()) - max(0, top),
+    )
+    row_height = max(1, window.policy_tree.sizeHintForRow(0))
+    return visible_height / row_height
+
+
+def _layout_window(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> MainWindow:
+    rules = [_rule("core-rule"), _rule("overlay-rule")]
+    rules.extend(_rule(f"policy-{index:02d}") for index in range(1, 19))
+    window = _window(tmp_path, monkeypatch, rules=rules)
+    _save_manifest(window, source="auto")
+    window.router_status = _status(window)
+    window._update_policy_metric()
+    _select_first_policy(window)
+    window.show()
+    app.processEvents()
+    return window
+
+
+def test_hybrid_policy_layout_keeps_three_rows_visible_at_1180x760(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _layout_window(app, tmp_path, monkeypatch)
+    window.resize(1180, 760)
+    window.policies_scroll.verticalScrollBar().setValue(0)
+    app.processEvents()
+
+    assert list(window.policy_storage_cells) == [
+        "local",
+        "core",
+        "this_overlay",
+        "other_overlays",
+        "effective",
+    ]
+    assert window.policy_overlay_source.text() == "auto"
+    assert window.pin_core_button.text() == "Replace persistent core"
+    assert window.load_ram_button.text() == "Load selected into RAM"
+    assert window.restore_ram_button.text() == "Restore RAM overlay now"
+    assert window.remove_overlay_button.text() == "Remove this overlay"
+    assert _visible_policy_rows(window) >= 3
+
+    screenshot = tmp_path / "hybrid-policies-1180x760.png"
+    assert window.grab().save(str(screenshot))
+    assert screenshot.stat().st_size > 1_000
+    window.close()
+
+
+def test_hybrid_policy_layout_uses_scroll_recovery_without_overlap_at_minimum(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _layout_window(app, tmp_path, monkeypatch)
+    window.resize(960, 640)
+    window.policies_scroll.verticalScrollBar().setValue(0)
+    app.processEvents()
+
+    group = window.policy_storage_group
+    assert group.height() >= group.minimumSizeHint().height()
+    assert not window.policy_overlay_source.geometry().intersects(
+        window.policy_auto_restore_check.geometry()
+    )
+
+    actions = (
+        window.pin_core_button,
+        window.load_ram_button,
+        window.restore_ram_button,
+        window.remove_overlay_button,
+    )
+    for index, button in enumerate(actions):
+        assert group.contentsRect().contains(button.geometry())
+        assert button.width() >= button.minimumSizeHint().width()
+        for other in actions[index + 1 :]:
+            assert not button.geometry().intersects(other.geometry())
+
+    status_bottom = max(
+        label.geometry().bottom() for label in window.policy_storage_cells.values()
+    )
+    assert status_bottom < window.policy_overlay_source.geometry().top()
+    action_bottom = max(button.geometry().bottom() for button in actions)
+    assert action_bottom < window.policy_storage_legend.geometry().top()
+    assert window.policies_scroll.verticalScrollBar().isVisible()
+
+    screenshot = tmp_path / "hybrid-policies-960x640.png"
+    assert window.grab().save(str(screenshot))
+    assert screenshot.stat().st_size > 1_000
+
+    window.policies_scroll.verticalScrollBar().setValue(
+        window.policies_scroll.verticalScrollBar().maximum()
+    )
+    app.processEvents()
+    assert _visible_policy_rows(window) >= 3
+    window.close()
 
 
 def test_legacy_companion_keeps_apply_actions(
@@ -225,6 +344,8 @@ def test_hybrid_layers_render_with_neutral_amber_red_semantics(
     assert window.policy_overlay_source.text() == SOURCE
     assert window.metric_labels["rules"].text() == "2 / 3"
     assert "Router policy is up to date" in window.policy_sync_state.text()
+    assert "Hybrid storage:" in window.policy_capacity_state.text()
+    assert "Full apply is blocked" not in window.policy_capacity_state.text()
 
     window.router_status = _status(window, owner_overlay=False)
     window._update_policy_metric()
@@ -248,6 +369,103 @@ def test_hybrid_layers_render_with_neutral_amber_red_semantics(
     assert window.policy_overlay_source_state.property("storageTone") == "red"
     assert "Router reports 192.168.1.199/32" in (
         window.policy_overlay_source_state.text()
+    )
+    window.close()
+
+
+def test_auto_source_is_default_and_displays_resolved_ip_and_mac(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _window(tmp_path, monkeypatch, rules=[_rule("overlay-rule")])
+    window.router_status = _status(window, owner_overlay=False, peer_overlay=False)
+    window._update_policy_metric()
+
+    assert window.policy_overlay_source.text() == "auto"
+
+    _save_manifest(window, source="auto")
+    window.router_status = _status(window, peer_overlay=False)
+    window._update_policy_metric()
+
+    assert window.policy_overlay_source.text() == "auto"
+    assert SOURCE in window.policy_overlay_source_state.text()
+    assert SOURCE_MAC in window.policy_overlay_source_state.text()
+    assert SOURCE in window.policy_storage_cells["this_overlay"].text()
+    assert SOURCE_MAC in window.policy_storage_cells["this_overlay"].text()
+    assert (
+        window.policy_storage_cells["this_overlay"].property("storageTone") == "green"
+    )
+
+    mac_mismatch = _status(window, peer_overlay=False)
+    mac_mismatch["overlays"][0]["mac"] = "00:11:22:33:44:55"
+    window.router_status = mac_mismatch
+    window._update_policy_metric()
+    assert window.policy_storage_cells["this_overlay"].property("storageTone") == "red"
+    assert window.policy_overlay_source_state.property("storageTone") == "red"
+    window.close()
+
+
+def test_first_auto_ram_load_passes_literal_auto(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _window(tmp_path, monkeypatch, rules=[_rule("overlay-rule")])
+    window.router_status = _status(window, owner_overlay=False, peer_overlay=False)
+    window._update_policy_metric()
+    selected = _select_first_policy(window)
+    configured: list[dict[str, Any]] = []
+    loaded: list[tuple[tuple[str, ...], str]] = []
+
+    monkeypatch.setattr(
+        window.controller,
+        "configure_policy_deployment",
+        lambda **kwargs: configured.append(kwargs),
+    )
+    monkeypatch.setattr(
+        window.controller,
+        "load_ram_overlay",
+        lambda rule_ids, *, source: (
+            loaded.append((rule_ids, source)) or window.router_status
+        ),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(window, "_run_task", _run_synchronously)
+
+    window._load_selected_into_ram()
+
+    assert configured[0]["source"] == "auto"
+    assert loaded == [(selected, "auto")]
+    window.close()
+
+
+def test_peer_origin_counts_do_not_hide_local_policies_outside_profile(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _window(
+        tmp_path,
+        monkeypatch,
+        rules=[_rule("core-rule"), _rule("overlay-rule")],
+    )
+    manifest = _save_manifest(window)
+    manifest.overlay_rule_ids = ()
+    manifest.overlay_hash = None
+    manifest.overlay_generation = 0
+    window.controller.store.upsert_deployment(manifest)
+    window.router_status = _status(window, owner_overlay=False, peer_overlay=True)
+
+    window._update_policy_metric()
+
+    assert window.metric_labels["rules"].text() == "2 / 2"
+    assert "1 enabled local policy is deliberately outside" in (
+        window.policy_sync_state.text()
     )
     window.close()
 
@@ -357,6 +575,7 @@ def test_first_core_pin_configures_manifest_without_requiring_ram_source(
     window.policy_overlay_source.clear()
     configured: list[dict[str, Any]] = []
     pinned: list[tuple[str, ...]] = []
+    confirmations: list[tuple[str, str]] = []
 
     def configure(**kwargs: Any) -> object:
         configured.append(kwargs)
@@ -375,7 +594,9 @@ def test_first_core_pin_configures_manifest_without_requiring_ram_source(
     monkeypatch.setattr(
         QMessageBox,
         "question",
-        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+        lambda _parent, title, message, **_kwargs: (
+            confirmations.append((title, message)) or QMessageBox.StandardButton.Yes
+        ),
     )
     monkeypatch.setattr(window, "_run_task", _run_synchronously)
 
@@ -392,6 +613,9 @@ def test_first_core_pin_configures_manifest_without_requiring_ram_source(
         }
     ]
     assert pinned == [selected]
+    assert confirmations[0][0] == "Replace persistent core"
+    assert "whole-document replacement, not an append" in confirmations[0][1]
+    assert "Current core: 1 policies" in confirmations[0][1]
     window.close()
 
 
@@ -424,7 +648,7 @@ def test_restore_refuses_missing_or_changed_visible_source(
 
     assert tasks == []
     assert "RAM overlay actions refuse" in warnings[0]
-    assert "differs from the saved overlay binding" in warnings[1]
+    assert "differs from the saved overlay request" in warnings[1]
     window.close()
 
 

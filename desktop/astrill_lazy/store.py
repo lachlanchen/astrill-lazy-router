@@ -25,6 +25,7 @@ CONTROLLER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 HOST_KEY_FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/=]{4,128}$")
 MAC_ADDRESS_RE = re.compile(r"^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$")
 POLICY_HASH_RE = re.compile(r"^md5:[0-9a-f]{32}$")
+PACKAGE_MD5_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 def new_controller_id() -> str:
@@ -61,17 +62,22 @@ class PolicyDeploymentManifest:
     router_host_key_fingerprint: str
     companion_version: str
     controller_id: str
+    companion_package_md5: str | None = None
     source: str = "auto"
     resolved_source: str | None = None
     source_mac: str | None = None
     core_rule_ids: tuple[str, ...] = ()
     overlay_rule_ids: tuple[str, ...] = ()
     core_hash: str | None = None
+    core_observed_hash: str | None = None
     overlay_hash: str | None = None
     core_generation: int = 0
     overlay_generation: int = 0
     restore_overlay_after_reboot: bool = False
+    core_runtime_epoch: str | None = None
     last_runtime_epoch: str | None = None
+    last_restore_attempt_epoch: str | None = None
+    last_restore_error: str | None = None
 
     def validate(self) -> None:
         if not self.router_host.strip():
@@ -84,6 +90,11 @@ class PolicyDeploymentManifest:
             raise ValueError("deployment companion version cannot be empty")
         if not CONTROLLER_ID_RE.fullmatch(self.controller_id):
             raise ValueError("deployment controller ID is invalid")
+        if self.companion_package_md5 is not None:
+            normalized_package_md5 = self.companion_package_md5.strip().casefold()
+            if not PACKAGE_MD5_RE.fullmatch(normalized_package_md5):
+                raise ValueError("deployment companion package MD5 is invalid")
+            self.companion_package_md5 = normalized_package_md5
         self.source = normalize_overlay_source(self.source)
         if self.resolved_source is not None:
             resolved = normalize_overlay_source(self.resolved_source)
@@ -95,7 +106,7 @@ class PolicyDeploymentManifest:
             if not MAC_ADDRESS_RE.fullmatch(normalized_mac):
                 raise ValueError("deployment source MAC address is invalid")
             self.source_mac = normalized_mac
-        for name in ("core_hash", "overlay_hash"):
+        for name in ("core_hash", "core_observed_hash", "overlay_hash"):
             value = getattr(self, name)
             if value is None:
                 continue
@@ -115,6 +126,26 @@ class PolicyDeploymentManifest:
         ):
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise ValueError(f"deployment {name} must be a non-negative integer")
+        for name in (
+            "core_runtime_epoch",
+            "last_runtime_epoch",
+            "last_restore_attempt_epoch",
+        ):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value.strip() or len(value) > 256:
+                raise ValueError(
+                    f"deployment {name} must be a non-empty string of at most "
+                    "256 characters"
+                )
+            setattr(self, name, value.strip())
+        if self.last_restore_error is not None:
+            if not isinstance(self.last_restore_error, str):
+                raise TypeError(
+                    "deployment last_restore_error must be a string or null"
+                )
+            self.last_restore_error = self.last_restore_error.strip()[:2048] or None
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -124,6 +155,7 @@ class PolicyDeploymentManifest:
             "router_port": self.router_port,
             "router_host_key_fingerprint": self.router_host_key_fingerprint,
             "companion_version": self.companion_version,
+            "companion_package_md5": self.companion_package_md5,
             "controller_id": self.controller_id,
             "source": self.source,
             "resolved_source": self.resolved_source,
@@ -131,11 +163,15 @@ class PolicyDeploymentManifest:
             "core_rule_ids": list(self.core_rule_ids),
             "overlay_rule_ids": list(self.overlay_rule_ids),
             "core_hash": self.core_hash,
+            "core_observed_hash": self.core_observed_hash,
             "overlay_hash": self.overlay_hash,
             "core_generation": self.core_generation,
             "overlay_generation": self.overlay_generation,
             "restore_overlay_after_reboot": self.restore_overlay_after_reboot,
+            "core_runtime_epoch": self.core_runtime_epoch,
             "last_runtime_epoch": self.last_runtime_epoch,
+            "last_restore_attempt_epoch": self.last_restore_attempt_epoch,
+            "last_restore_error": self.last_restore_error,
         }
 
     @classmethod
@@ -152,6 +188,9 @@ class PolicyDeploymentManifest:
                 document.get("router_host_key_fingerprint", "")
             ),
             companion_version=str(document.get("companion_version", "")),
+            companion_package_md5=_optional_string(
+                document.get("companion_package_md5")
+            ),
             controller_id=str(document.get("controller_id", "")),
             source=str(document.get("source", "auto")),
             resolved_source=_optional_string(document.get("resolved_source")),
@@ -163,11 +202,17 @@ class PolicyDeploymentManifest:
                 str(item) for item in document.get("overlay_rule_ids", [])
             ),
             core_hash=_optional_string(document.get("core_hash")),
+            core_observed_hash=_optional_string(document.get("core_observed_hash")),
             overlay_hash=_optional_string(document.get("overlay_hash")),
             core_generation=document.get("core_generation", 0),
             overlay_generation=document.get("overlay_generation", 0),
             restore_overlay_after_reboot=restore,
+            core_runtime_epoch=_optional_string(document.get("core_runtime_epoch")),
             last_runtime_epoch=_optional_string(document.get("last_runtime_epoch")),
+            last_restore_attempt_epoch=_optional_string(
+                document.get("last_restore_attempt_epoch")
+            ),
+            last_restore_error=_optional_string(document.get("last_restore_error")),
         )
         manifest.validate()
         return manifest

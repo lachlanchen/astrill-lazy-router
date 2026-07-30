@@ -20,15 +20,14 @@ appstreamcli validate --no-net data/*.metainfo.xml
 Current result:
 
 ```text
-253 tests passed, 4 skipped
+416 tests passed, 2 skipped
 Ruff lint and format: all checks passed
 Catalog: 261 profiles, 19 categories, 731 seeds / 652 unique
 ```
 
 The release pytest result was produced by the full Windows build virtual
-environment with `python -m pytest -ra`. The four skips are two Ubuntu-only
-provider tests and two router static tests that require a POSIX shell
-unavailable in that Windows environment.
+environment with Git's POSIX shell on `PATH` and `python -m pytest`. The two
+skips are Ubuntu-only provider tests.
 
 Tests cover:
 
@@ -40,6 +39,18 @@ Tests cover:
 - single-tunnel region conflict warnings;
 - applet parsing and protocol-specific VPN mode selection;
 - deterministic router package contents;
+- same-version package-MD5 mismatch detection, read-only projected-NVRAM
+  preflight, exact failed-upgrade snapshot restoration, validated captured
+  package recovery through the current serialized path, and restored-runtime
+  file identity checks;
+- deterministic gzip/base64 bootstrap storage, canonical encoded-payload
+  hashing, same-captured-payload decode/execute, pre/post-lock payload
+  revalidation, staged package replacement, and delayed running-package
+  marker publication;
+- shared-lock package/helper/policy/install/removal serialization,
+  version/package/helper-bound mutation syntax, exact-byte NVRAM
+  compare-and-swap, signal cleanup, uninstalled-state residue audits, and
+  same-session snapshot restoration;
 - current-runtime reconciliation, stored-package reconstruction, in-place
   watchdog repair, and identical-package rewrite suppression;
 - private, atomic user-session autostart;
@@ -62,6 +73,10 @@ Tests cover:
 - Windows Services category/profile/provider-country filtering, durable
   checkbox and row multi-selection, tri-state Select visible, and explicit
   Add-to-Policies behavior;
+- Windows layered-policy manifest validation, host/version/fingerprint
+  binding, core generation/hash compare-and-swap, runtime-epoch generation
+  adoption, source/MAC-scoped owner overlays, one-shot restore persistence,
+  and refusal to overwrite a differing live owner;
 - Windows endpoint exact-country filtering, durable checkbox plus
   Ctrl/Command/Shift selection, semantic header ordering,
   numeric/missing-value behavior, and persistent manual latency-cache
@@ -71,10 +86,18 @@ Tests cover:
   and native/companion transactional controller paths;
 - seven-section Windows Astrill rendering, complete safe-key coverage, and
   section changes that preserve draft/dirty state;
-- companion `0.2.10` executable coverage for post-connect allocation,
+- companion `0.2.11` executable coverage for post-connect allocation,
   no-ratchet undercut handling, persistent table `212` blackhole fallback,
   exact owned-rule cleanup, bounded transient application source-port routes,
-  upgrade-lock recovery, and degraded-state reporting;
+  upgrade-lock recovery, degraded-state reporting, corrupt-core recovery,
+  verified NVRAM rollback, deterministic core/overlay composition,
+  unique-domain DNS deduplication, eight-worker/five-second resolver bounds,
+  fresh-resolution cache fallback, pre-counted generated-match admission,
+  build deadlines, and failed-chain cleanup;
+- one-document inactive-chain restore generation, a dry run with
+  `iptables-restore --noflush --test` before commit,
+  topology/memory/deadline guards, exact rule-count readback, and refusal to
+  publish a failed candidate;
 - route probe parsing, noise thresholds, minimum bypasses, and service-aware
   recommendations;
 - complete native-only removal and preserved Astrill state.
@@ -152,8 +175,9 @@ The following checks were performed against the Linksys E4200:
   the former 30-second switch cutoff was marginal and verifying the new
   60-second boundary;
 - installed companion maintenance configured for a 60-second ensure and a
-  domain refresh every 30 cycles (approximately 30 minutes), with no desktop
-  polling involved;
+  core-only domain refresh every 30 cycles (approximately 30 minutes) when no
+  overlay is active, with overlay rebuilds excluded from that cadence and no
+  desktop polling involved;
 - applet country-name normalization, default-order preservation, country
   sorting, measured fastest/slowest sorting, and stable pending/no-reply/
   unmeasured ordering;
@@ -177,6 +201,42 @@ The following checks were performed against the Linksys E4200:
   `astrill_autocycle=1`, `astrill_autostart=0`, and the tunnel up;
 - post-test HTTPS responses from Google (`204`), YouTube (`200`), and Instagram
   (`200`), with the UU Remote bridge and GameViewer server processes active.
+
+### 2026-07-30 Companion 0.2.11 Hybrid Staging Check
+
+Before persistent installation, the new `alctl` and RAM-only `alhybrid`
+extension were syntax-checked by the E4200's actual BusyBox `/bin/sh` and
+exercised from an isolated `/tmp/astrill-lazy-stage` harness. The installed
+`0.2.5` runtime and NVRAM package were not replaced during staging.
+
+The staged contract verified:
+
+- layered JSON status with runtime epoch, core, overlays, effective policy,
+  and separate limits;
+- 32-bit-safe containment for `192.168.1.0/24`;
+- `auto` owner binding to `192.168.1.166/32` and
+  `54:bf:64:80:aa:23` from the bridge ARP table;
+- source-plus-MAC emission and generated-match counting through the router's
+  BusyBox tools;
+- reclaimable-memory calculation of 41,436 KiB on the observed kernel, using
+  the larger of `MemAvailable` and `MemFree + Buffers + Cached`; and
+- an unchanged NVRAM-value digest across the isolated overlay exercise.
+
+The hardened deterministic boot archive at this check is 19,506 bytes, or
+26,008 base64 bytes in 15 chunks, below the 20,000-byte archive ceiling. The
+normalized bootstrap is 6,502 bytes; deterministic gzip plus base64 stores it
+in 2,560 bytes. For this release, the canonical 2,561-byte payload-plus-LF hash
+input has MD5 `3b6a21b7fbc73107dc1fc85539e9e008`. On the documented E4200
+preflight snapshot, the live installer projection measured 6,284 bytes free
+before the upgrade, 2,772 bytes of total growth, and 3,512 bytes free
+afterward. That is 1,464 bytes above the enforced 2,048-byte reserve.
+Installation repeats the exact projection under the controller lock and
+blocks if concurrent growth removes the margin.
+
+This staging check is not the physical-reboot acceptance result. Persistent
+installation, core replacement, full owner-overlay admission, Windows bundle
+installation, and reboot/one-shot restoration must still pass the checklist
+in [Hybrid policy storage](HYBRID_POLICY_STORAGE.md) before release.
 
 ### 2026-07-30 Windows UU, Nutstore, And Companion 0.2.5 Check
 

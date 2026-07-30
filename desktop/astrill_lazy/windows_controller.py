@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,7 @@ COMPILED_CAPACITY_RE = re.compile(
 )
 MAX_OVERLAY_BYTES = 32_768
 MAX_OVERLAY_ROWS = 320
+MAC_ADDRESS_RE = re.compile(r"^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$")
 
 
 class ControllerError(RuntimeError):
@@ -330,7 +331,9 @@ def _layer_source_mac(layer: dict[str, Any] | None) -> str | None:
     for key in ("source_mac", "mac"):
         value = layer.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip().casefold().replace("-", ":")
+            normalized = value.strip().casefold().replace("-", ":")
+            if MAC_ADDRESS_RE.fullmatch(normalized):
+                return normalized
     return None
 
 
@@ -344,6 +347,37 @@ def _layer_origin_ids(layer: dict[str, Any] | None) -> tuple[str, ...] | None:
         ):
             return tuple(dict.fromkeys(item.strip() for item in value))
     return None
+
+
+def _expected_overlay_source(
+    manifest: PolicyDeploymentManifest,
+) -> str | None:
+    if manifest.resolved_source is not None:
+        return manifest.resolved_source
+    if manifest.source != "auto":
+        return manifest.source
+    return None
+
+
+def _overlay_binding_matches(
+    manifest: PolicyDeploymentManifest,
+    layer: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(layer, dict):
+        return False
+    actual_source = _layer_source(layer)
+    expected_source = _expected_overlay_source(manifest)
+    if expected_source is not None and actual_source != expected_source:
+        return False
+    actual_mac = _layer_source_mac(layer)
+    if manifest.source_mac is not None:
+        return actual_mac == manifest.source_mac
+    # Auto is the strongest binding: the router must resolve the authenticated
+    # SSH peer to a LAN /32 and an ARP MAC. Never call a hash-only auto layer a
+    # match merely because its destination document is unchanged.
+    if manifest.source == "auto":
+        return actual_source is not None and actual_mac is not None
+    return actual_source is not None
 
 
 @dataclass(frozen=True)
@@ -506,7 +540,8 @@ class WindowsController:
 
         self._require_companion_write("configuring hybrid policy storage")
         current, layers = self._read_layered_status(status)
-        version = self._companion_version(current, layers)
+        version = self._require_expected_companion_version(current, layers)
+        package_md5 = RouterInstaller(self.router).expected_package_md5
         fingerprint = self._verified_host_fingerprint(host_key)
         normalized_source = normalize_overlay_source(source)
         core_ids = self._normalize_rule_ids(core_rule_ids)
@@ -523,27 +558,69 @@ class WindowsController:
             layer="overlay",
         )
         owner_layer = _owner_overlay(layers, self.store.controller_id)
+        existing = self.store.deployment_for(
+            router_host=self.store.router_host,
+            router_port=self.store.router_port,
+            companion_version=version,
+        )
+        preserve_overlay = (
+            existing is not None
+            and existing.router_host_key_fingerprint == fingerprint
+            and existing.overlay_rule_ids == overlay_ids
+            and existing.source == normalized_source
+        )
+        if preserve_overlay:
+            # Rebinding the reviewed persistent-core base is not approval to
+            # adopt or weaken a RAM-overlay binding. Keep its last trusted
+            # generation/hash/source/MAC and restore-attempt bookkeeping.
+            resolved_source = existing.resolved_source
+            source_mac = existing.source_mac
+            if resolved_source is None and _overlay_binding_matches(
+                existing,
+                owner_layer,
+            ):
+                resolved_source = _layer_source(owner_layer)
+            if source_mac is None and _overlay_binding_matches(existing, owner_layer):
+                source_mac = _layer_source_mac(owner_layer)
+            overlay_hash = existing.overlay_hash
+            overlay_generation = existing.overlay_generation
+            overlay_runtime_epoch = existing.last_runtime_epoch
+            last_restore_attempt_epoch = existing.last_restore_attempt_epoch
+            last_restore_error = existing.last_restore_error
+        else:
+            resolved_source = (
+                _layer_source(owner_layer)
+                if normalized_source == "auto"
+                else normalized_source
+            )
+            source_mac = _layer_source_mac(owner_layer)
+            overlay_hash = _payload_hash(overlay_payload) if overlay_ids else None
+            overlay_generation = _layer_generation(owner_layer)
+            overlay_runtime_epoch = None
+            last_restore_attempt_epoch = None
+            last_restore_error = None
         manifest = PolicyDeploymentManifest(
             router_host=self.store.router_host,
             router_port=self.store.router_port,
             router_host_key_fingerprint=fingerprint,
             companion_version=version,
             controller_id=self.store.controller_id,
+            companion_package_md5=package_md5,
             source=normalized_source,
-            resolved_source=(
-                _layer_source(owner_layer)
-                if normalized_source == "auto"
-                else normalized_source
-            ),
-            source_mac=_layer_source_mac(owner_layer),
+            resolved_source=resolved_source,
+            source_mac=source_mac,
             core_rule_ids=core_ids,
             overlay_rule_ids=overlay_ids,
             core_hash=_payload_hash(core_payload) if core_ids else None,
-            overlay_hash=_payload_hash(overlay_payload) if overlay_ids else None,
+            core_observed_hash=_layer_hash(layers.get("core")),
+            overlay_hash=overlay_hash,
             core_generation=_layer_generation(layers.get("core")),
-            overlay_generation=_layer_generation(owner_layer),
+            overlay_generation=overlay_generation,
             restore_overlay_after_reboot=bool(restore_overlay_after_reboot),
-            last_runtime_epoch=None,
+            core_runtime_epoch=_runtime_epoch_from_layers(layers),
+            last_runtime_epoch=overlay_runtime_epoch,
+            last_restore_attempt_epoch=last_restore_attempt_epoch,
+            last_restore_error=last_restore_error,
         )
         self.store.upsert_deployment(manifest)
         return manifest
@@ -587,6 +664,7 @@ class WindowsController:
                 owner_layer is not None
                 and overlay_hash is not None
                 and overlay_hash == manifest.overlay_hash.casefold()
+                and _overlay_binding_matches(manifest, owner_layer)
             )
         )
         return HybridPolicyComparison(
@@ -632,7 +710,10 @@ class WindowsController:
                     manifest.resolved_source = manifest.source
         manifest.restore_overlay_after_reboot = enabled
         if not enabled:
-            manifest.last_runtime_epoch = _runtime_epoch_from_layers(layers)
+            epoch = _runtime_epoch_from_layers(layers)
+            manifest.last_runtime_epoch = epoch
+            manifest.last_restore_attempt_epoch = epoch
+            manifest.last_restore_error = None
         self.store.upsert_deployment(manifest)
         return manifest
 
@@ -662,10 +743,14 @@ class WindowsController:
         if helper_action == "installed":
             status, layers = self._read_layered_status()
             manifest = self._require_deployment(status, layers)
+        expected_generation = self._verify_core_manifest_base(
+            manifest,
+            layers,
+        )
         selected = manifest.core_rule_ids if requested is None else requested
         self._reject_layer_overlap(selected, manifest.overlay_rule_ids)
         payload = self._compile_layer_payload(selected, layer="core")
-        result = self.router.core_apply(payload)
+        result = self.router.core_apply(expected_generation, payload)
         result_layers = self._require_layered_document(result)
         expected_hash = _payload_hash(payload)
         self._verify_applied_hash(
@@ -675,7 +760,11 @@ class WindowsController:
         )
         manifest.core_rule_ids = selected
         manifest.core_hash = expected_hash
+        manifest.core_observed_hash = expected_hash
         manifest.core_generation = _layer_generation(result_layers.get("core"))
+        manifest.core_runtime_epoch = (
+            _runtime_epoch_from_layers(result_layers) or manifest.core_runtime_epoch
+        )
         self.store.upsert_deployment(manifest)
         return result
 
@@ -691,12 +780,20 @@ class WindowsController:
         if self._ensure_hybrid_helper() == "installed":
             status, layers = self._read_layered_status()
             manifest = self._require_deployment(status, layers)
-        result = self.router.core_rollback()
+        expected_generation = self._verify_core_manifest_base(
+            manifest,
+            layers,
+        )
+        result = self.router.core_rollback(expected_generation)
         result_layers = self._require_layered_document(result)
         core_layer = result_layers.get("core")
         manifest.core_rule_ids = _layer_origin_ids(core_layer) or ()
         manifest.core_hash = _layer_hash(core_layer)
+        manifest.core_observed_hash = manifest.core_hash
         manifest.core_generation = _layer_generation(core_layer)
+        manifest.core_runtime_epoch = (
+            _runtime_epoch_from_layers(result_layers) or manifest.core_runtime_epoch
+        )
         self.store.upsert_deployment(manifest)
         return result
 
@@ -748,12 +845,15 @@ class WindowsController:
         if owner_layer is None:
             manifest.overlay_generation = 0
             manifest.restore_overlay_after_reboot = False
-            manifest.last_runtime_epoch = _runtime_epoch_from_layers(layers)
+            epoch = _runtime_epoch_from_layers(layers)
+            manifest.last_runtime_epoch = epoch
+            manifest.last_restore_attempt_epoch = epoch
+            manifest.last_restore_error = None
             self.store.upsert_deployment(manifest)
             return status
         result = self.router.overlay_remove(
             manifest.controller_id,
-            _layer_generation(owner_layer),
+            self._verify_overlay_manifest_base(manifest, layers),
         )
         result_layers = self._require_layered_document(result)
         if _owner_overlay(result_layers, manifest.controller_id) is not None:
@@ -762,7 +862,10 @@ class WindowsController:
             )
         manifest.overlay_generation = 0
         manifest.restore_overlay_after_reboot = False
-        manifest.last_runtime_epoch = _runtime_epoch_from_layers(result_layers)
+        epoch = _runtime_epoch_from_layers(result_layers)
+        manifest.last_runtime_epoch = epoch
+        manifest.last_restore_attempt_epoch = epoch
+        manifest.last_restore_error = None
         self.store.upsert_deployment(manifest)
         return result
 
@@ -1207,10 +1310,31 @@ class WindowsController:
             max_bytes = MAX_OVERLAY_BYTES
         else:
             raise ValueError("policy layer must be 'core' or 'overlay'")
-        return self._policy_preflight(
+        summary = self._policy_preflight(
             rule_ids,
             max_bytes=max_bytes,
             capacity_name=normalized_layer,
+        )
+        if normalized_layer != "overlay" or summary.compilation is None:
+            return summary
+        device_origins = sorted(
+            {
+                compiled.origin
+                for compiled in summary.compilation.rules
+                if compiled.kind == MatchKind.DEVICE.value
+            }
+        )
+        if not device_origins:
+            return summary
+        return replace(
+            summary,
+            error=(
+                "RAM overlays are already scoped to this computer and cannot "
+                "contain Device or process-network-identity rows. Move these "
+                "policies to the persistent core or select destination-based "
+                "service, domain, or network policies: " + ", ".join(device_origins)
+            ),
+            compilation=None,
         )
 
     def _policy_preflight(
@@ -1380,6 +1504,107 @@ class WindowsController:
                 + ". Move the policies out of the other layer first."
             )
 
+    def _verify_core_manifest_base(
+        self,
+        manifest: PolicyDeploymentManifest,
+        layers: dict[str, Any],
+    ) -> int:
+        core_layer = layers.get("core")
+        live_generation = _layer_generation(core_layer)
+        live_hash = _layer_hash(core_layer)
+        live_epoch = _runtime_epoch_from_layers(layers)
+        expected_hash = manifest.core_observed_hash or manifest.core_hash
+        if expected_hash is None:
+            raise ControllerError(
+                "the saved deployment has no trusted observation of the current "
+                "persistent core; refresh the Policies page and use its reviewed "
+                "whole-core replacement action to bind the current base"
+            )
+        if live_hash != expected_hash.casefold():
+            raise ControllerError(
+                "the persistent core changed since this deployment observed it "
+                "(the trusted document hash no longer matches); refresh and review "
+                "the whole-core replacement diff before rebinding, or retry rollback "
+                "only after adopting the current base"
+            )
+        if (
+            manifest.core_runtime_epoch is not None
+            and live_epoch is not None
+            and live_epoch != manifest.core_runtime_epoch
+        ):
+            # Core generations are runtime-scoped and may reset at reboot. A new
+            # epoch plus the exact trusted persistent hash is sufficient to
+            # adopt the live generation without weakening the document CAS.
+            manifest.core_generation = live_generation
+            manifest.core_observed_hash = live_hash
+            manifest.core_runtime_epoch = live_epoch
+            self.store.upsert_deployment(manifest)
+            return live_generation
+        if live_generation != manifest.core_generation:
+            raise ControllerError(
+                "the persistent core changed since this deployment observed it "
+                f"(saved generation {manifest.core_generation}, router generation "
+                f"{live_generation} in the same or an unverifiable runtime); "
+                "refresh and review the whole-core replacement diff before "
+                "rebinding"
+            )
+        if manifest.core_runtime_epoch is None and live_epoch is not None:
+            # Safe migration for manifests created before core epochs were
+            # recorded: only attach the epoch after both hash and generation
+            # already match.
+            manifest.core_runtime_epoch = live_epoch
+            self.store.upsert_deployment(manifest)
+        return live_generation
+
+    @staticmethod
+    def _verify_overlay_manifest_base(
+        manifest: PolicyDeploymentManifest,
+        layers: dict[str, Any],
+    ) -> int:
+        live_epoch = _runtime_epoch_from_layers(layers)
+        owner_layer = _owner_overlay(layers, manifest.controller_id)
+        same_epoch = (
+            live_epoch is not None
+            and manifest.last_runtime_epoch is not None
+            and live_epoch == manifest.last_runtime_epoch
+        )
+        if same_epoch:
+            if owner_layer is None:
+                if manifest.overlay_generation == 0:
+                    return 0
+            elif (
+                manifest.overlay_generation > 0
+                and _layer_generation(owner_layer) == manifest.overlay_generation
+                and manifest.overlay_hash is not None
+                and _layer_hash(owner_layer) == manifest.overlay_hash.casefold()
+                and _overlay_binding_matches(manifest, owner_layer)
+            ):
+                return manifest.overlay_generation
+            raise ControllerError(
+                "this controller's live RAM overlay changed during the current "
+                "router runtime; no replacement was written. Remove or explicitly "
+                "rebind the changed owner before loading it again"
+            )
+
+        # RAM generations reset with the runtime. On a new (or previously
+        # unrecorded) epoch, absence is the only safe zero-generation base. An
+        # existing owner may be adopted only when its document and source/MAC
+        # binding are exactly the last trusted overlay.
+        if owner_layer is None:
+            return 0
+        if (
+            manifest.overlay_hash is not None
+            and _layer_hash(owner_layer) == manifest.overlay_hash.casefold()
+            and _overlay_binding_matches(manifest, owner_layer)
+        ):
+            return _layer_generation(owner_layer)
+        raise ControllerError(
+            "this controller's live RAM overlay differs from the saved document "
+            "or source/MAC binding in a new router runtime; automatic restore "
+            "refused to overwrite it. Remove or explicitly rebind the changed "
+            "owner first"
+        )
+
     def _compile_layer_payload(
         self,
         rule_ids: tuple[str, ...],
@@ -1395,6 +1620,19 @@ class WindowsController:
                 self.catalog,
                 max_bytes=max_bytes,
             )
+            if layer == "overlay":
+                device_origins = sorted(
+                    {
+                        compiled.origin
+                        for compiled in compilation.rules
+                        if compiled.kind == MatchKind.DEVICE.value
+                    }
+                )
+                if device_origins:
+                    raise ControllerError(
+                        "RAM overlays cannot contain Device or "
+                        "process-network-identity rows: " + ", ".join(device_origins)
+                    )
             if layer == "overlay" and len(compilation.rules) > MAX_OVERLAY_ROWS:
                 raise ControllerError(
                     f"RAM overlay has {len(compilation.rules):,} rows, but one "
@@ -1459,12 +1697,39 @@ class WindowsController:
             raise ControllerError("router status omitted the companion version")
         return value.strip()
 
+    def _require_expected_companion_version(
+        self,
+        status: dict[str, Any],
+        layers: dict[str, Any],
+    ) -> str:
+        version = self._companion_version(status, layers)
+        installer = RouterInstaller(self.router)
+        expected_version = installer.expected_version
+        if version != expected_version:
+            raise ControllerError(
+                f"hybrid policy storage requires companion {expected_version}, but the "
+                f"router reports {version}; use the separately confirmed Install / "
+                "upgrade action before binding or writing layered policy state"
+            )
+        package_md5 = status.get("package_md5", layers.get("package_md5"))
+        normalized_md5 = (
+            package_md5.strip().casefold() if isinstance(package_md5, str) else ""
+        )
+        if normalized_md5 != installer.expected_package_md5:
+            raise ControllerError(
+                "the router companion version matches, but its stored package MD5 "
+                "does not match this desktop build; use the separately confirmed "
+                "Install / upgrade action before binding or writing layered policy "
+                "state"
+            )
+        return version
+
     def _require_deployment(
         self,
         status: dict[str, Any],
         layers: dict[str, Any],
     ) -> PolicyDeploymentManifest:
-        version = self._companion_version(status, layers)
+        version = self._require_expected_companion_version(status, layers)
         manifest = self.store.deployment_for(
             router_host=self.store.router_host,
             router_port=self.store.router_port,
@@ -1473,6 +1738,17 @@ class WindowsController:
         if manifest is None:
             raise ControllerError(
                 "configure a version-bound hybrid deployment for this router first"
+            )
+        expected_package_md5 = RouterInstaller(self.router).expected_package_md5
+        if manifest.companion_package_md5 is None:
+            # Safe schema migration: the fresh status above already proved the
+            # router is running this desktop's exact stored package.
+            manifest.companion_package_md5 = expected_package_md5
+            self.store.upsert_deployment(manifest)
+        elif manifest.companion_package_md5 != expected_package_md5:
+            raise ControllerError(
+                "the saved hybrid deployment belongs to a different companion "
+                "package; reconfigure it only after reviewing the router upgrade"
             )
         return manifest
 
@@ -1543,12 +1819,16 @@ class WindowsController:
                 "the new selection before enabling or retrying automatic restore"
             )
         requested_source = normalize_overlay_source(source or manifest.source)
-        current_owner = _owner_overlay(layers, manifest.controller_id)
+        expected_generation = self._verify_overlay_manifest_base(manifest, layers)
         result = self.router.overlay_put(
             manifest.controller_id,
-            _layer_generation(current_owner),
+            expected_generation,
             requested_source,
             payload,
+            expected_source=(
+                _expected_overlay_source(manifest) if require_saved_hash else None
+            ),
+            expected_mac=manifest.source_mac if require_saved_hash else None,
         )
         result_layers = self._require_layered_document(result)
         applied_owner = _owner_overlay(result_layers, manifest.controller_id)
@@ -1561,13 +1841,55 @@ class WindowsController:
             _layer_hash(applied_owner),
             "RAM overlay",
         )
+        applied_source = _layer_source(applied_owner)
+        applied_mac = _layer_source_mac(applied_owner)
+        if applied_source is None:
+            raise ControllerError(
+                "router omitted the applied RAM overlay source binding"
+            )
+        if requested_source == "auto" and applied_mac is None:
+            raise ControllerError(
+                "router did not bind the automatic RAM overlay to a validated "
+                "LAN MAC address"
+            )
+        if require_saved_hash:
+            expected_source = _expected_overlay_source(manifest)
+            if expected_source is not None and applied_source != expected_source:
+                raise ControllerError(
+                    "router resolved the restored RAM overlay to a different "
+                    "source; use Load selected into RAM to approve a new binding"
+                )
+            if manifest.source_mac is not None and applied_mac != manifest.source_mac:
+                raise ControllerError(
+                    "router resolved the restored RAM overlay to a different or "
+                    "missing MAC address; use Load selected into RAM to approve a "
+                    "new binding"
+                )
+        elif (
+            manifest.source_mac is not None
+            and applied_mac is None
+            and requested_source == manifest.source
+        ):
+            raise ControllerError(
+                "router omitted the previously verified RAM overlay MAC binding"
+            )
+        previous_source = manifest.source
         manifest.overlay_rule_ids = selected
         manifest.overlay_hash = expected_hash
         manifest.overlay_generation = _layer_generation(applied_owner)
         manifest.source = requested_source
-        manifest.resolved_source = _layer_source(applied_owner)
-        manifest.source_mac = _layer_source_mac(applied_owner)
-        manifest.last_runtime_epoch = _runtime_epoch_from_layers(result_layers)
+        manifest.resolved_source = applied_source
+        if applied_mac is not None:
+            manifest.source_mac = applied_mac
+        elif requested_source != previous_source:
+            # A deliberate switch to an advanced multi-host CIDR may not have a
+            # single MAC. Never clear a verified MAC during an automatic or
+            # same-binding restore.
+            manifest.source_mac = None
+        epoch = _runtime_epoch_from_layers(result_layers)
+        manifest.last_runtime_epoch = epoch
+        manifest.last_restore_attempt_epoch = epoch
+        manifest.last_restore_error = None
         self.store.upsert_deployment(manifest)
         return result
 
@@ -1616,23 +1938,34 @@ class WindowsController:
         if (
             epoch is None
             or epoch == manifest.last_runtime_epoch
+            or epoch == manifest.last_restore_attempt_epoch
             or epoch in self._overlay_restore_attempted_epochs
         ):
             return status
 
         owner_layer = _owner_overlay(layers, manifest.controller_id)
-        if _layer_hash(owner_layer) == manifest.overlay_hash.casefold() and (
-            manifest.resolved_source is None
-            or _layer_source(owner_layer) == manifest.resolved_source
+        if _layer_hash(
+            owner_layer
+        ) == manifest.overlay_hash.casefold() and _overlay_binding_matches(
+            manifest, owner_layer
         ):
             manifest.overlay_generation = _layer_generation(owner_layer)
-            manifest.resolved_source = _layer_source(owner_layer)
-            manifest.source_mac = _layer_source_mac(owner_layer)
+            resolved_source = _layer_source(owner_layer)
+            resolved_mac = _layer_source_mac(owner_layer)
+            if resolved_source is not None:
+                manifest.resolved_source = resolved_source
+            if resolved_mac is not None:
+                manifest.source_mac = resolved_mac
             manifest.last_runtime_epoch = epoch
+            manifest.last_restore_attempt_epoch = epoch
+            manifest.last_restore_error = None
             self.store.upsert_deployment(manifest)
             return status
 
         self._overlay_restore_attempted_epochs.add(epoch)
+        manifest.last_restore_attempt_epoch = epoch
+        manifest.last_restore_error = None
+        self.store.upsert_deployment(manifest)
         try:
             restored = self._put_ram_overlay(
                 None,
@@ -1646,6 +1979,15 @@ class WindowsController:
                 f"overlay could not be restored once for this router boot: {exc}. "
                 "Use Restore RAM overlay now to retry."
             )
+            current_manifest = self.store.deployment_for(
+                router_host=self.store.router_host,
+                router_port=self.store.router_port,
+                companion_version=version,
+            )
+            if current_manifest is not None:
+                current_manifest.last_restore_attempt_epoch = epoch
+                current_manifest.last_restore_error = str(exc)
+                self.store.upsert_deployment(current_manifest)
             self.recovery_notice = (
                 f"{self.recovery_notice} {notice}" if self.recovery_notice else notice
             )

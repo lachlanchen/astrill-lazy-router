@@ -3,6 +3,7 @@
 # RAM-only hybrid policy extension. This file is sourced by alctl.
 
 GENERATED_MATCHES_FILE=$BASE/generated-matches
+RUNTIME_METADATA_SNAPSHOT=$BASE/runtime-metadata.$$
 MAX_OVERLAY_BYTES=32768
 MAX_OVERLAY_ROWS=320
 MAX_OVERLAYS=8
@@ -10,8 +11,16 @@ MAX_EFFECTIVE_BYTES=131072
 MAX_EFFECTIVE_ROWS=512
 MAX_GENERATED_MATCHES=1536
 MIN_POLICY_FREE_KIB=8192
-MAX_POLICY_APPLY_SECONDS=30
+MAX_POLICY_APPLY_SECONDS=120
+MAX_RESTORE_BYTES=524288
+HYBRID_DNS_BATCH=8
+HYBRID_DNS_QUERY_SECONDS=5
 HYBRID_MEMINFO_FILE=${ASTRILL_LAZY_MEMINFO_FILE:-/proc/meminfo}
+IPTABLES_RESTORE=${ASTRILL_LAZY_IPTABLES_RESTORE:-iptables-restore}
+hybrid_dns_pids=
+hybrid_dns_dir=
+hybrid_dns_list=
+runtime_metadata_snapshot_active=false
 
 hybrid_validate_rules() {
     hybrid_saved_limit=$MAX_RULE_BYTES
@@ -25,6 +34,109 @@ hybrid_validate_rules() {
             if ($4 == "device" || seen[$1]++) exit 1
         }
     ' "$1"
+}
+
+encode_rule_document() {
+    source_file=$1
+    archive_file=$BASE/rules.encode.$$.gz
+    wrapper_file=$BASE/rules.encode.$$.txt
+    gzip -9 -c "$source_file" > "$archive_file" || {
+        rm -f "$archive_file" "$wrapper_file"
+        return 1
+    }
+    uuencode -m "$archive_file" rules.tsv.gz > "$wrapper_file" || {
+        rm -f "$archive_file" "$wrapper_file"
+        return 1
+    }
+    sed '1d;$d' "$wrapper_file"
+    encode_status=$?
+    rm -f "$archive_file" "$wrapper_file"
+    return "$encode_status"
+}
+
+persistent_rule_bytes() {
+    source_file=$1
+    plain_key=${2:-}
+    compressed_key=${3:-}
+    plain_value=$(cat "$source_file") || return 1
+    plain_bytes=$(printf '%s' "$plain_value" | wc -c)
+    compressed_value=$(encode_rule_document "$source_file") ||
+        compressed_value=
+    compressed_bytes=$(printf '%s' "$compressed_value" | wc -c)
+    if [ -n "$compressed_value" ] &&
+       [ "$compressed_bytes" -lt "$plain_bytes" ]; then
+        rule_bytes=$compressed_bytes
+        rule_key=$compressed_key
+    else
+        rule_bytes=$plain_bytes
+        rule_key=$plain_key
+    fi
+    [ -z "$rule_key" ] ||
+        rule_bytes=$((((rule_bytes + ${#rule_key} + 5) / 4) * 4))
+    printf '%s\n' "$rule_bytes"
+}
+
+persist_rule_document() {
+    source_file=$1
+    plain_key=$2
+    compressed_key=$3
+    plain_value=$(cat "$source_file") || return 1
+    plain_bytes=$(printf '%s' "$plain_value" | wc -c)
+    compressed_value=$(encode_rule_document "$source_file") ||
+        compressed_value=
+    compressed_bytes=$(printf '%s' "$compressed_value" | wc -c)
+    if [ -n "$compressed_value" ] &&
+       [ "$compressed_bytes" -lt "$plain_bytes" ]; then
+        nvram set "$compressed_key=$compressed_value" || return 1
+        nvram unset "$plain_key" || return 1
+    else
+        nvram set "$plain_key=$plain_value" || return 1
+        nvram unset "$compressed_key" || return 1
+    fi
+}
+
+check_persistence_capacity() {
+    candidate=$1
+    candidate_bytes=$(
+        persistent_rule_bytes \
+            "$candidate" "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY"
+    ) || return 1
+    current_bytes=$(
+        persistent_rule_bytes \
+            "$CURRENT" "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY"
+    ) || return 1
+    stored_bytes=0
+    for stored_key in \
+        "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY" \
+        "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY"; do
+        stored_value=$(nvram get "$stored_key")
+        [ -z "$stored_value" ] || {
+            stored_value_bytes=$(printf '%s' "$stored_value" | wc -c)
+            stored_bytes=$((stored_bytes +
+                ((stored_value_bytes + ${#stored_key} + 5) / 4) * 4))
+        }
+    done
+    desired_bytes=$((candidate_bytes + current_bytes))
+    growth=$((desired_bytes - stored_bytes))
+    size_line=$(nvram show 2>&1 >/dev/null)
+    free_bytes=$(printf '%s\n' "$size_line" |
+        sed -n 's/.*(\([0-9][0-9]*\) left).*/\1/p')
+    is_uint "$free_bytes" || {
+        printf 'could not determine safe NVRAM headroom\n' >&2
+        return 1
+    }
+    if [ $((free_bytes - growth)) -ge "$MIN_NVRAM_FREE_BYTES" ]; then
+        PERSIST_PREVIOUS=1
+        return 0
+    fi
+    current_only_growth=$((candidate_bytes - stored_bytes))
+    [ $((free_bytes - current_only_growth)) -ge "$MIN_NVRAM_FREE_BYTES" ] || {
+        printf 'insufficient NVRAM headroom for the active rule document\n' >&2
+        return 1
+    }
+    PERSIST_PREVIOUS=0
+    log_message WARN \
+        "NVRAM headroom permits active rules only; rollback remains available until reboot"
 }
 
 append_rule_pair() {
@@ -95,6 +207,419 @@ hybrid_policy_free_kib() {
     ' "$HYBRID_MEMINFO_FILE" 2>/dev/null
 }
 
+hybrid_apply_time_ok() {
+    hybrid_now=$(date +%s) || return 1
+    is_uint "$hybrid_now" && is_uint "$hybrid_started" || return 1
+    [ $((hybrid_now - hybrid_started)) -le "$MAX_POLICY_APPLY_SECONDS" ]
+}
+
+hybrid_cancel_dns_jobs() {
+    for hybrid_dns_pid in $hybrid_dns_pids; do
+        kill "$hybrid_dns_pid" 2>/dev/null || true
+    done
+    if [ -n "$hybrid_dns_dir" ] && [ -d "$hybrid_dns_dir" ]; then
+        for hybrid_dns_pid_file in "$hybrid_dns_dir"/*.pid; do
+            [ -f "$hybrid_dns_pid_file" ] || continue
+            hybrid_dns_child_pid=$(
+                cat "$hybrid_dns_pid_file" 2>/dev/null || printf 0
+            )
+            is_live_pid "$hybrid_dns_child_pid" &&
+                kill "$hybrid_dns_child_pid" 2>/dev/null || true
+        done
+    fi
+    for hybrid_dns_pid in $hybrid_dns_pids; do
+        wait "$hybrid_dns_pid" 2>/dev/null || true
+    done
+    hybrid_dns_pids=
+    [ -z "$hybrid_dns_list" ] || rm -f "$hybrid_dns_list"
+    if [ -n "$hybrid_dns_dir" ] && [ -d "$hybrid_dns_dir" ]; then
+        for hybrid_dns_pid_file in "$hybrid_dns_dir"/*.pid; do
+            [ -f "$hybrid_dns_pid_file" ] || continue
+            hybrid_dns_child_pid=$(
+                cat "$hybrid_dns_pid_file" 2>/dev/null || printf 0
+            )
+            is_live_pid "$hybrid_dns_child_pid" &&
+                kill -9 "$hybrid_dns_child_pid" 2>/dev/null || true
+        done
+        rm -f "$hybrid_dns_dir"/*
+        rmdir "$hybrid_dns_dir" 2>/dev/null || true
+    fi
+    hybrid_dns_list=
+    hybrid_dns_dir=
+}
+
+hybrid_wait_dns_jobs() {
+    hybrid_dns_failed=false
+    for hybrid_dns_pid in $hybrid_dns_pids; do
+        wait "$hybrid_dns_pid" || hybrid_dns_failed=true
+    done
+    hybrid_dns_pids=
+    [ "$hybrid_dns_failed" = false ] || return 1
+    hybrid_dns_free=$(hybrid_policy_free_kib)
+    is_uint "$hybrid_dns_free" &&
+        [ "$hybrid_dns_free" -ge "$MIN_POLICY_FREE_KIB" ] &&
+        hybrid_apply_time_ok
+}
+
+hybrid_resolve_domain_bounded() {
+    hybrid_dns_domain=$1
+    hybrid_dns_raw=$2
+    hybrid_dns_addresses_file=$3
+    hybrid_dns_pid_file=$4
+    hybrid_dns_server=$(nvram get lan_ipaddr)
+    hybrid_dns_lookup_pid=0
+    hybrid_dns_lookup_cleanup() {
+        if is_live_pid "$hybrid_dns_lookup_pid"; then
+            kill "$hybrid_dns_lookup_pid" 2>/dev/null || true
+            sleep 1
+            is_live_pid "$hybrid_dns_lookup_pid" &&
+                kill -9 "$hybrid_dns_lookup_pid" 2>/dev/null || true
+        fi
+        wait "$hybrid_dns_lookup_pid" 2>/dev/null || true
+        rm -f "$hybrid_dns_raw" "$hybrid_dns_addresses_file" \
+            "$hybrid_dns_pid_file"
+    }
+    trap 'hybrid_dns_lookup_cleanup; exit 129' HUP
+    trap 'hybrid_dns_lookup_cleanup; exit 130' INT
+    trap 'hybrid_dns_lookup_cleanup; exit 143' TERM
+    nslookup "$hybrid_dns_domain" "$hybrid_dns_server" \
+        > "$hybrid_dns_raw" 2>/dev/null &
+    hybrid_dns_lookup_pid=$!
+    printf '%s\n' "$hybrid_dns_lookup_pid" > "$hybrid_dns_pid_file" || {
+        hybrid_dns_lookup_cleanup
+        trap - HUP INT TERM
+        return 1
+    }
+    hybrid_dns_waited=0
+    while is_live_pid "$hybrid_dns_lookup_pid"; do
+        if [ "$hybrid_dns_waited" -ge "$HYBRID_DNS_QUERY_SECONDS" ]; then
+            kill "$hybrid_dns_lookup_pid" 2>/dev/null || true
+            sleep 1
+            is_live_pid "$hybrid_dns_lookup_pid" &&
+                kill -9 "$hybrid_dns_lookup_pid" 2>/dev/null || true
+            break
+        fi
+        sleep 1
+        hybrid_dns_waited=$((hybrid_dns_waited + 1))
+    done
+    wait "$hybrid_dns_lookup_pid" 2>/dev/null || true
+    awk '
+        /^Name:/ { seen = 1; next }
+        seen && /^Address [0-9]+:/ {
+            if ($3 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $3
+        }
+    ' "$hybrid_dns_raw" 2>/dev/null |
+        sort -u | head -n 16 > "$hybrid_dns_addresses_file"
+    hybrid_dns_parse_status=$?
+    rm -f "$hybrid_dns_raw" "$hybrid_dns_pid_file"
+    trap - HUP INT TERM
+    return "$hybrid_dns_parse_status"
+}
+
+hybrid_prefetch_domains() {
+    hybrid_dns_document=$1
+    hybrid_dns_target=$2
+    hybrid_dns_refresh=${3:-0}
+    hybrid_cancel_dns_jobs
+    hybrid_dns_list=$BASE/hybrid-domains.$$.txt
+    hybrid_dns_dir=$BASE/hybrid-dns.$$
+    mkdir "$hybrid_dns_dir" || return 1
+    awk -F '\t' '
+        $0 !~ /^#/ && $2 == 1 && $4 == "domain" && !seen[$5]++ {
+            print $5
+        }
+    ' "$hybrid_dns_document" > "$hybrid_dns_list" || {
+        hybrid_cancel_dns_jobs
+        return 1
+    }
+    : > "$hybrid_dns_target" || {
+        hybrid_cancel_dns_jobs
+        return 1
+    }
+
+    hybrid_dns_index=0
+    hybrid_dns_pending=0
+    while IFS= read -r hybrid_dns_domain; do
+        [ -n "$hybrid_dns_domain" ] || continue
+        hybrid_dns_result=$hybrid_dns_dir/$hybrid_dns_index
+        (
+            hybrid_dns_cached=$(
+                awk -F '\t' -v domain="$hybrid_dns_domain" \
+                    '$1 == domain { print $2 }' "$RESOLVED" 2>/dev/null
+            )
+            hybrid_dns_addresses=$hybrid_dns_cached
+            if [ "$hybrid_dns_refresh" = 1 ] ||
+               [ -z "$hybrid_dns_addresses" ]; then
+                hybrid_dns_fresh_file=$hybrid_dns_result.fresh
+                if hybrid_resolve_domain_bounded \
+                    "$hybrid_dns_domain" "$hybrid_dns_result.raw" \
+                    "$hybrid_dns_fresh_file" "$hybrid_dns_result.pid"; then
+                    hybrid_dns_fresh=$(
+                        cat "$hybrid_dns_fresh_file" 2>/dev/null || true
+                    )
+                else
+                    hybrid_dns_fresh=
+                fi
+                rm -f "$hybrid_dns_fresh_file"
+                if [ -n "$hybrid_dns_fresh" ]; then
+                    hybrid_dns_addresses=$hybrid_dns_fresh
+                else
+                    hybrid_dns_addresses=$hybrid_dns_cached
+                fi
+            fi
+            hybrid_dns_now=$(date +%s) || exit 1
+            for hybrid_dns_address in $hybrid_dns_addresses; do
+                printf '%s\t%s\t%s\n' \
+                    "$hybrid_dns_domain" "$hybrid_dns_address" "$hybrid_dns_now"
+            done
+        ) > "$hybrid_dns_result" &
+        hybrid_dns_pids="$hybrid_dns_pids $!"
+        hybrid_dns_index=$((hybrid_dns_index + 1))
+        hybrid_dns_pending=$((hybrid_dns_pending + 1))
+        if [ "$hybrid_dns_pending" -ge "$HYBRID_DNS_BATCH" ]; then
+            hybrid_dns_pending=0
+            hybrid_wait_dns_jobs || {
+                hybrid_cancel_dns_jobs
+                return 1
+            }
+        fi
+    done < "$hybrid_dns_list"
+
+    hybrid_wait_dns_jobs || {
+        hybrid_cancel_dns_jobs
+        return 1
+    }
+    for hybrid_dns_result in "$hybrid_dns_dir"/*; do
+        [ -f "$hybrid_dns_result" ] || continue
+        case $hybrid_dns_result in *.raw) continue ;; esac
+        cat "$hybrid_dns_result" >> "$hybrid_dns_target" || {
+            hybrid_cancel_dns_jobs
+            return 1
+        }
+    done
+    hybrid_cancel_dns_jobs
+}
+
+hybrid_plan_pair() {
+    hybrid_plan_kind=$1
+    hybrid_plan_selector=$2
+    hybrid_plan_target=$3
+    hybrid_plan_protocol=$4
+    hybrid_plan_port=$5
+    hybrid_plan_source=$6
+    hybrid_plan_mac=$7
+    hybrid_planned=$((hybrid_planned + 1))
+    [ "$hybrid_planned" -le "$MAX_GENERATED_MATCHES" ] || {
+        printf 'effective policy exceeds %s generated matches\n' \
+            "$MAX_GENERATED_MATCHES" >&2
+        return 1
+    }
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$hybrid_plan_kind" "$hybrid_plan_selector" "$hybrid_plan_target" \
+        "$hybrid_plan_protocol" "$hybrid_plan_port" \
+        "$hybrid_plan_source" "$hybrid_plan_mac" >> "$hybrid_plan"
+}
+
+hybrid_plan_compiled_rule() {
+    hybrid_compiled_kind=$1
+    hybrid_compiled_selector=$2
+    hybrid_compiled_target=$3
+    hybrid_compiled_protocol=$4
+    hybrid_compiled_ports=$5
+    hybrid_compiled_source=$6
+    hybrid_compiled_mac=$7
+    if [ "$hybrid_compiled_ports" = - ]; then
+        hybrid_plan_pair \
+            "$hybrid_compiled_kind" "$hybrid_compiled_selector" \
+            "$hybrid_compiled_target" "$hybrid_compiled_protocol" - \
+            "$hybrid_compiled_source" "$hybrid_compiled_mac"
+        return
+    fi
+    hybrid_compiled_ifs=$IFS
+    IFS=,
+    set -f
+    set -- $hybrid_compiled_ports
+    set +f
+    IFS=$hybrid_compiled_ifs
+    for hybrid_compiled_port in "$@"; do
+        hybrid_plan_pair \
+            "$hybrid_compiled_kind" "$hybrid_compiled_selector" \
+            "$hybrid_compiled_target" "$hybrid_compiled_protocol" \
+            "$hybrid_compiled_port" \
+            "$hybrid_compiled_source" "$hybrid_compiled_mac" || return 1
+    done
+}
+
+hybrid_discard_build() {
+    hybrid_discard_chain=$1
+    hybrid_discard_references=$(
+        hybrid_chain_reference_count "$hybrid_discard_chain"
+    ) || return 1
+    [ "$hybrid_discard_references" -eq 0 ] || return 1
+}
+
+hybrid_restore_match() {
+    hybrid_restore_file=$1
+    hybrid_restore_chain=$2
+    hybrid_restore_kind=$3
+    hybrid_restore_selector=$4
+    hybrid_restore_protocol=$5
+    hybrid_restore_port=$6
+    hybrid_restore_source=$7
+    hybrid_restore_mac=$8
+    hybrid_restore_target=$9
+    {
+        printf -- '-A %s' "$hybrid_restore_chain"
+        if [ "$hybrid_restore_source" != - ]; then
+            printf ' -s %s' "$hybrid_restore_source"
+            [ "$hybrid_restore_mac" = - ] ||
+                printf ' -m mac --mac-source %s' "$hybrid_restore_mac"
+        fi
+        case $hybrid_restore_kind in
+            destination) printf ' -d %s' "$hybrid_restore_selector" ;;
+            source) printf ' -s %s' "$hybrid_restore_selector" ;;
+            *) return 1 ;;
+        esac
+        [ "$hybrid_restore_protocol" = any ] ||
+            printf ' -p %s' "$hybrid_restore_protocol"
+        [ "$hybrid_restore_port" = - ] ||
+            printf ' --dport %s' "$hybrid_restore_port"
+        printf ' %s\n' "$hybrid_restore_target"
+    } >> "$hybrid_restore_file"
+}
+
+hybrid_restore_pair() {
+    hybrid_restore_pair_file=$1
+    hybrid_restore_pair_chain=$2
+    hybrid_restore_pair_kind=$3
+    hybrid_restore_pair_selector=$4
+    hybrid_restore_pair_target=$5
+    hybrid_restore_pair_protocol=$6
+    hybrid_restore_pair_port=$7
+    hybrid_restore_pair_source=$8
+    hybrid_restore_pair_mac=$9
+    [ "$hybrid_restore_pair_target" = direct ] &&
+        hybrid_restore_pair_mark=$DIRECT_MARK ||
+        hybrid_restore_pair_mark=$VPN_MARK
+    hybrid_generated=$((hybrid_generated + 1))
+    [ "$hybrid_generated" -le "$MAX_GENERATED_MATCHES" ] || return 1
+    hybrid_restore_match \
+        "$hybrid_restore_pair_file" "$hybrid_restore_pair_chain" \
+        "$hybrid_restore_pair_kind" "$hybrid_restore_pair_selector" \
+        "$hybrid_restore_pair_protocol" "$hybrid_restore_pair_port" \
+        "$hybrid_restore_pair_source" "$hybrid_restore_pair_mac" \
+        "-j MARK --set-xmark $hybrid_restore_pair_mark/$MARK_MASK" &&
+        hybrid_restore_match \
+            "$hybrid_restore_pair_file" "$hybrid_restore_pair_chain" \
+            "$hybrid_restore_pair_kind" "$hybrid_restore_pair_selector" \
+            "$hybrid_restore_pair_protocol" "$hybrid_restore_pair_port" \
+            "$hybrid_restore_pair_source" "$hybrid_restore_pair_mac" \
+            "-j RETURN"
+}
+
+hybrid_chain_reference_count() {
+    policy_chain_reference_count "$1"
+}
+
+hybrid_restore_topology_ok() {
+    hybrid_topology_inactive=$1
+    hybrid_topology_active=$(active_chain)
+    case "$hybrid_topology_active:$hybrid_topology_inactive" in
+        "$CHAIN_A:$CHAIN_B"|"$CHAIN_B:$CHAIN_A") ;;
+        *) return 1 ;;
+    esac
+    hybrid_topology_active_jumps=$(
+        prerouting_jump_count "$hybrid_topology_active"
+    ) || return 1
+    hybrid_topology_inactive_jumps=$(
+        prerouting_jump_count "$hybrid_topology_inactive"
+    ) || return 1
+    hybrid_topology_active_references=$(
+        hybrid_chain_reference_count "$hybrid_topology_active"
+    ) || return 1
+    hybrid_topology_inactive_references=$(
+        hybrid_chain_reference_count "$hybrid_topology_inactive"
+    ) || return 1
+    [ "$hybrid_topology_inactive_jumps" -eq 0 ] &&
+        [ "$hybrid_topology_inactive_references" -eq 0 ] || return 1
+    if [ "$hybrid_topology_active_jumps" -eq 0 ]; then
+        [ "$hybrid_topology_active_references" -eq 0 ]
+    else
+        [ "$hybrid_topology_active_jumps" -eq 1 ] &&
+            [ "$hybrid_topology_active_references" -eq 1 ]
+    fi
+}
+
+hybrid_build_chain_restore() {
+    hybrid_restore_chain=$1
+    hybrid_restore_plan=$2
+    hybrid_restore_file=$BASE/iptables-restore.$$.rules
+    rm -f "$hybrid_restore_file"
+    {
+        printf '*mangle\n'
+        printf ':%s - [0:0]\n' "$hybrid_restore_chain"
+        printf -- '-A %s -d 10.0.0.0/8 -j RETURN\n' "$hybrid_restore_chain"
+        printf -- '-A %s -d 172.16.0.0/12 -j RETURN\n' "$hybrid_restore_chain"
+        printf -- '-A %s -d 192.168.0.0/16 -j RETURN\n' "$hybrid_restore_chain"
+        printf -- '-A %s -d 224.0.0.0/4 -j RETURN\n' "$hybrid_restore_chain"
+        printf -- '-A %s -d 255.255.255.255/32 -j RETURN\n' \
+            "$hybrid_restore_chain"
+    } > "$hybrid_restore_file" || return 1
+    hybrid_generated=0
+    while IFS="$TAB" read -r \
+        hybrid_build_kind hybrid_build_selector hybrid_build_target \
+        hybrid_build_protocol hybrid_build_port hybrid_build_source \
+        hybrid_build_mac; do
+        hybrid_restore_pair \
+            "$hybrid_restore_file" "$hybrid_restore_chain" \
+            "$hybrid_build_kind" "$hybrid_build_selector" \
+            "$hybrid_build_target" "$hybrid_build_protocol" \
+            "$hybrid_build_port" "$hybrid_build_source" \
+            "$hybrid_build_mac" || {
+            rm -f "$hybrid_restore_file"
+            return 1
+        }
+    done < "$hybrid_restore_plan"
+    {
+        printf -- '-A %s -j RETURN\n' "$hybrid_restore_chain"
+        printf 'COMMIT\n'
+    } >> "$hybrid_restore_file" || {
+        rm -f "$hybrid_restore_file"
+        return 1
+    }
+    [ "$(wc -c < "$hybrid_restore_file")" -le "$MAX_RESTORE_BYTES" ] &&
+        hybrid_apply_time_ok ||
+    {
+        rm -f "$hybrid_restore_file"
+        return 1
+    }
+    hybrid_restore_topology_ok "$hybrid_restore_chain" &&
+        "$IPTABLES_RESTORE" -w 10 -n -t "$hybrid_restore_file" &&
+        hybrid_apply_time_ok &&
+        hybrid_restore_topology_ok "$hybrid_restore_chain" &&
+        hybrid_restore_free=$(hybrid_policy_free_kib) &&
+        is_uint "$hybrid_restore_free" &&
+        [ "$hybrid_restore_free" -ge "$MIN_POLICY_FREE_KIB" ] &&
+        "$IPTABLES_RESTORE" -w 10 -n "$hybrid_restore_file" &&
+        chain_exists "$hybrid_restore_chain" &&
+        hybrid_restore_topology_ok "$hybrid_restore_chain"
+    hybrid_restore_status=$?
+    if [ "$hybrid_restore_status" -eq 0 ]; then
+        hybrid_restore_readback=$(
+            iptables -w 10 -t mangle -S "$hybrid_restore_chain" 2>/dev/null
+        ) || hybrid_restore_status=1
+    fi
+    if [ "$hybrid_restore_status" -eq 0 ]; then
+        hybrid_restore_rules=$(printf '%s\n' "$hybrid_restore_readback" |
+            awk '$1 == "-A" { rules++ } END { print rules + 0 }')
+        is_uint "$hybrid_restore_rules" &&
+            [ "$hybrid_restore_rules" -eq $((hybrid_generated * 2 + 6)) ] ||
+            hybrid_restore_status=1
+    fi
+    rm -f "$hybrid_restore_file"
+    return "$hybrid_restore_status"
+}
+
 build_chain() {
     chain=$1
     file=$2
@@ -102,12 +627,22 @@ build_chain() {
     hybrid_free=$(hybrid_policy_free_kib)
     is_uint "$hybrid_free" &&
         [ "$hybrid_free" -ge "$MIN_POLICY_FREE_KIB" ] || return 1
-    hybrid_generated=0
     hybrid_started=$(date +%s)
-    new_resolved=$BASE/resolved.new.tsv
-    : > "$new_resolved"
-    : > "$UNRESOLVED"
-    ensure_chain_shell "$chain" || return 1
+    is_uint "$hybrid_started" || return 1
+    hybrid_plan=$BASE/hybrid-plan.$$.tsv
+    new_resolved=$BASE/resolved.new.$$.tsv
+    hybrid_unresolved=$BASE/unresolved.new.$$.txt
+    hybrid_generated_file=$BASE/generated-matches.new.$$
+    rm -f "$hybrid_plan" "$new_resolved" "$hybrid_unresolved" \
+        "$hybrid_generated_file"
+    : > "$hybrid_plan"
+    : > "$hybrid_unresolved"
+    hybrid_prefetch_domains "$file" "$new_resolved" "$refresh_mode" || {
+        rm -f "$hybrid_plan" "$new_resolved" \
+            "$hybrid_unresolved" "$hybrid_generated_file"
+        return 1
+    }
+    hybrid_planned=0
     while IFS="$TAB" read -r id enabled priority kind selector target \
         protocol ports label origin source_scope scope_mac; do
         case $id in ''|\#*) continue ;; esac
@@ -116,41 +651,123 @@ build_chain() {
         [ -n "$scope_mac" ] || scope_mac=-
         case $kind in
             domain)
-                addresses=$(
-                    domain_addresses "$selector" "$new_resolved" "$refresh_mode"
+                addresses=$(awk -F '\t' -v domain="$selector" \
+                    '$1 == domain { print $2 }' "$new_resolved"
                 )
                 if [ -z "$addresses" ]; then
-                    printf '%s\n' "$selector" >> "$UNRESOLVED"
+                    printf '%s\n' "$selector" >> "$hybrid_unresolved"
                     continue
                 fi
                 for address in $addresses; do
-                    append_compiled_rule \
-                        "$chain" destination "$address/32" "$target" \
-                        "$protocol" "$ports" "$source_scope" "$scope_mac" ||
+                    hybrid_plan_compiled_rule \
+                        destination "$address/32" "$target" \
+                        "$protocol" "$ports" "$source_scope" "$scope_mac" || {
+                        rm -f "$hybrid_plan" "$new_resolved" \
+                            "$hybrid_unresolved" "$hybrid_generated_file"
                         return 1
+                    }
                 done
                 ;;
             cidr)
-                append_compiled_rule \
-                    "$chain" destination "$selector" "$target" "$protocol" \
-                    "$ports" "$source_scope" "$scope_mac" || return 1
+                hybrid_plan_compiled_rule \
+                    destination "$selector" "$target" "$protocol" \
+                    "$ports" "$source_scope" "$scope_mac" || {
+                    rm -f "$hybrid_plan" "$new_resolved" \
+                        "$hybrid_unresolved" "$hybrid_generated_file"
+                    return 1
+                }
                 ;;
             device)
-                [ "$source_scope" = - ] || return 1
-                append_compiled_rule \
-                    "$chain" source "$selector" "$target" "$protocol" \
-                    "$ports" - - || return 1
+                [ "$source_scope" = - ] || {
+                    rm -f "$hybrid_plan" "$new_resolved" \
+                        "$hybrid_unresolved" "$hybrid_generated_file"
+                    return 1
+                }
+                hybrid_plan_compiled_rule \
+                    source "$selector" "$target" "$protocol" \
+                    "$ports" - - || {
+                    rm -f "$hybrid_plan" "$new_resolved" \
+                        "$hybrid_unresolved" "$hybrid_generated_file"
+                    return 1
+                }
                 ;;
         esac
+        hybrid_apply_time_ok || {
+            rm -f "$hybrid_plan" "$new_resolved" \
+                "$hybrid_unresolved" "$hybrid_generated_file"
+            return 1
+        }
     done < "$file"
-    iptables -w 10 -t mangle -A "$chain" -j RETURN || return 1
     hybrid_free=$(hybrid_policy_free_kib)
     is_uint "$hybrid_free" &&
-        [ "$hybrid_free" -ge "$MIN_POLICY_FREE_KIB" ] || return 1
-    [ $(( $(date +%s) - hybrid_started )) \
-        -le "$MAX_POLICY_APPLY_SECONDS" ] || return 1
-    printf '%s\n' "$hybrid_generated" > "$GENERATED_MATCHES_FILE"
-    mv "$new_resolved" "$RESOLVED"
+        [ "$hybrid_free" -ge "$MIN_POLICY_FREE_KIB" ] &&
+        hybrid_apply_time_ok || {
+        rm -f "$hybrid_plan" "$new_resolved" \
+            "$hybrid_unresolved" "$hybrid_generated_file"
+        return 1
+    }
+    if command -v "$IPTABLES_RESTORE" >/dev/null 2>&1; then
+        hybrid_build_chain_restore "$chain" "$hybrid_plan" || {
+            hybrid_discard_build "$chain"
+            rm -f "$hybrid_plan" "$new_resolved" \
+                "$hybrid_unresolved" "$hybrid_generated_file"
+            return 1
+        }
+    else
+        ensure_chain_shell "$chain" || {
+            hybrid_discard_build "$chain"
+            rm -f "$hybrid_plan" "$new_resolved" \
+                "$hybrid_unresolved" "$hybrid_generated_file"
+            return 1
+        }
+        hybrid_generated=0
+        while IFS="$TAB" read -r \
+            hybrid_build_kind hybrid_build_selector hybrid_build_target \
+            hybrid_build_protocol hybrid_build_port hybrid_build_source \
+            hybrid_build_mac; do
+            hybrid_apply_time_ok &&
+                append_rule_pair \
+                    "$chain" "$hybrid_build_kind" "$hybrid_build_selector" \
+                    "$hybrid_build_target" "$hybrid_build_protocol" \
+                    "$hybrid_build_port" "$hybrid_build_source" \
+                    "$hybrid_build_mac" || {
+                hybrid_discard_build "$chain"
+                rm -f "$hybrid_plan" "$new_resolved" \
+                    "$hybrid_unresolved" "$hybrid_generated_file"
+                return 1
+            }
+        done < "$hybrid_plan"
+        iptables -w 10 -t mangle -A "$chain" -j RETURN || {
+            hybrid_discard_build "$chain"
+            rm -f "$hybrid_plan" "$new_resolved" \
+                "$hybrid_unresolved" "$hybrid_generated_file"
+            return 1
+        }
+    fi
+    hybrid_free=$(hybrid_policy_free_kib)
+    is_uint "$hybrid_free" &&
+        [ "$hybrid_free" -ge "$MIN_POLICY_FREE_KIB" ] &&
+        hybrid_apply_time_ok || {
+        hybrid_discard_build "$chain"
+        rm -f "$hybrid_plan" "$new_resolved" \
+            "$hybrid_unresolved" "$hybrid_generated_file"
+        return 1
+    }
+    printf '%s\n' "$hybrid_generated" > "$hybrid_generated_file" || {
+        hybrid_discard_build "$chain"
+        rm -f "$hybrid_plan" "$new_resolved" \
+            "$hybrid_unresolved" "$hybrid_generated_file"
+        return 1
+    }
+    if ! mv "$new_resolved" "$RESOLVED" ||
+       ! mv "$hybrid_unresolved" "$UNRESOLVED" ||
+       ! mv "$hybrid_generated_file" "$GENERATED_MATCHES_FILE"; then
+        hybrid_discard_build "$chain"
+        rm -f "$hybrid_plan" "$new_resolved" \
+            "$hybrid_unresolved" "$hybrid_generated_file"
+        return 1
+    fi
+    rm -f "$hybrid_plan"
 }
 
 hybrid_ipv4_number() {
@@ -276,6 +893,42 @@ hybrid_normalize_source() {
     printf '%s\t%s\n' "$hybrid_source" "$hybrid_mac"
 }
 
+hybrid_require_expected_binding() {
+    hybrid_binding_source=$1
+    hybrid_binding_mac=$2
+    hybrid_binding_expected_source=${3:--}
+    hybrid_binding_expected_mac=${4:--}
+    if [ "$hybrid_binding_expected_source" != - ]; then
+        valid_ipv4_network "$hybrid_binding_expected_source" || {
+            printf 'expected overlay source is invalid\n' >&2
+            return 1
+        }
+        case $hybrid_binding_expected_source in
+            */*) ;;
+            *) hybrid_binding_expected_source=$hybrid_binding_expected_source/32 ;;
+        esac
+        [ "$hybrid_binding_source" = "$hybrid_binding_expected_source" ] || {
+            printf 'overlay source binding changed: expected %s, current %s\n' \
+                "$hybrid_binding_expected_source" "$hybrid_binding_source" >&2
+            return 1
+        }
+    fi
+    if [ "$hybrid_binding_expected_mac" != - ]; then
+        hybrid_binding_expected_mac=$(
+            printf '%s' "$hybrid_binding_expected_mac" | tr 'A-F' 'a-f'
+        )
+        valid_mac "$hybrid_binding_expected_mac" || {
+            printf 'expected overlay MAC is invalid\n' >&2
+            return 1
+        }
+        [ "$hybrid_binding_mac" = "$hybrid_binding_expected_mac" ] || {
+            printf 'overlay MAC binding changed: expected %s, current %s\n' \
+                "$hybrid_binding_expected_mac" "$hybrid_binding_mac" >&2
+            return 1
+        }
+    fi
+}
+
 hybrid_meta_path() {
     printf '%s/%s.meta\n' "$OVERLAY_DIR" "$1"
 }
@@ -382,6 +1035,10 @@ hybrid_validate_effective() {
     done < "$hybrid_effective"
 }
 
+hybrid_cleanup_composition() {
+    rm -f "$hybrid_list" "$hybrid_list.sorted" "$hybrid_target"
+}
+
 hybrid_compose_effective() {
     hybrid_core=$1
     hybrid_target=$2
@@ -390,15 +1047,31 @@ hybrid_compose_effective() {
     hybrid_replacement_source=${5:-}
     hybrid_replacement_mac=${6:-}
     hybrid_removed=${7:-}
-    printf '# astrill-lazy-effective-v1\n' > "$hybrid_target" || return 1
+    hybrid_list=$BASE/hybrid-owners.$$
+    rm -f "$hybrid_list" "$hybrid_list.sorted" "$hybrid_target"
+    printf '# astrill-lazy-effective-v1\n' > "$hybrid_target" || {
+        hybrid_cleanup_composition
+        return 1
+    }
     awk -F '\t' -v OFS='\t' '
         $0 !~ /^#/ && NF == 10 { print $0, "-", "-" }
-    ' "$hybrid_core" >> "$hybrid_target" || return 1
-    hybrid_list=$BASE/hybrid-owners.$$
-    hybrid_owners > "$hybrid_list"
+    ' "$hybrid_core" >> "$hybrid_target" || {
+        hybrid_cleanup_composition
+        return 1
+    }
+    hybrid_owners > "$hybrid_list" || {
+        hybrid_cleanup_composition
+        return 1
+    }
     [ -z "$hybrid_replacement" ] ||
-        printf '%s\n' "$hybrid_replacement" >> "$hybrid_list"
-    sort -u "$hybrid_list" > "$hybrid_list.sorted" || return 1
+        printf '%s\n' "$hybrid_replacement" >> "$hybrid_list" || {
+        hybrid_cleanup_composition
+        return 1
+    }
+    sort -u "$hybrid_list" > "$hybrid_list.sorted" || {
+        hybrid_cleanup_composition
+        return 1
+    }
     while IFS= read -r hybrid_compose_owner; do
         [ -n "$hybrid_compose_owner" ] || continue
         [ "$hybrid_compose_owner" = "$hybrid_removed" ] && continue
@@ -407,7 +1080,10 @@ hybrid_compose_effective() {
             hybrid_compose_source=$hybrid_replacement_source
             hybrid_compose_mac=$hybrid_replacement_mac
         else
-            hybrid_load_meta "$hybrid_compose_owner" || return 1
+            hybrid_load_meta "$hybrid_compose_owner" || {
+                hybrid_cleanup_composition
+                return 1
+            }
             hybrid_compose_document=$hybrid_document
             hybrid_compose_source=$hybrid_source
             hybrid_compose_mac=$hybrid_mac
@@ -416,10 +1092,16 @@ hybrid_compose_effective() {
             -v source="$hybrid_compose_source" \
             -v mac="$hybrid_compose_mac" '
             $0 !~ /^#/ && NF == 10 { print $0, source, mac }
-        ' "$hybrid_compose_document" >> "$hybrid_target" || return 1
+        ' "$hybrid_compose_document" >> "$hybrid_target" || {
+            hybrid_cleanup_composition
+            return 1
+        }
     done < "$hybrid_list.sorted"
     rm -f "$hybrid_list" "$hybrid_list.sorted"
-    hybrid_validate_effective "$hybrid_target"
+    hybrid_validate_effective "$hybrid_target" || {
+        rm -f "$hybrid_target"
+        return 1
+    }
 }
 
 hybrid_write_meta() {
@@ -440,7 +1122,476 @@ hybrid_write_meta() {
         "$hybrid_meta_hash" "$hybrid_meta_origins" \
         "$(rule_row_count "$hybrid_meta_document")" \
         "$(wc -c < "$hybrid_meta_document")" "$(date +%s)" \
-        > "$hybrid_meta_target"
+        > "$hybrid_meta_target" || {
+        rm -f "$hybrid_meta_target"
+        return 1
+    }
+}
+
+hybrid_verify_persisted_document() {
+    hybrid_verify_expected=$1
+    hybrid_verify_plain_key=$2
+    hybrid_verify_gz_key=$3
+    hybrid_verify_plain=$(nvram get "$hybrid_verify_plain_key")
+    hybrid_verify_gz=$(nvram get "$hybrid_verify_gz_key")
+    [ -n "$hybrid_verify_plain" ] &&
+        [ -n "$hybrid_verify_gz" ] && return 1
+    [ -z "$hybrid_verify_plain" ] &&
+        [ -z "$hybrid_verify_gz" ] && return 1
+    hybrid_verify_file=$BASE/rules.verify.$$.tsv
+    restore_rule_document \
+        "$hybrid_verify_file" "$hybrid_verify_gz_key" \
+        "$hybrid_verify_plain_key" || {
+        rm -f "$hybrid_verify_file"
+        return 1
+    }
+    hybrid_verify_expected_hash=$(document_hash "$hybrid_verify_expected")
+    hybrid_verify_actual_hash=$(document_hash "$hybrid_verify_file")
+    rm -f "$hybrid_verify_file"
+    [ -n "$hybrid_verify_expected_hash" ] &&
+        [ "$hybrid_verify_actual_hash" = "$hybrid_verify_expected_hash" ]
+}
+
+hybrid_verify_persisted_rules() {
+    hybrid_verify_persisted_document \
+        "$CURRENT" "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY" || return 1
+    if [ "$PERSIST_PREVIOUS" -eq 1 ] && [ -f "$PREVIOUS" ]; then
+        hybrid_verify_persisted_document \
+            "$PREVIOUS" "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY"
+    else
+        [ -z "$(nvram get "$PREVIOUS_RULES_KEY")" ] &&
+            [ -z "$(nvram get "$PREVIOUS_RULES_GZ_KEY")" ]
+    fi
+}
+
+hybrid_persist_rules() {
+    persist_rule_document \
+        "$CURRENT" "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY" || return 1
+    if [ "$PERSIST_PREVIOUS" -eq 1 ] && [ -f "$PREVIOUS" ]; then
+        persist_rule_document \
+            "$PREVIOUS" "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY" ||
+            return 1
+    else
+        nvram unset "$PREVIOUS_RULES_KEY" || return 1
+        nvram unset "$PREVIOUS_RULES_GZ_KEY" || return 1
+    fi
+    hybrid_verify_persisted_rules || return 1
+    nvram commit >/dev/null || return 1
+    hybrid_verify_persisted_rules
+}
+
+hybrid_persistent_keys() {
+    printf '%s\n' \
+        "$CURRENT_RULES_KEY" "$CURRENT_RULES_GZ_KEY" \
+        "$PREVIOUS_RULES_KEY" "$PREVIOUS_RULES_GZ_KEY"
+}
+
+hybrid_capture_persistent_state() {
+    hybrid_capture_prefix=$1
+    for hybrid_capture_key in $(hybrid_persistent_keys); do
+        nvram get "$hybrid_capture_key" \
+            > "$hybrid_capture_prefix.$hybrid_capture_key" || return 1
+    done
+}
+
+hybrid_persistent_state_matches() {
+    hybrid_state_prefix=$1
+    for hybrid_state_key in $(hybrid_persistent_keys); do
+        hybrid_state_expected=$(
+            cat "$hybrid_state_prefix.$hybrid_state_key" 2>/dev/null
+        ) || return 1
+        [ "$(nvram get "$hybrid_state_key")" = "$hybrid_state_expected" ] ||
+            return 1
+    done
+}
+
+hybrid_restore_persistent_state() {
+    hybrid_state_prefix=$1
+    hybrid_state_failed=false
+    for hybrid_state_key in $(hybrid_persistent_keys); do
+        hybrid_state_value=$(
+            cat "$hybrid_state_prefix.$hybrid_state_key" 2>/dev/null
+        ) || {
+            hybrid_state_failed=true
+            continue
+        }
+        if [ -n "$hybrid_state_value" ]; then
+            nvram set "$hybrid_state_key=$hybrid_state_value" ||
+                hybrid_state_failed=true
+        else
+            nvram unset "$hybrid_state_key" || hybrid_state_failed=true
+        fi
+    done
+    nvram commit >/dev/null || hybrid_state_failed=true
+    hybrid_persistent_state_matches "$hybrid_state_prefix" ||
+        hybrid_state_failed=true
+    [ "$hybrid_state_failed" = false ]
+}
+
+hybrid_backup_runtime_file() {
+    hybrid_backup_source=$1
+    hybrid_backup_target=$2
+    rm -f "$hybrid_backup_target" "$hybrid_backup_target.present"
+    [ ! -f "$hybrid_backup_source" ] || {
+        cp "$hybrid_backup_source" "$hybrid_backup_target" || return 1
+        : > "$hybrid_backup_target.present"
+    }
+}
+
+hybrid_restore_runtime_file() {
+    hybrid_backup_source=$1
+    hybrid_restore_target=$2
+    if [ -f "$hybrid_backup_source.present" ]; then
+        cp "$hybrid_backup_source" "$hybrid_restore_target"
+    else
+        rm -f "$hybrid_restore_target"
+    fi
+}
+
+hybrid_backup_runtime_state() {
+    hybrid_runtime_prefix=$1
+    hybrid_backup_runtime_file "$RESOLVED" "$hybrid_runtime_prefix.resolved" &&
+        hybrid_backup_runtime_file \
+            "$UNRESOLVED" "$hybrid_runtime_prefix.unresolved" &&
+        hybrid_backup_runtime_file \
+            "$GENERATED_MATCHES_FILE" "$hybrid_runtime_prefix.generated" &&
+        hybrid_backup_runtime_file \
+            "$BASE/last-apply" "$hybrid_runtime_prefix.last-apply"
+}
+
+hybrid_restore_runtime_state() {
+    hybrid_runtime_prefix=$1
+    hybrid_runtime_restore_failed=false
+    hybrid_restore_runtime_file \
+        "$hybrid_runtime_prefix.resolved" "$RESOLVED" ||
+        hybrid_runtime_restore_failed=true
+    hybrid_restore_runtime_file \
+        "$hybrid_runtime_prefix.unresolved" "$UNRESOLVED" ||
+        hybrid_runtime_restore_failed=true
+    hybrid_restore_runtime_file \
+        "$hybrid_runtime_prefix.generated" "$GENERATED_MATCHES_FILE" ||
+        hybrid_runtime_restore_failed=true
+    hybrid_restore_runtime_file \
+        "$hybrid_runtime_prefix.last-apply" "$BASE/last-apply" ||
+        hybrid_runtime_restore_failed=true
+    [ "$hybrid_runtime_restore_failed" = false ]
+}
+
+clear_runtime_metadata_snapshot() {
+    rm -f "$RUNTIME_METADATA_SNAPSHOT" "$RUNTIME_METADATA_SNAPSHOT".*
+}
+
+capture_runtime_metadata() {
+    runtime_metadata_snapshot_active=false
+    clear_runtime_metadata_snapshot || return 1
+    hybrid_backup_runtime_state "$RUNTIME_METADATA_SNAPSHOT" || {
+        clear_runtime_metadata_snapshot >/dev/null 2>&1 || true
+        return 1
+    }
+    runtime_metadata_snapshot_active=true
+}
+
+restore_runtime_metadata() {
+    [ "$runtime_metadata_snapshot_active" = true ] || return 0
+    hybrid_restore_runtime_state "$RUNTIME_METADATA_SNAPSHOT" || return 1
+    runtime_metadata_snapshot_active=false
+    clear_runtime_metadata_snapshot
+}
+
+restore_runtime_metadata_or_record_error() {
+    restore_runtime_metadata && return 0
+    set_reconcile_error "runtime policy metadata could not be restored"
+    return 1
+}
+
+apply_runtime() {
+    file=$1
+    refresh_mode=${2:-0}
+    capture_runtime_metadata || return 1
+    previous_runtime_chain=$(active_chain)
+    next_chain=$(inactive_chain)
+    next_hash_file=$(chain_document_hash_file "$next_chain") || {
+        restore_runtime_metadata_or_record_error >/dev/null 2>&1 || true
+        return 1
+    }
+    next_document_hash=$(document_hash "$file") || {
+        restore_runtime_metadata_or_record_error >/dev/null 2>&1 || true
+        return 1
+    }
+    rm -f "$next_hash_file" "$next_hash_file.new.$$"
+    build_chain "$next_chain" "$file" "$refresh_mode" || {
+        discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        restore_runtime_metadata_or_record_error >/dev/null 2>&1 || true
+        log_message ERROR "could not build policy chain $next_chain"
+        return 1
+    }
+    printf '%s\n' "$next_document_hash" > "$next_hash_file.new.$$" || {
+        discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        restore_runtime_metadata_or_record_error >/dev/null 2>&1 || true
+        return 1
+    }
+    mv "$next_hash_file.new.$$" "$next_hash_file" || {
+        discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        restore_runtime_metadata_or_record_error >/dev/null 2>&1 || true
+        return 1
+    }
+    ensure_routes || {
+        discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        restore_runtime_metadata_or_record_error >/dev/null 2>&1 || true
+        return 1
+    }
+    if ! activate_chain "$next_chain"; then
+        if activate_chain "$previous_runtime_chain"; then
+            discard_policy_chain "$next_chain" >/dev/null 2>&1 || true
+        else
+            set_reconcile_error \
+                "policy activation failed and the previous chain could not be restored"
+        fi
+        restore_runtime_metadata_or_record_error >/dev/null 2>&1 || true
+        return 1
+    fi
+    runtime_metadata_snapshot_active=false
+    clear_runtime_metadata_snapshot ||
+        log_message WARN "runtime policy metadata snapshot cleanup was deferred"
+    date +%s > "$BASE/last-apply"
+}
+
+hybrid_record_core_transaction() {
+    printf 'core\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" \
+        > "$POLICY_TRANSACTION_FILE.new.$$" || {
+        rm -f "$POLICY_TRANSACTION_FILE.new.$$"
+        return 1
+    }
+    mv "$POLICY_TRANSACTION_FILE.new.$$" "$POLICY_TRANSACTION_FILE" || {
+        rm -f "$POLICY_TRANSACTION_FILE.new.$$"
+        return 1
+    }
+}
+
+hybrid_record_overlay_transaction() {
+    printf 'overlay\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" \
+        > "$POLICY_TRANSACTION_FILE.new.$$" || {
+        rm -f "$POLICY_TRANSACTION_FILE.new.$$"
+        return 1
+    }
+    mv "$POLICY_TRANSACTION_FILE.new.$$" "$POLICY_TRANSACTION_FILE" || {
+        rm -f "$POLICY_TRANSACTION_FILE.new.$$"
+        return 1
+    }
+}
+
+hybrid_remove_internal_path() {
+    case ${1:-} in
+        "$BASE"/*) rm -f "$1" ;;
+    esac
+}
+
+hybrid_cleanup_overlay_transaction() {
+    hybrid_remove_internal_path "$1"
+    hybrid_remove_internal_path "$2"
+    hybrid_remove_internal_path "$3"
+    hybrid_remove_internal_path "$4"
+    hybrid_remove_internal_path "$5"
+    case ${6:-} in "$BASE"/*) rm -f "$6".* ;; esac
+}
+
+hybrid_recover_interrupted_transaction() {
+    [ -f "$POLICY_TRANSACTION_FILE" ] || return 0
+    IFS="$TAB" read -r \
+        hybrid_tx_kind hybrid_tx_a hybrid_tx_b hybrid_tx_c hybrid_tx_d \
+        hybrid_tx_e hybrid_tx_f hybrid_tx_g hybrid_tx_h hybrid_tx_i \
+        hybrid_tx_j < "$POLICY_TRANSACTION_FILE" || return 1
+    case $hybrid_tx_kind in
+        core)
+            case $hybrid_tx_c in "$BASE/core.tx."*) ;; *) return 1 ;; esac
+            case $hybrid_tx_d in "$BASE/effective.core."*.tsv) ;; *) return 1 ;; esac
+            hybrid_restore_core_transaction \
+                "$hybrid_tx_a" "$hybrid_tx_b" "$hybrid_tx_c" || return 1
+            rm -f "$POLICY_TRANSACTION_FILE" "$hybrid_tx_d" \
+                "$hybrid_tx_c".*
+            ;;
+        overlay)
+            valid_id "$hybrid_tx_a" || return 1
+            case $hybrid_tx_d in "$OVERLAY_DIR/$hybrid_tx_a.meta") ;;
+                *) return 1 ;;
+            esac
+            hybrid_restore_transaction \
+                "$hybrid_tx_d" "$hybrid_tx_e" "$hybrid_tx_b" \
+                "$hybrid_tx_f" "$hybrid_tx_c" "$hybrid_tx_j" || return 1
+            rm -f "$POLICY_TRANSACTION_FILE"
+            hybrid_cleanup_overlay_transaction \
+                "$hybrid_tx_g" "$hybrid_tx_h" "$hybrid_tx_i" \
+                "$hybrid_tx_e" "$hybrid_tx_f" "$hybrid_tx_j"
+            ;;
+        *) return 1 ;;
+    esac
+    log_message WARN "recovered interrupted $hybrid_tx_kind policy transaction"
+}
+
+hybrid_restore_core_transaction() {
+    hybrid_core_old_chain=$1
+    hybrid_core_failed_chain=$2
+    hybrid_core_tx=$3
+    hybrid_core_restore_failed=false
+    cp "$hybrid_core_tx.current" "$CURRENT" ||
+        hybrid_core_restore_failed=true
+    if [ -f "$hybrid_core_tx.previous" ]; then
+        cp "$hybrid_core_tx.previous" "$PREVIOUS" ||
+            hybrid_core_restore_failed=true
+    else
+        rm -f "$PREVIOUS"
+    fi
+    if [ -f "$hybrid_core_tx.effective-present" ]; then
+        cp "$hybrid_core_tx.effective" "$EFFECTIVE" ||
+            hybrid_core_restore_failed=true
+    else
+        rm -f "$EFFECTIVE"
+    fi
+    hybrid_restore_runtime_state "$hybrid_core_tx" ||
+        hybrid_core_restore_failed=true
+    hybrid_restore_persistent_state "$hybrid_core_tx.nvram" ||
+        hybrid_core_restore_failed=true
+    cp "$hybrid_core_tx.generation-before" "$CORE_GENERATION_FILE" ||
+        hybrid_core_restore_failed=true
+    if activate_chain "$hybrid_core_old_chain" >/dev/null 2>&1; then
+        discard_policy_chain "$hybrid_core_failed_chain" >/dev/null 2>&1 ||
+            hybrid_core_restore_failed=true
+    else
+        hybrid_core_restore_failed=true
+    fi
+    if [ "$hybrid_core_restore_failed" = true ]; then
+        printf '%s\n' "core transaction rollback was incomplete" \
+            > "$CORE_RECOVERY_FILE"
+        set_reconcile_error \
+            "core transaction rollback was incomplete; verify storage and policy chain"
+        log_message ERROR "core transaction rollback was incomplete"
+        return 1
+    fi
+}
+
+hybrid_cleanup_core_transaction() {
+    rm -f "$hybrid_core_runtime" "$hybrid_core_tx".*
+}
+
+hybrid_apply_core_file() {
+    hybrid_core_candidate=$1
+    hybrid_core_expected=$2
+    hybrid_core_generation=$(
+        cat "$CORE_GENERATION_FILE" 2>/dev/null || printf 1
+    )
+    is_uint "$hybrid_core_generation" || hybrid_core_generation=1
+    is_uint "$hybrid_core_expected" &&
+        [ "$hybrid_core_expected" = "$hybrid_core_generation" ] || {
+        printf 'core generation conflict: expected %s, current %s\n' \
+            "$hybrid_core_expected" "$hybrid_core_generation" >&2
+        return 1
+    }
+    validate_rules "$hybrid_core_candidate" &&
+        check_persistence_capacity "$hybrid_core_candidate" || return 1
+    hybrid_core_has_collision "$hybrid_core_candidate" && {
+        printf 'core/overlay origin collision\n' >&2
+        return 1
+    }
+    hybrid_core_runtime=$BASE/effective.core.$$.tsv
+    hybrid_core_tx=$BASE/core.tx.$$
+    hybrid_cleanup_core_transaction
+    compose_runtime_policy \
+        "$hybrid_core_candidate" "$hybrid_core_runtime" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    cp "$CURRENT" "$hybrid_core_tx.current" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    cp "$CURRENT" "$hybrid_core_tx.next-previous" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    cp "$hybrid_core_candidate" "$hybrid_core_tx.next-current" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    [ ! -f "$PREVIOUS" ] ||
+        cp "$PREVIOUS" "$hybrid_core_tx.previous" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    if [ -f "$EFFECTIVE" ]; then
+        cp "$EFFECTIVE" "$hybrid_core_tx.effective" || {
+            hybrid_cleanup_core_transaction
+            return 1
+        }
+        : > "$hybrid_core_tx.effective-present"
+    fi
+    hybrid_backup_runtime_state "$hybrid_core_tx" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    hybrid_capture_persistent_state "$hybrid_core_tx.nvram" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    printf '%s\n' "$hybrid_core_generation" \
+        > "$hybrid_core_tx.generation-before" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    printf '%s\n' $((hybrid_core_generation + 1)) \
+        > "$hybrid_core_tx.generation" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    hybrid_core_old_chain=$(active_chain)
+    hybrid_core_new_chain=$(inactive_chain)
+    hybrid_record_core_transaction \
+        "$hybrid_core_old_chain" "$hybrid_core_new_chain" \
+        "$hybrid_core_tx" "$hybrid_core_runtime" || {
+        hybrid_cleanup_core_transaction
+        return 1
+    }
+    apply_runtime "$hybrid_core_runtime" || {
+        if hybrid_recover_interrupted_transaction; then
+            hybrid_cleanup_core_transaction
+        else
+            set_reconcile_error \
+                "core transaction rollback was incomplete"
+        fi
+        return 1
+    }
+    [ "$(active_chain)" = "$hybrid_core_new_chain" ] || {
+        hybrid_recover_interrupted_transaction || true
+        return 1
+    }
+    if ! mv "$hybrid_core_tx.next-previous" "$PREVIOUS" ||
+       ! mv "$hybrid_core_tx.next-current" "$CURRENT" ||
+       ! hybrid_persist_rules; then
+        hybrid_recover_interrupted_transaction || true
+        return 1
+    fi
+    hybrid_core_commit_ok=true
+    if [ "$(sed -n '1p' "$hybrid_core_runtime")" = \
+        "# astrill-lazy-effective-v1" ]; then
+        mv "$hybrid_core_runtime" "$EFFECTIVE" ||
+            hybrid_core_commit_ok=false
+    else
+        rm -f "$hybrid_core_runtime" "$EFFECTIVE" ||
+            hybrid_core_commit_ok=false
+    fi
+    if [ "$hybrid_core_commit_ok" != true ] ||
+       ! mv "$hybrid_core_tx.generation" "$CORE_GENERATION_FILE" ||
+       ! rm -f "$POLICY_TRANSACTION_FILE"; then
+        hybrid_recover_interrupted_transaction || true
+        return 1
+    fi
+    rm -f "$CORE_RECOVERY_FILE"
+    hybrid_cleanup_core_transaction
+    hybrid_core_unresolved=$(
+        wc -l < "$UNRESOLVED" 2>/dev/null || printf 0
+    )
+    log_message INFO \
+        "applied persistent core; unresolved domains: $hybrid_core_unresolved"
 }
 
 hybrid_restore_transaction() {
@@ -448,17 +1599,30 @@ hybrid_restore_transaction() {
     hybrid_restore_backup=$2
     hybrid_restore_chain=$3
     hybrid_restore_effective=$4
+    hybrid_failed_chain=$5
+    hybrid_restore_runtime_prefix=$6
+    hybrid_restore_failed=false
     if [ -f "$hybrid_restore_backup" ]; then
-        cp "$hybrid_restore_backup" "$hybrid_restore_meta" || true
+        cp "$hybrid_restore_backup" "$hybrid_restore_meta" ||
+            hybrid_restore_failed=true
     else
         rm -f "$hybrid_restore_meta"
     fi
     if [ -f "$hybrid_restore_effective" ]; then
-        cp "$hybrid_restore_effective" "$EFFECTIVE" || true
+        cp "$hybrid_restore_effective" "$EFFECTIVE" ||
+            hybrid_restore_failed=true
     else
         rm -f "$EFFECTIVE"
     fi
-    activate_chain "$hybrid_restore_chain" >/dev/null 2>&1 || true
+    hybrid_restore_runtime_state "$hybrid_restore_runtime_prefix" ||
+        hybrid_restore_failed=true
+    if activate_chain "$hybrid_restore_chain" >/dev/null 2>&1; then
+        discard_policy_chain "$hybrid_failed_chain" >/dev/null 2>&1 ||
+            hybrid_restore_failed=true
+    else
+        hybrid_restore_failed=true
+    fi
+    [ "$hybrid_restore_failed" = false ]
 }
 
 hybrid_put_overlay() {
@@ -466,6 +1630,8 @@ hybrid_put_overlay() {
     hybrid_put_expected=$2
     hybrid_put_requested=$3
     hybrid_put_candidate=$4
+    hybrid_put_expected_source=${5:--}
+    hybrid_put_expected_mac=${6:--}
     valid_id "$hybrid_put_owner" && is_uint "$hybrid_put_expected" ||
         return 1
     hybrid_validate_rules "$hybrid_put_candidate" ||
@@ -490,6 +1656,10 @@ hybrid_put_overlay() {
         return 1
     hybrid_put_source=${hybrid_put_binding%%"$TAB"*}
     hybrid_put_mac=${hybrid_put_binding#*"$TAB"}
+    hybrid_require_expected_binding \
+        "$hybrid_put_source" "$hybrid_put_mac" \
+        "$hybrid_put_expected_source" "$hybrid_put_expected_mac" ||
+        return 1
     hybrid_source_conflicts "$hybrid_put_owner" "$hybrid_put_source" && {
         printf 'overlay source overlaps another owner\n' >&2
         return 1
@@ -505,42 +1675,97 @@ hybrid_put_overlay() {
     fi
     hybrid_put_generation=$((hybrid_put_current + 1))
     hybrid_put_document=$OVERLAY_DIR/$hybrid_put_owner.$hybrid_put_generation.tsv
-    cp "$hybrid_put_candidate" "$hybrid_put_document" || return 1
     hybrid_put_effective=$BASE/effective.put.$$.tsv
+    hybrid_put_new_meta=$OVERLAY_DIR/$hybrid_put_owner.meta.new.$$
+    hybrid_put_backup=$OVERLAY_DIR/$hybrid_put_owner.meta.tx.$$
+    hybrid_put_effective_backup=$BASE/effective.tx.$$
+    hybrid_put_runtime_backup=$BASE/overlay-runtime.tx.$$
+    rm -f "$hybrid_put_document" "$hybrid_put_effective" \
+        "$hybrid_put_new_meta" "$hybrid_put_backup" \
+        "$hybrid_put_effective_backup" "$hybrid_put_runtime_backup".*
+    cp "$hybrid_put_candidate" "$hybrid_put_document" || {
+        hybrid_cleanup_overlay_transaction \
+            "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_effective" "$hybrid_put_backup" \
+            "$hybrid_put_effective_backup" "$hybrid_put_runtime_backup"
+        return 1
+    }
     hybrid_compose_effective \
         "$CURRENT" "$hybrid_put_effective" "$hybrid_put_owner" \
         "$hybrid_put_document" "$hybrid_put_source" "$hybrid_put_mac" ||
+    {
+        hybrid_cleanup_overlay_transaction \
+            "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_effective" "$hybrid_put_backup" \
+            "$hybrid_put_effective_backup" "$hybrid_put_runtime_backup"
         return 1
-    hybrid_put_new_meta=$OVERLAY_DIR/$hybrid_put_owner.meta.new.$$
+    }
     hybrid_write_meta \
         "$hybrid_put_new_meta" "$hybrid_put_generation" \
         "$hybrid_put_source" "$hybrid_put_mac" "$hybrid_put_document" ||
+    {
+        hybrid_cleanup_overlay_transaction \
+            "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_effective" "$hybrid_put_backup" \
+            "$hybrid_put_effective_backup" "$hybrid_put_runtime_backup"
         return 1
-    hybrid_put_backup=$OVERLAY_DIR/$hybrid_put_owner.meta.tx.$$
-    rm -f "$hybrid_put_backup"
+    }
     [ ! -f "$hybrid_put_meta" ] ||
-        cp "$hybrid_put_meta" "$hybrid_put_backup" || return 1
-    hybrid_put_effective_backup=$BASE/effective.tx.$$
-    rm -f "$hybrid_put_effective_backup"
+        cp "$hybrid_put_meta" "$hybrid_put_backup" || {
+        hybrid_cleanup_overlay_transaction \
+            "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_effective" "$hybrid_put_backup" \
+            "$hybrid_put_effective_backup" "$hybrid_put_runtime_backup"
+        return 1
+    }
     [ ! -f "$EFFECTIVE" ] ||
-        cp "$EFFECTIVE" "$hybrid_put_effective_backup" || return 1
+        cp "$EFFECTIVE" "$hybrid_put_effective_backup" || {
+        hybrid_cleanup_overlay_transaction \
+            "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_effective" "$hybrid_put_backup" \
+            "$hybrid_put_effective_backup" "$hybrid_put_runtime_backup"
+        return 1
+    }
+    hybrid_backup_runtime_state "$hybrid_put_runtime_backup" || {
+        hybrid_cleanup_overlay_transaction \
+            "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_effective" "$hybrid_put_backup" \
+            "$hybrid_put_effective_backup" "$hybrid_put_runtime_backup"
+        return 1
+    }
     hybrid_put_chain=$(active_chain)
+    hybrid_put_applied_chain=$(inactive_chain)
+    hybrid_record_overlay_transaction \
+        "$hybrid_put_owner" "$hybrid_put_chain" \
+        "$hybrid_put_applied_chain" "$hybrid_put_meta" \
+        "$hybrid_put_backup" "$hybrid_put_effective_backup" \
+        "$hybrid_put_document" "$hybrid_put_new_meta" \
+        "$hybrid_put_effective" "$hybrid_put_runtime_backup" || {
+        hybrid_cleanup_overlay_transaction \
+            "$hybrid_put_document" "$hybrid_put_new_meta" \
+            "$hybrid_put_effective" "$hybrid_put_backup" \
+            "$hybrid_put_effective_backup" "$hybrid_put_runtime_backup"
+        return 1
+    }
     apply_runtime "$hybrid_put_effective" || {
-        rm -f "$hybrid_put_document" "$hybrid_put_new_meta" \
-            "$hybrid_put_backup" "$hybrid_put_effective_backup" \
-            "$hybrid_put_effective"
+        hybrid_recover_interrupted_transaction || true
+        return 1
+    }
+    [ "$(active_chain)" = "$hybrid_put_applied_chain" ] || {
+        hybrid_recover_interrupted_transaction || true
         return 1
     }
     if ! mv "$hybrid_put_new_meta" "$hybrid_put_meta" ||
-       ! mv "$hybrid_put_effective" "$EFFECTIVE"; then
-        hybrid_restore_transaction \
-            "$hybrid_put_meta" "$hybrid_put_backup" "$hybrid_put_chain" \
-            "$hybrid_put_effective_backup"
-        rm -f "$hybrid_put_document" "$hybrid_put_new_meta" \
-            "$hybrid_put_effective"
+       ! mv "$hybrid_put_effective" "$EFFECTIVE" ||
+       ! rm -f "$POLICY_TRANSACTION_FILE"; then
+        if ! hybrid_recover_interrupted_transaction; then
+            set_reconcile_error \
+                "RAM overlay transaction rollback was incomplete"
+        fi
         return 1
     fi
-    rm -f "$hybrid_put_backup" "$hybrid_put_effective_backup"
+    rm -f "$hybrid_put_backup" "$hybrid_put_effective_backup" \
+        "$hybrid_put_runtime_backup".*
     for hybrid_stale in "$OVERLAY_DIR/$hybrid_put_owner".*.tsv; do
         [ "$hybrid_stale" = "$hybrid_put_document" ] ||
             rm -f "$hybrid_stale"
@@ -571,30 +1796,70 @@ hybrid_remove_overlay() {
     }
     hybrid_remove_document=$hybrid_document
     hybrid_remove_effective=$BASE/effective.remove.$$.tsv
+    hybrid_remove_backup=$OVERLAY_DIR/$hybrid_remove_owner.meta.tx.$$
+    hybrid_remove_effective_backup=$BASE/effective.tx.$$
+    hybrid_remove_runtime_backup=$BASE/overlay-runtime.tx.$$
+    rm -f "$hybrid_remove_effective" "$hybrid_remove_backup" \
+        "$hybrid_remove_effective_backup" "$hybrid_remove_runtime_backup".*
     hybrid_compose_effective \
         "$CURRENT" "$hybrid_remove_effective" "" "" "" "" \
-        "$hybrid_remove_owner" || return 1
-    hybrid_remove_backup=$OVERLAY_DIR/$hybrid_remove_owner.meta.tx.$$
-    cp "$hybrid_remove_meta" "$hybrid_remove_backup" || return 1
-    hybrid_remove_effective_backup=$BASE/effective.tx.$$
-    rm -f "$hybrid_remove_effective_backup"
+        "$hybrid_remove_owner" || {
+        hybrid_cleanup_overlay_transaction \
+            - - "$hybrid_remove_effective" "$hybrid_remove_backup" \
+            "$hybrid_remove_effective_backup" "$hybrid_remove_runtime_backup"
+        return 1
+    }
+    cp "$hybrid_remove_meta" "$hybrid_remove_backup" || {
+        hybrid_cleanup_overlay_transaction \
+            - - "$hybrid_remove_effective" "$hybrid_remove_backup" \
+            "$hybrid_remove_effective_backup" "$hybrid_remove_runtime_backup"
+        return 1
+    }
     [ ! -f "$EFFECTIVE" ] ||
-        cp "$EFFECTIVE" "$hybrid_remove_effective_backup" || return 1
+        cp "$EFFECTIVE" "$hybrid_remove_effective_backup" || {
+        hybrid_cleanup_overlay_transaction \
+            - - "$hybrid_remove_effective" "$hybrid_remove_backup" \
+            "$hybrid_remove_effective_backup" "$hybrid_remove_runtime_backup"
+        return 1
+    }
+    hybrid_backup_runtime_state "$hybrid_remove_runtime_backup" || {
+        hybrid_cleanup_overlay_transaction \
+            - - "$hybrid_remove_effective" "$hybrid_remove_backup" \
+            "$hybrid_remove_effective_backup" "$hybrid_remove_runtime_backup"
+        return 1
+    }
     hybrid_remove_chain=$(active_chain)
+    hybrid_remove_applied_chain=$(inactive_chain)
+    hybrid_record_overlay_transaction \
+        "$hybrid_remove_owner" "$hybrid_remove_chain" \
+        "$hybrid_remove_applied_chain" "$hybrid_remove_meta" \
+        "$hybrid_remove_backup" "$hybrid_remove_effective_backup" \
+        - - "$hybrid_remove_effective" \
+        "$hybrid_remove_runtime_backup" || {
+        hybrid_cleanup_overlay_transaction \
+            - - "$hybrid_remove_effective" "$hybrid_remove_backup" \
+            "$hybrid_remove_effective_backup" "$hybrid_remove_runtime_backup"
+        return 1
+    }
     apply_runtime "$hybrid_remove_effective" || {
-        rm -f "$hybrid_remove_backup" "$hybrid_remove_effective_backup" \
-            "$hybrid_remove_effective"
+        hybrid_recover_interrupted_transaction || true
+        return 1
+    }
+    [ "$(active_chain)" = "$hybrid_remove_applied_chain" ] || {
+        hybrid_recover_interrupted_transaction || true
         return 1
     }
     if ! rm -f "$hybrid_remove_meta" ||
-       ! mv "$hybrid_remove_effective" "$EFFECTIVE"; then
-        hybrid_restore_transaction \
-            "$hybrid_remove_meta" "$hybrid_remove_backup" \
-            "$hybrid_remove_chain" "$hybrid_remove_effective_backup"
+       ! mv "$hybrid_remove_effective" "$EFFECTIVE" ||
+       ! rm -f "$POLICY_TRANSACTION_FILE"; then
+        if ! hybrid_recover_interrupted_transaction; then
+            set_reconcile_error \
+                "RAM overlay removal rollback was incomplete"
+        fi
         return 1
     fi
     rm -f "$hybrid_remove_backup" "$hybrid_remove_document" \
-        "$hybrid_remove_effective_backup"
+        "$hybrid_remove_effective_backup" "$hybrid_remove_runtime_backup".*
     log_message INFO "removed RAM overlay $hybrid_remove_owner"
 }
 

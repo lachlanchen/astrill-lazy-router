@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -12,7 +16,9 @@ from astrill_lazy.native_settings import (
     NativeAstrillSettings,
 )
 from astrill_lazy.router import (
+    _COMPANION_INTEGRITY_SHELL,
     DOMAIN_REFRESH_TIMEOUT,
+    HYBRID_POLICY_TIMEOUT,
     CommandResult,
     RouterClient,
     RouterError,
@@ -21,6 +27,151 @@ from astrill_lazy.router import (
 )
 
 WINDOWS_NO_WINDOW = 0x08000000
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="POSIX shell is unavailable")
+@pytest.mark.parametrize(
+    ("package_payload", "bootstrap_digest", "expected_package", "expected_bootstrap"),
+    [
+        (b"package", None, "true", "true"),
+        (b"corrupt-package", None, "false", "true"),
+        (b"package", "0" * 32, "true", "false"),
+    ],
+)
+def test_companion_integrity_probe_hashes_actual_nvram_bytes(
+    package_payload: bytes,
+    bootstrap_digest: str | None,
+    expected_package: str,
+    expected_bootstrap: str,
+) -> None:
+    expected_payload = b"package"
+    package_md5 = hashlib.md5(
+        expected_payload,
+        usedforsecurity=False,
+    ).hexdigest()
+    package_chunk = base64.b64encode(package_payload).decode("ascii")
+    bootstrap = "#!/bin/sh\nexit 0\n"
+    expected_bootstrap_md5 = hashlib.md5(
+        bootstrap.encode("ascii"),
+        usedforsecurity=False,
+    ).hexdigest()
+    stored_bootstrap_md5 = bootstrap_digest or expected_bootstrap_md5
+    script = f"""
+uudecode() {{
+    [ "$1" = -o ] || return 1
+    output=$2
+    sed '1d;$d' | base64 --decode > "$output"
+}}
+nvram() {{
+    case $2 in
+        astrill_lazy_bootstrap) printf '%s' {shlex.quote(bootstrap)} ;;
+        astrill_lazy_bootstrap_md5)
+            printf '%s' {shlex.quote(stored_bootstrap_md5)} ;;
+        astrill_lazy_pkg_count) printf 1 ;;
+        astrill_lazy_pkg_md5) printf '%s' {shlex.quote(package_md5)} ;;
+        astrill_lazy_pkg_0) printf '%s' {shlex.quote(package_chunk)} ;;
+        *) return 1 ;;
+    esac
+}}
+{_COMPANION_INTEGRITY_SHELL}
+"""
+    result = subprocess.run(
+        ["sh", "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        creationflags=WINDOWS_NO_WINDOW,
+    )
+    values = dict(line.split("\t", 1) for line in result.stdout.splitlines())
+
+    assert values == {
+        "integrity:package": expected_package,
+        "integrity:bootstrap": expected_bootstrap,
+    }
+
+
+def test_hybrid_policy_mutations_stage_helper_and_use_extended_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+    expected_version = "test-version"
+    helper_calls: list[RouterClient] = []
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "astrill_lazy.installer.RouterInstaller.ensure_hybrid_helper",
+        lambda installer: helper_calls.append(installer.client),
+    )
+    monkeypatch.setattr(
+        client,
+        "_policy_identity_args",
+        lambda: (expected_version, "a" * 32, "b" * 32),
+    )
+
+    def run_alctl(
+        arguments: list[str],
+        *,
+        input_bytes: bytes | None = None,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        commands.append(arguments)
+        if arguments[0] in {"apply", "core-apply", "overlay-put"}:
+            assert input_bytes == b"# astrill-lazy-rules-v1\n"
+        else:
+            assert input_bytes is None
+        assert timeout == HYBRID_POLICY_TIMEOUT
+        return CommandResult('{"health":"healthy"}\n', "", 0)
+
+    monkeypatch.setattr(client, "_run_alctl", run_alctl)
+
+    assert client.apply_rules("# astrill-lazy-rules-v1\n")["health"] == "healthy"
+    assert client.rollback()["health"] == "healthy"
+    assert client.core_apply(4, "# astrill-lazy-rules-v1\n")["health"] == "healthy"
+    assert client.core_rollback(5)["health"] == "healthy"
+    assert (
+        client.overlay_put(
+            "controller-abc",
+            6,
+            "192.168.1.10/32",
+            "# astrill-lazy-rules-v1\n",
+        )["health"]
+        == "healthy"
+    )
+    assert client.overlay_remove("controller-abc", 7)["health"] == "healthy"
+    assert helper_calls == [client] * 6
+    assert commands == [
+        ["apply", expected_version, "a" * 32, "b" * 32, "-"],
+        ["rollback", expected_version, "a" * 32, "b" * 32, "--json"],
+        ["core-apply", expected_version, "a" * 32, "b" * 32, "4", "-"],
+        [
+            "core-rollback",
+            expected_version,
+            "a" * 32,
+            "b" * 32,
+            "5",
+            "--json",
+        ],
+        [
+            "overlay-put",
+            expected_version,
+            "a" * 32,
+            "b" * 32,
+            "controller-abc",
+            "6",
+            "192.168.1.10/32",
+            "-",
+            "-",
+            "-",
+        ],
+        [
+            "overlay-remove",
+            expected_version,
+            "a" * 32,
+            "b" * 32,
+            "controller-abc",
+            "7",
+        ],
+    ]
 
 
 def test_refresh_allows_a_full_forced_domain_resolution(
@@ -373,6 +524,11 @@ def test_monitor_snapshot_combines_status_settings_and_companion(
             tagged("presence:astrill_lazy_installed", "1"),
             tagged("presence:astrill_lazy_version", "0.2.3"),
             tagged("presence:astrill_lazy_pkg_md5", "abc123"),
+            tagged("presence:astrill_lazy_bootstrap_md5", "def456"),
+            tagged("presence:rc_startup", "bootstrap-launcher"),
+            tagged("presence:mypage_scripts", "/tmp/astrill-lazy/alpage"),
+            "integrity:package\ttrue\n",
+            "integrity:bootstrap\ttrue\n",
             *(tagged(f"setting:{key}", value) for key, value in settings.items()),
             tagged("companion_status", json.dumps(companion)),
         )
@@ -399,6 +555,11 @@ def test_monitor_snapshot_combines_status_settings_and_companion(
         "version": "0.2.3",
         "runtime": True,
         "package_md5": "abc123",
+        "bootstrap_md5": "def456",
+        "rc_startup": "bootstrap-launcher",
+        "mypage_scripts": "/tmp/astrill-lazy/alpage",
+        "package_integrity": True,
+        "bootstrap_integrity": True,
     }
     assert snapshot.companion_status == companion
     assert snapshot.selected_status(companion_enabled=True) == companion
@@ -422,6 +583,11 @@ def test_monitor_snapshot_can_skip_companion_status(
             tagged("presence:astrill_lazy_installed", ""),
             tagged("presence:astrill_lazy_version", ""),
             tagged("presence:astrill_lazy_pkg_md5", ""),
+            tagged("presence:astrill_lazy_bootstrap_md5", ""),
+            tagged("presence:rc_startup", ""),
+            tagged("presence:mypage_scripts", ""),
+            "integrity:package\tfalse\n",
+            "integrity:bootstrap\tfalse\n",
             *(tagged(f"setting:{key}", "") for key in SAFE_NATIVE_ASTRILL_KEYS),
         )
     )
@@ -509,6 +675,105 @@ def test_native_client_inventory_does_not_use_companion_runtime(
     assert "nvram get" in captured
     assert "/tmp/dnsmasq.leases" in captured
     assert "/proc/net/arp" in captured
+
+
+def test_nvram_get_exact_removes_only_the_cli_newline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+    captured = ""
+
+    def run_script(script: str, *, timeout: int = 60) -> str:
+        nonlocal captured
+        assert timeout == 60
+        captured = script
+        return "value\t6162630a0a\n"
+
+    monkeypatch.setattr(client, "run_script", run_script)
+
+    assert client.nvram_get_exact("astrill_lazy_bootstrap") == "abc\n"
+    assert "nvram get astrill_lazy_bootstrap" in captured
+
+
+def test_nvram_get_exact_rejects_an_unsafe_key() -> None:
+    client = RouterClient()
+
+    with pytest.raises(ValueError, match="invalid NVRAM key"):
+        client.nvram_get_exact("key; reboot")
+
+
+@pytest.mark.parametrize(("output", "expected"), [("true\n", True), ("false\n", False)])
+def test_nvram_is_set_distinguishes_empty_from_unset(
+    monkeypatch: pytest.MonkeyPatch,
+    output: str,
+    expected: bool,
+) -> None:
+    client = RouterClient()
+    captured = ""
+
+    def run_script(script: str, *, timeout: int = 60) -> str:
+        nonlocal captured
+        captured = script
+        return output
+
+    monkeypatch.setattr(client, "run_script", run_script)
+
+    assert client.nvram_is_set("rc_startup") is expected
+    assert "grep -q '^rc_startup='" in captured
+
+
+def test_nvram_is_set_rejects_invalid_results_and_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+    monkeypatch.setattr(client, "run_script", lambda _script: "maybe\n")
+
+    with pytest.raises(RouterError, match="invalid NVRAM presence"):
+        client.nvram_is_set("rc_startup")
+    with pytest.raises(ValueError, match="invalid NVRAM key"):
+        client.nvram_is_set("key; reboot")
+
+
+def test_companion_presence_includes_stored_package_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = RouterClient()
+    captured = ""
+    output = "".join(
+        (
+            "astrill_lazy_installed\t31\n",
+            "astrill_lazy_version\t302e322e3131\n",
+            "astrill_lazy_pkg_md5\t" + ("61" * 32) + "\n",
+            "astrill_lazy_bootstrap_md5\t" + ("62" * 32) + "\n",
+            "rc_startup\t6c61756e63686572\n",
+            "mypage_scripts\t7061676573\n",
+            "integrity:package\ttrue\n",
+            "integrity:bootstrap\ttrue\n",
+            "runtime\ttrue\n",
+        )
+    )
+
+    def run_script(script: str) -> str:
+        nonlocal captured
+        captured = script
+        return output
+
+    monkeypatch.setattr(client, "run_script", run_script)
+
+    assert client.companion_presence() == {
+        "installed": True,
+        "version": "0.2.11",
+        "package_md5": "a" * 32,
+        "bootstrap_md5": "b" * 32,
+        "rc_startup": "launcher",
+        "mypage_scripts": "pages",
+        "package_integrity": True,
+        "bootstrap_integrity": True,
+        "runtime": True,
+    }
+    assert "uudecode -o" in captured
+    assert "md5sum" in captured
+    assert "integrity:package" in captured
 
 
 def test_connection_apply_verifies_selection_and_native_settings() -> None:

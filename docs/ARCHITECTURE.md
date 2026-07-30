@@ -4,8 +4,8 @@
 
 Astrill Lazy Router has three deliberately small trust domains:
 
-1. The native Ubuntu application owns editable rules, catalogs, Astrill server
-   discovery, and application launch profiles.
+1. The native Ubuntu and Windows applications own editable rules, catalogs,
+   Astrill server discovery, and platform-specific application profiles.
 2. The DD-WRT controller owns validated compiled rules, address resolution,
    packet marking, policy tables, rollback, and runtime recovery.
 3. Astrill continues to own its tunnel, DNS behavior, low-order marks, server
@@ -42,8 +42,10 @@ Local and non-routable destinations return before policy matching:
 - `224.0.0.0/4`
 - `255.255.255.255/32`
 
-Rules are evaluated by ascending priority. The first matching rule sets one of
-these marks and returns:
+The global persistent core is evaluated by ascending priority first. Each
+owner overlay is then reached only through its source-address and optional MAC
+guard and evaluates its own rules by ascending priority. The first matching
+rule sets one of these marks and returns:
 
 | Target | Mark | Mask | Preference | Table |
 | --- | --- | --- | --- | --- |
@@ -81,47 +83,58 @@ fallback. If the tunnel route disappears, lookup terminates at that fallback
 instead of continuing to the WAN. While disconnected, the blackhole is the
 table's only default.
 
-## Transactional Apply
+## Transactional Layer Updates
 
-The controller validates the entire document before touching the active chain.
-It then:
+The companion validates and deterministically composes the entire candidate
+effective document before touching the active chain. It then:
 
 1. selects the inactive A/B chain;
-2. flushes and completely builds that chain;
-3. resolves domain rules, retaining prior addresses when a refresh fails;
-4. verifies both policy tables and rules;
-5. inserts the completed chain at `PREROUTING` position one;
-6. removes the old jump;
-7. persists the current document and, when the 2 KiB reserve permits, the
-   previous document to NVRAM, using gzip/base64 when it is smaller than plain
-   TSV; otherwise rollback remains runtime-only.
+2. extracts enabled unique domains and prefetches them with no more than eight
+   resolver workers and a five-second deadline per lookup, retaining prior
+   validated addresses when a fresh lookup fails;
+3. counts generated matches and checks memory and elapsed duration while
+   creating a deterministic plan;
+4. emits one restore document that declares and replaces only the inactive user
+   chain, without changing `PREROUTING`;
+5. verifies the active/inactive reference topology, memory, and deadline,
+   dry-runs that document with `iptables-restore --noflush --test`, rechecks the
+   guards, and commits the same document with `--noflush`;
+6. reads back the exact rule count and chain-reference topology; and
+7. inserts the completed chain at `PREROUTING` position one, removing the old
+   jump only after the replacement is ready.
 
-An invalid document or failed chain build leaves the previous jump active.
-Rollback applies the same transaction in the opposite direction.
+An invalid document, resolver/build deadline, exceeded admission limit,
+topology change, restore failure, or readback mismatch discards the candidate
+and leaves the previous jump active.
 
-The desktop owns a local editable document while the router owns the last
-successfully applied document. A service rule expands to every maintained seed
-domain and literal endpoint network before transmission. **Apply policies**
-preflights all saved local records, including disabled rows, and transactionally
-replaces the complete router document. **Apply selected** preflights only the
-explicit selection and replaces the router document with that selected scope;
-unchosen records remain saved locally. Each compiled TSV is limited to 6,144
-bytes. An oversized scope is rejected before router mutation and is never
-truncated to a partial policy.
+For a core change, the desktop supplies the observed generation. After chain
+activation the companion persists the current core and, when the 2 KiB reserve
+permits, its previous generation to NVRAM using gzip/base64 when smaller than
+plain TSV. It commits, decodes, and byte-verifies the record before advancing
+the generation. A persistence failure restores the exact old NVRAM values and
+active chain in the same operation.
 
-Current status returns every serialized rule's `origin` and `enabled` value.
-The desktop compares exact enabled origin-ID sets when deciding whether local
-and applied policy agree. Older companions without that identity information
-fall back to a count-only compatibility display.
+For an overlay change, the desktop supplies the owner and expected generation.
+The companion atomically replaces only that owner's file under `/tmp`; it
+never writes or commits NVRAM. Core and overlay origins cannot collide.
+
+The desktop owns a complete local editable library while the router reports
+the persistent core, this computer's overlay, other overlays, and the composed
+effective policy separately. Exact origin IDs, MD5 hashes, generations,
+runtime epoch, and source/MAC bindings distinguish deliberate deployment
+scope from drift. See [Hybrid policy storage](HYBRID_POLICY_STORAGE.md).
 
 ## Runtime Recovery
 
 `alctl watchdog-loop` runs locally on DD-WRT every 60 seconds. It repairs
 missing policy objects, tables, chains, and the `PREROUTING` hook. It does not
 chase an unmanaged native undercut to a lower preference; that condition stays
-fail-closed and rebase-required. Every 30 cycles it re-resolves domain rules
-through DD-WRT's local DNS service and performs an A/B refresh. This
-router-local watchdog and 30-minute DNS cycle are not desktop SSH polling.
+fail-closed and rebase-required. When no owner overlay is active, every 30
+cycles it can re-resolve the core's domain rules through DD-WRT's local DNS
+service and perform a core-only A/B refresh. When an overlay is active, the
+watchdog deliberately skips that periodic policy rebuild: an overlay snapshot
+is loaded only by an explicit load, one-shot startup/network restoration, or a
+manual restore/reload. These router-local checks are not desktop SSH polling.
 Status is degraded whenever this watchdog is absent, the active jump is
 missing, or the runtime contract for the current tunnel state cannot be
 verified. A disconnected state is ready when the Direct table, VPN blackhole
@@ -146,23 +159,35 @@ A disconnected ready state intentionally has no owned RPDB preferences and no
 native table. Its Direct table, VPN blackhole table, and VPN-mark forwarding
 fail-close remain ready.
 
-The package lives on tmpfs at `/tmp/astrill-lazy`. A gzip archive is base64
-encoded into bounded NVRAM chunks. `rc_startup` reconstructs the archive,
-verifies its MD5 value using tools available in this firmware, extracts it, and
-starts the controller. The host installer also records SHA-256 for release
-verification.
+The package lives on tmpfs at `/tmp/astrill-lazy`. A deterministic gzip archive
+is base64 encoded into bounded NVRAM chunks. Separately, the installer
+normalizes the 6,502-byte bootstrap script, creates deterministic gzip
+(`mtime=0`), and stores its 2,560-byte base64 payload in one NVRAM value. Its
+MD5 covers that encoded payload plus exactly one canonical trailing newline.
+
+`rc_startup` captures the encoded payload and digest once, hashes those
+canonical bytes, decodes that same captured payload through `uudecode` and
+gzip, rejects an empty result, and executes the decoded script. The running
+bootstrap rechecks the stored encoded-payload identity before and under the
+shared controller lock, reconstructs and MD5-verifies the package archive,
+extracts into a private staging directory, publishes each runtime file by
+atomic rename, and writes the running `PACKAGE_MD5` marker last.
+The host installer also records SHA-256 for release verification.
 
 The desktop reconciles the companion once at launch. Later reconciliation is
 manual; status and data otherwise come from explicit page loads or the result
-of an action the operator requested. A matching version with its jump and
-watchdog present is left untouched; a stopped current runtime may be started
-in place; and a current package can be reconstructed from its stored bootstrap
-without a rewrite. If login startup precedes router startup, the failed read
-does not change the saved mode and manual Refresh retries after DD-WRT is
-reachable. A missing, outdated, fingerprint-mismatched, or non-repairable
-package only opens the Install/Upgrade confirmation. No background desktop
-monitor can invoke the NVRAM installer. This lifecycle is separate from
-Astrill connection management and does not change `astrill_autostart`.
+of an action the operator requested. A matching version, stored-package MD5,
+stored-bootstrap-payload MD5, verified stored chunk/bootstrap integrity, and
+exact persistent hooks with the corresponding running package marker, jump,
+and watchdog are left untouched. A stopped current runtime may be started in
+place, and that exact current package can be reconstructed from its verified
+stored bootstrap payload without a rewrite. If login startup
+precedes router startup, the failed read does not change the saved mode and
+manual Refresh retries after DD-WRT is reachable. A missing, outdated,
+package-mismatched, fingerprint-mismatched, or non-repairable package only
+opens the Install/Upgrade confirmation. No background desktop monitor can
+invoke the NVRAM installer. This lifecycle is separate from Astrill connection
+management and does not change `astrill_autostart`.
 
 The applet endpoint payload is a separate, larger read. Startup queues it only
 after the health snapshot completes instead of opening both SSH sessions
@@ -227,7 +252,10 @@ Connection draft.
 `Restore Astrill Only` records native tunnel state, removes all
 companion-owned runtime and persistent objects, audits that cleanup, and then
 checks that endpoint, protocol, and tunnel state are unchanged. The desktop
-persists native-only mode only after this audit succeeds.
+persists native-only mode only after this audit succeeds. Runtime stop and the
+exact-byte NVRAM removal transaction use the same controller lock as policy
+writes; snapshot or residue drift is refused, and a failed locked mutation
+attempts same-session restoration of the captured NVRAM state.
 
 ## Native Policy Composition
 

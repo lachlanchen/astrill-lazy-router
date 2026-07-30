@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astrill-lazy-router"
-version = "0.2.12"
+version = "0.2.13"
 description = "Native Ubuntu and DD-WRT policy routing controls for Astrill"
 readme = "README.md"
 requires-python = ">=3.11"

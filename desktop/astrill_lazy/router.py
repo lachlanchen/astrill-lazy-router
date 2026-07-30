@@ -24,9 +24,72 @@ from .native_settings import (
 from .subprocess_support import background_process_options
 
 DOMAIN_REFRESH_TIMEOUT = 180
+HYBRID_POLICY_TIMEOUT = 210
 OVERLAY_OWNER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 MD5_RE = re.compile(r"^[0-9a-f]{32}$")
 HYBRID_HELPER_PATH = "/tmp/astrill-lazy/alhybrid"
+_COMPANION_INTEGRITY_SHELL = r"""
+integrity_package=false
+integrity_bootstrap=false
+integrity_encoded="/tmp/astrill-lazy-presence.$$.b64"
+integrity_archive="/tmp/astrill-lazy-presence.$$.tgz"
+integrity_bootstrap_file="/tmp/astrill-lazy-presence.$$.bootstrap"
+
+bootstrap_value=$(nvram get astrill_lazy_bootstrap)
+bootstrap_expected=$(nvram get astrill_lazy_bootstrap_md5)
+case $bootstrap_expected in
+    ''|*[!0-9a-fA-F]*) ;;
+    *)
+        bootstrap_expected=$(printf '%s' "$bootstrap_expected" | tr 'A-F' 'a-f')
+        if [ "${#bootstrap_expected}" -eq 32 ] &&
+           [ -n "$(printf '%s' "$bootstrap_value" | tr -d '[:space:]')" ]; then
+            printf '%s\n' "$bootstrap_value" > "$integrity_bootstrap_file"
+            bootstrap_actual=$(md5sum "$integrity_bootstrap_file" 2>/dev/null |
+                awk '{print $1}')
+            [ "$bootstrap_actual" = "$bootstrap_expected" ] &&
+                integrity_bootstrap=true
+        fi
+        ;;
+esac
+
+package_count=$(nvram get astrill_lazy_pkg_count)
+package_expected=$(nvram get astrill_lazy_pkg_md5)
+case $package_count:$package_expected in
+    *[!0-9a-fA-F:]*|:*|0:*) ;;
+    *)
+        package_expected=$(printf '%s' "$package_expected" | tr 'A-F' 'a-f')
+        if [ "${#package_expected}" -eq 32 ] &&
+           [ "$package_count" -le 64 ] 2>/dev/null; then
+            : > "$integrity_encoded"
+            package_index=0
+            package_chunks_ok=true
+            while [ "$package_index" -lt "$package_count" ]; do
+                package_chunk=$(nvram get "astrill_lazy_pkg_$package_index")
+                if [ -z "$package_chunk" ]; then
+                    package_chunks_ok=false
+                    break
+                fi
+                printf '%s' "$package_chunk" >> "$integrity_encoded"
+                package_index=$((package_index + 1))
+            done
+            if [ "$package_chunks_ok" = true ] &&
+               {
+                   printf 'begin-base64 644 package.tgz\n'
+                   cat "$integrity_encoded"
+                   printf '\n====\n'
+               } | uudecode -o "$integrity_archive" 2>/dev/null; then
+                package_actual=$(md5sum "$integrity_archive" 2>/dev/null |
+                    awk '{print $1}')
+                [ "$package_actual" = "$package_expected" ] &&
+                    integrity_package=true
+            fi
+        fi
+        ;;
+esac
+rm -f "$integrity_encoded" "$integrity_archive" "$integrity_bootstrap_file"
+printf 'integrity:package\t%s\n' "$integrity_package"
+printf 'integrity:bootstrap\t%s\n' "$integrity_bootstrap"
+"""
 
 
 class RouterError(RuntimeError):
@@ -102,8 +165,11 @@ class RouterClient:
         return self._run_alctl(["rules"]).stdout
 
     def apply_rules(self, rules_tsv: str) -> dict[str, Any]:
+        self._ensure_policy_transaction_helper()
         result = self._run_alctl(
-            ["apply", "-"], input_bytes=rules_tsv.encode(), timeout=120
+            ["apply", *self._policy_identity_args(), "-"],
+            input_bytes=rules_tsv.encode(),
+            timeout=HYBRID_POLICY_TIMEOUT,
         )
         return _decode_status_document(
             result.stdout,
@@ -154,21 +220,40 @@ class RouterClient:
                 f"router returned invalid application flow result: {exc}"
             ) from exc
 
-    def core_apply(self, rules_tsv: str) -> dict[str, Any]:
-        """Persist and activate the core layer without changing RAM overlays."""
+    def core_apply(
+        self,
+        expected_generation: int,
+        rules_tsv: str,
+    ) -> dict[str, Any]:
+        """Persist the core only if the observed generation is still current."""
 
+        self._ensure_policy_transaction_helper()
         result = self._run_alctl(
-            ["core-apply", "-"],
+            [
+                "core-apply",
+                *self._policy_identity_args(),
+                str(_validate_generation(expected_generation)),
+                "-",
+            ],
             input_bytes=rules_tsv.encode("ascii"),
-            timeout=120,
+            timeout=HYBRID_POLICY_TIMEOUT,
         )
         return _decode_status_document(
             result.stdout,
             error_prefix="router returned invalid core apply result",
         )
 
-    def core_rollback(self) -> dict[str, Any]:
-        result = self._run_alctl(["core-rollback", "--json"], timeout=120)
+    def core_rollback(self, expected_generation: int) -> dict[str, Any]:
+        self._ensure_policy_transaction_helper()
+        result = self._run_alctl(
+            [
+                "core-rollback",
+                *self._policy_identity_args(),
+                str(_validate_generation(expected_generation)),
+                "--json",
+            ],
+            timeout=HYBRID_POLICY_TIMEOUT,
+        )
         return _decode_status_document(
             result.stdout,
             error_prefix="router returned invalid core rollback result",
@@ -180,22 +265,41 @@ class RouterClient:
         expected_generation: int,
         source: str,
         rules_tsv: str,
+        *,
+        expected_source: str | None = None,
+        expected_mac: str | None = None,
     ) -> dict[str, Any]:
+        self._ensure_policy_transaction_helper()
         normalized_owner = _validate_overlay_owner(owner)
         generation = _validate_generation(expected_generation)
         normalized_source = str(source).strip()
         if not normalized_source:
             raise ValueError("overlay source cannot be empty")
+        required_source = "-"
+        if expected_source is not None:
+            required_source = str(expected_source).strip()
+            if not _valid_ipv4_network(required_source):
+                raise ValueError("expected overlay source must be an IPv4 host/CIDR")
+            if "/" not in required_source:
+                required_source = f"{required_source}/32"
+        required_mac = "-"
+        if expected_mac is not None:
+            required_mac = str(expected_mac).strip().casefold().replace("-", ":")
+            if not _valid_mac(required_mac):
+                raise ValueError("expected overlay MAC address is invalid")
         result = self._run_alctl(
             [
                 "overlay-put",
+                *self._policy_identity_args(),
                 normalized_owner,
                 str(generation),
                 normalized_source,
+                required_source,
+                required_mac,
                 "-",
             ],
             input_bytes=rules_tsv.encode("ascii"),
-            timeout=120,
+            timeout=HYBRID_POLICY_TIMEOUT,
         )
         return _decode_status_document(
             result.stdout,
@@ -207,13 +311,15 @@ class RouterClient:
         owner: str,
         expected_generation: int,
     ) -> dict[str, Any]:
+        self._ensure_policy_transaction_helper()
         result = self._run_alctl(
             [
                 "overlay-remove",
+                *self._policy_identity_args(),
                 _validate_overlay_owner(owner),
                 str(_validate_generation(expected_generation)),
             ],
-            timeout=120,
+            timeout=HYBRID_POLICY_TIMEOUT,
         )
         return _decode_status_document(
             result.stdout,
@@ -240,30 +346,69 @@ class RouterClient:
         self,
         payload: bytes,
         expected_md5: str,
+        *,
+        expected_version: str,
+        expected_package_md5: str,
     ) -> str:
-        """Atomically stage the desktop-shipped overlay helper in router RAM."""
+        """Stage the desktop-shipped helper under the shared controller lock."""
 
         normalized_md5 = str(expected_md5).strip().casefold()
         if not MD5_RE.fullmatch(normalized_md5):
             raise ValueError("hybrid helper MD5 is invalid")
+        normalized_version = str(expected_version).strip()
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", normalized_version):
+            raise ValueError("companion version is invalid")
+        normalized_package_md5 = str(expected_package_md5).strip().casefold()
+        if not MD5_RE.fullmatch(normalized_package_md5):
+            raise ValueError("companion package MD5 is invalid")
         if not payload:
             raise ValueError("hybrid helper payload cannot be empty")
+        probe = f"""
+target={shlex.quote(HYBRID_HELPER_PATH)}
+expected={shlex.quote(normalized_md5)}
+if [ -x "$target" ] &&
+   [ "$(md5sum "$target" | awk '{{print $1}}')" = "$expected" ]; then
+    printf current
+else
+    printf upload
+fi
+"""
+        probe_action = self._run_remote(
+            ["/bin/sh", "-c", probe],
+            timeout=30,
+        ).stdout.strip()
+        if probe_action == "current":
+            return "current"
+        if probe_action != "upload":
+            raise RouterError("router omitted the hybrid helper probe result")
         script = f"""
 set -e
 target={shlex.quote(HYBRID_HELPER_PATH)}
 expected={shlex.quote(normalized_md5)}
+expected_version={shlex.quote(normalized_version)}
+expected_package={shlex.quote(normalized_package_md5)}
+lock=/tmp/astrill-lazy/controller.lock
+locked=false
+temporary=
+cleanup() {{
+    cleanup_status=$?
+    trap - EXIT HUP INT TERM
+    [ -z "$temporary" ] || rm -f "$temporary"
+    if [ "$locked" = true ]; then
+        rm -f "$lock/pid"
+        rmdir "$lock" 2>/dev/null || true
+    fi
+    exit "$cleanup_status"
+}}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 [ -d /tmp/astrill-lazy ] || {{
     printf '%s\\n' 'companion runtime directory is missing' >&2
     exit 1
 }}
-if [ -f "$target" ] && [ -x "$target" ] &&
-   [ "$(md5sum "$target" | awk '{{print $1}}')" = "$expected" ]; then
-    cat >/dev/null
-    printf current
-    exit 0
-fi
 temporary="$target.$$"
-trap 'rm -f "$temporary"' EXIT HUP INT TERM
 umask 077
 cat > "$temporary"
 actual=$(md5sum "$temporary" | awk '{{print $1}}')
@@ -272,14 +417,51 @@ actual=$(md5sum "$temporary" | awk '{{print $1}}')
     exit 1
 }}
 chmod 700 "$temporary"
+attempts=0
+while ! mkdir "$lock" 2>/dev/null; do
+    lock_pid=$(cat "$lock/pid" 2>/dev/null || printf 0)
+    case $lock_pid in ''|*[!0-9]*) lock_pid=0 ;; esac
+    if [ "$lock_pid" -le 1 ] || ! kill -0 "$lock_pid" 2>/dev/null; then
+        sleep 1
+        lock_pid=$(cat "$lock/pid" 2>/dev/null || printf 0)
+        case $lock_pid in ''|*[!0-9]*) lock_pid=0 ;; esac
+    fi
+    if [ "$lock_pid" -le 1 ] || ! kill -0 "$lock_pid" 2>/dev/null; then
+        rm -f "$lock/pid"
+        rmdir "$lock" 2>/dev/null || true
+        continue
+    fi
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 90 ] || {{
+        printf '%s\\n' 'controller is busy' >&2
+        exit 75
+    }}
+    sleep 1
+done
+locked=true
+printf '%s\\n' "$$" > "$lock/pid"
+[ "$(cat /tmp/astrill-lazy/VERSION 2>/dev/null)" = "$expected_version" ] &&
+[ "$(cat /tmp/astrill-lazy/PACKAGE_MD5 2>/dev/null)" = "$expected_package" ] &&
+[ "$(nvram get astrill_lazy_installed)" = 1 ] &&
+[ "$(nvram get astrill_lazy_version)" = "$expected_version" ] &&
+[ "$(nvram get astrill_lazy_pkg_md5 | tr 'A-F' 'a-f')" = "$expected_package" ] || {{
+    printf '%s\\n' 'package identity precondition failed' >&2
+    exit 75
+}}
+if [ -f "$target" ] && [ -x "$target" ] &&
+   [ "$(md5sum "$target" | awk '{{print $1}}')" = "$expected" ]; then
+    printf current
+    exit 0
+fi
 mv -f "$temporary" "$target"
+temporary=
 [ -x "$target" ]
 printf installed
 """
         result = self._run_remote(
             ["/bin/sh", "-c", script],
             input_bytes=payload,
-            timeout=60,
+            timeout=120,
         )
         action = result.stdout.strip()
         if action not in {"current", "installed"}:
@@ -287,10 +469,35 @@ printf installed
         return action
 
     def rollback(self) -> dict[str, Any]:
-        result = self._run_alctl(["rollback", "--json"])
+        self._ensure_policy_transaction_helper()
+        result = self._run_alctl(
+            ["rollback", *self._policy_identity_args(), "--json"],
+            timeout=HYBRID_POLICY_TIMEOUT,
+        )
         return _decode_status_document(
             result.stdout,
             error_prefix="router returned invalid rollback result",
+        )
+
+    def _ensure_policy_transaction_helper(self) -> None:
+        """Stage the RAM-only journal engine before a persistent policy write."""
+
+        # Import lazily because installer owns package discovery and imports
+        # RouterClient for its transport type.
+        from .installer import RouterInstaller
+
+        RouterInstaller(self).ensure_hybrid_helper()
+
+    def _policy_identity_args(self) -> tuple[str, str, str]:
+        """Return exact runtime and RAM-helper identities required for a write."""
+
+        from .installer import RouterInstaller
+
+        installer = RouterInstaller(self)
+        return (
+            installer.expected_version,
+            installer.expected_package_md5,
+            installer.expected_hybrid_helper_md5,
         )
 
     def refresh(self) -> dict[str, Any]:
@@ -318,24 +525,75 @@ for key in static_leases dhcp_staticlist dhcpd_static lan_ifname; do
     nvram get "$key" | hexdump -v -e '1/1 "%02x"'
     printf '\\n'
 done
-"""
+        """
         return _parse_native_clients(self.run_script(script))
+
+    def nvram_get_exact(self, key: str) -> str:
+        """Read one text NVRAM value without dropping intrinsic final newlines."""
+
+        if not re.fullmatch(r"[A-Za-z0-9_]+", key):
+            raise ValueError(f"invalid NVRAM key: {key!r}")
+        script = f"""
+printf 'value\\t'
+nvram get {shlex.quote(key)} | hexdump -v -e '1/1 "%02x"'
+printf '\\n'
+"""
+        values = _decode_tagged_hex(self.run_script(script))
+        if "value" not in values:
+            raise RouterError("router omitted the requested NVRAM value")
+        return values["value"]
+
+    def nvram_is_set(self, key: str) -> bool:
+        """Distinguish an unset NVRAM key from one explicitly set to empty."""
+
+        if not re.fullmatch(r"[A-Za-z0-9_]+", key):
+            raise ValueError(f"invalid NVRAM key: {key!r}")
+        script = f"""
+if nvram show 2>/dev/null | grep -q '^{key}='; then
+    printf 'true\\n'
+else
+    printf 'false\\n'
+fi
+"""
+        value = self.run_script(script).strip()
+        if value not in {"true", "false"}:
+            raise RouterError("router returned an invalid NVRAM presence result")
+        return value == "true"
 
     def companion_presence(self) -> dict[str, Any]:
         """Inspect companion markers without starting, repairing, or installing it."""
-        script = """
-for key in astrill_lazy_installed astrill_lazy_version; do
+        script = (
+            """
+for key in astrill_lazy_installed astrill_lazy_version astrill_lazy_pkg_md5 \
+    astrill_lazy_bootstrap_md5 rc_startup mypage_scripts; do
     printf '%s\\t' "$key"
     nvram get "$key" | hexdump -v -e '1/1 "%02x"'
     printf '\\n'
 done
+"""
+            + _COMPANION_INTEGRITY_SHELL
+            + """
 [ -x /tmp/astrill-lazy/alctl ] && runtime=true || runtime=false
 printf 'runtime\\t%s\\n' "$runtime"
 """
-        values = _decode_tagged_hex(self.run_script(script), plain_tags={"runtime"})
+        )
+        values = _decode_tagged_hex(
+            self.run_script(script),
+            plain_tags={
+                "runtime",
+                "integrity:package",
+                "integrity:bootstrap",
+            },
+        )
         return {
             "installed": values.get("astrill_lazy_installed") == "1",
             "version": values.get("astrill_lazy_version") or None,
+            "package_md5": values.get("astrill_lazy_pkg_md5") or None,
+            "bootstrap_md5": values.get("astrill_lazy_bootstrap_md5") or None,
+            "rc_startup": values.get("rc_startup", ""),
+            "mypage_scripts": values.get("mypage_scripts", ""),
+            "package_integrity": values.get("integrity:package") == "true",
+            "bootstrap_integrity": values.get("integrity:bootstrap") == "true",
             "runtime": values.get("runtime") == "true",
         }
 
@@ -366,7 +624,8 @@ printf 'presence:runtime\\t%s\\n' "$companion_runtime"
 printf 'meta:wan_iface\\t'
 nvram get wan_iface | hexdump -v -e '1/1 "%02x"'
 printf '\\n'
-for key in astrill_lazy_installed astrill_lazy_version astrill_lazy_pkg_md5; do
+for key in astrill_lazy_installed astrill_lazy_version astrill_lazy_pkg_md5 \
+    astrill_lazy_bootstrap_md5 rc_startup mypage_scripts; do
     printf 'presence:%s\\t' "$key"
     nvram get "$key" | hexdump -v -e '1/1 "%02x"'
     printf '\\n'
@@ -376,14 +635,16 @@ for key in {keys}; do
     nvram get "$key" | hexdump -v -e '1/1 "%02x"'
     printf '\\n'
 done
-{companion_status}
 """
+        script = script + _COMPANION_INTEGRITY_SHELL + companion_status
         values = _decode_tagged_hex(
             self.run_script(script, timeout=30),
             plain_tags={
                 "meta:vpn_state",
                 "meta:applet",
                 "presence:runtime",
+                "integrity:package",
+                "integrity:bootstrap",
             },
         )
         required_meta = {
@@ -394,6 +655,11 @@ done
             "presence:astrill_lazy_installed",
             "presence:astrill_lazy_version",
             "presence:astrill_lazy_pkg_md5",
+            "presence:astrill_lazy_bootstrap_md5",
+            "presence:rc_startup",
+            "presence:mypage_scripts",
+            "integrity:package",
+            "integrity:bootstrap",
         }
         missing_meta = required_meta - values.keys()
         if missing_meta:
@@ -433,6 +699,13 @@ done
                 "version": values["presence:astrill_lazy_version"] or None,
                 "runtime": values["presence:runtime"] == "true",
                 "package_md5": values["presence:astrill_lazy_pkg_md5"] or None,
+                "bootstrap_md5": (
+                    values["presence:astrill_lazy_bootstrap_md5"] or None
+                ),
+                "rc_startup": values["presence:rc_startup"],
+                "mypage_scripts": values["presence:mypage_scripts"],
+                "package_integrity": values["integrity:package"] == "true",
+                "bootstrap_integrity": (values["integrity:bootstrap"] == "true"),
             },
             companion_status=parsed_companion,
         )
@@ -880,7 +1153,7 @@ def _validate_overlay_owner(value: str) -> str:
 
 def _validate_generation(value: int) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise ValueError("overlay generation must be a non-negative integer")
+        raise ValueError("policy generation must be a non-negative integer")
     return value
 
 

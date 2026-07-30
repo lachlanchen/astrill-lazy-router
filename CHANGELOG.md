@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.2.13 - 2026-07-30
+
+- Split router policy storage into a reboot-persistent compressed core and
+  owner-scoped RAM overlays. The router activates the verified core at boot,
+  while each paired Windows controller can restore only its own volatile
+  source-and-MAC-bound overlay.
+- Add strict generation checks, deterministic core-plus-overlay composition,
+  generated-match, memory, and duration admission limits, transactional chain
+  activation, verified persistent readback, and rollback that leaves the
+  previous effective policy active on failure.
+- Add a five-part Windows Policies workspace modeled on the Ubuntu app's
+  local-versus-router hierarchy: Local library, Persistent core, This
+  computer's RAM overlay, Other overlays, and Effective router.
+- Add explicit **Replace persistent core**, **Load into router RAM**,
+  one-shot restore, and owner-only remove actions. Volatile restoration is an
+  opt-in response to startup or network-change events and never uses recurring
+  router polling.
+- Bind the Windows deployment manifest to the trusted router, companion
+  version, controller identity, source address, MAC address, layer
+  generations, and content hashes so drift is surfaced instead of silently
+  overwritten.
+- Harden same-version upgrades with package-digest comparison, conservative
+  NVRAM-headroom preflight, verified bootstrap/status checks, and validated
+  captured-package restoration through the current serialized recovery path
+  after a failed install.
+- Store the normalized 6,502-byte bootstrap as a deterministic 2,560-byte
+  gzip/base64 payload. Hash the canonical encoded payload, decode and execute
+  the script derived from that same captured value. On the documented E4200
+  preflight snapshot, retain 3,512 bytes of projected live NVRAM after the
+  upgrade versus the 2,048-byte reserve.
+- Bind every core and overlay mutation to the expected running/stored package
+  and RAM-helper digests under one controller lock. Stage package replacement
+  away from the live runtime and serialize install/removal with policy writes.
+- Load large explicit overlays with bounded parallel DNS resolution and one
+  tested `iptables-restore --noflush` transaction on the inactive chain.
+  Reject unsafe chain references, restore runtime metadata on interruption,
+  and skip periodic overlay rebuilds while retaining core-only maintenance.
+
 ## 0.2.12 - 2026-07-30
 
 - Upgrade the router companion to `0.2.10` and replace the unsafe fixed
