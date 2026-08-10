@@ -260,6 +260,13 @@ available while a tunnel is degraded so cleanup cannot be trapped behind the
 failure it is trying to remove. Its managed connection window is 90 seconds,
 covering the measured favorite failover without allowing an unowned late
 tunnel.
+
+For a phone or another external LAN device, `device-flow` creates a separate
+RAM-only route bound to one exact IPv4 address and verified MAC address. It
+accepts explicit domains and TCP/UDP ports, rejects wildcard domains and broad
+source networks, and leaves this computer's traffic unchanged. See the
+[external-device flow guide](docs/EXTERNAL_DEVICE_FLOW.md).
+
 The optional macOS UU reporter registers only the signed app's persistent UDP
 media source port in a bounded transient companion chain; it does not exclude
 the Mac or route all of its UDP traffic directly.

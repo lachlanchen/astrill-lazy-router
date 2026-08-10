@@ -31,6 +31,25 @@ def test_fresh_read_only_config_blocks_mutating_cli_before_ssh(
     assert (
         main(
             [
+                "device-flow",
+                "set",
+                "--owner",
+                "test-phone",
+                "--source",
+                "192.168.1.132",
+                "--mac",
+                "aa:bb:cc:dd:ee:ff",
+                "--domain",
+                "play.googleapis.com",
+            ]
+        )
+        == 2
+    )
+    assert "read-only access blocks this command" in capsys.readouterr().err
+
+    assert (
+        main(
+            [
                 "app-flow",
                 "set",
                 "mac-uuremote",

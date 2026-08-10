@@ -15,6 +15,12 @@ from .autostart import (
 )
 from .catalog import Catalog, load_catalog
 from .compiler import compile_rules
+from .device_flow import (
+    DeviceFlowSpec,
+    put_device_flow,
+    remove_device_flow,
+    summarize_device_flow,
+)
 from .device_policy import (
     TrafficContext,
     compile_country_routes,
@@ -97,6 +103,34 @@ def build_parser() -> argparse.ArgumentParser:
         "delete", help="delete a source-port route"
     )
     delete_app_flow.add_argument("flow_id")
+
+    device_flow = subparsers.add_parser(
+        "device-flow",
+        help="manage a volatile domain route for one external LAN device",
+    )
+    device_flow_commands = device_flow.add_subparsers(
+        dest="device_flow_command", required=True
+    )
+    list_device_flows = device_flow_commands.add_parser(
+        "list", help="list source-scoped RAM overlays"
+    )
+    list_device_flows.add_argument("--owner")
+    set_device_flow = device_flow_commands.add_parser(
+        "set", help="set an exact-device, exact-domain volatile route"
+    )
+    set_device_flow.add_argument("--owner", required=True)
+    set_device_flow.add_argument("--source", required=True)
+    set_device_flow.add_argument("--mac", required=True)
+    set_device_flow.add_argument("--domain", action="append", required=True)
+    set_device_flow.add_argument(
+        "--protocol", action="append", choices=("tcp", "udp")
+    )
+    set_device_flow.add_argument("--port", type=int, default=443)
+    set_device_flow.add_argument("--target", choices=("direct", "vpn"), default="vpn")
+    remove_device_flow_parser = device_flow_commands.add_parser(
+        "delete", help="remove one owned volatile device route"
+    )
+    remove_device_flow_parser.add_argument("--owner", required=True)
 
     isolated_run = subparsers.add_parser(
         "isolated-run",
@@ -478,8 +512,13 @@ def main(argv: list[str] | None = None) -> int:
     mutating_app_flow = (
         arguments.command == "app-flow" and arguments.app_flow_command != "list"
     )
+    mutating_device_flow = (
+        arguments.command == "device-flow" and arguments.device_flow_command != "list"
+    )
     if store.read_only and (
-        arguments.command in mutating_commands or mutating_app_flow
+        arguments.command in mutating_commands
+        or mutating_app_flow
+        or mutating_device_flow
     ):
         print(
             "astrill-lazy: read-only access blocks this command; "
@@ -580,6 +619,59 @@ def main(argv: list[str] | None = None) -> int:
                 )
             elif arguments.app_flow_command == "delete":
                 _print_json(router.delete_app_flow(arguments.flow_id))
+        elif arguments.command == "device-flow":
+            if not store.companion_enabled:
+                raise RouterError("device-flow routes require the router companion")
+            if arguments.device_flow_command == "list":
+                status = router.effective_status()
+                if arguments.owner:
+                    overlays = [
+                        summarize_device_flow(status, arguments.owner.strip().casefold())
+                    ]
+                    overlays = [item for item in overlays if item is not None]
+                else:
+                    overlays = [
+                        summarize_device_flow(status, str(item.get("owner", "")))
+                        for item in status.get("overlays", [])
+                        if isinstance(item, dict)
+                    ]
+                    overlays = [item for item in overlays if item is not None]
+                _print_json({"ok": True, "temporary": True, "overlays": overlays})
+            elif arguments.device_flow_command == "set":
+                spec = DeviceFlowSpec.create(
+                    owner=arguments.owner,
+                    source=arguments.source,
+                    mac=arguments.mac,
+                    domains=arguments.domain,
+                    target=arguments.target,
+                    protocols=arguments.protocol,
+                    port=arguments.port,
+                )
+                status = put_device_flow(router, spec, load_catalog())
+                _print_json(
+                    {
+                        "ok": True,
+                        "temporary": True,
+                        "domains": list(spec.domains),
+                        "protocols": [item.value for item in spec.protocols],
+                        "port": spec.port,
+                        "target": spec.target.value,
+                        "overlay": summarize_device_flow(status, spec.owner),
+                    }
+                )
+            elif arguments.device_flow_command == "delete":
+                removed, status = remove_device_flow(router, arguments.owner)
+                _print_json(
+                    {
+                        "ok": True,
+                        "temporary": True,
+                        "owner": arguments.owner.strip().casefold(),
+                        "removed": removed,
+                        "remaining": summarize_device_flow(
+                            status, arguments.owner.strip().casefold()
+                        ),
+                    }
+                )
         elif arguments.command == "isolated-run":
             if not store.companion_enabled:
                 raise RouterError("isolated-run requires the router companion")
