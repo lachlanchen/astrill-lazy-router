@@ -208,6 +208,74 @@ printf 'ready\n'
     assert result.stdout == "ready\n"
 
 
+def test_vpn_gateway_uses_current_astrill_native_policy_table(
+    tmp_path: Path,
+) -> None:
+    result = _run_scenario(
+        tmp_path,
+        r"""
+ip() {
+    if [ "$1" = rule ] && [ "$2" = show ]; then
+        cat <<'EOF'
+0: from all lookup local
+32764: from all fwmark 0x1000000/0x3000000 lookup 113
+32766: from all lookup main
+EOF
+        return 0
+    fi
+    if [ "$1" = route ] && [ "$2" = show ] && [ "$3" = table ]; then
+        case "$4" in
+            main) printf '198.18.0.0/20 dev tun0 scope link\n' ;;
+            113) printf 'default via 198.18.0.1 dev tun0 metric 5\n' ;;
+        esac
+        return 0
+    fi
+    return 1
+}
+[ "$(vpn_gateway_for_tun)" = '198.18.0.1' ] || exit 8
+printf 'native-route-ready\n'
+""",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "native-route-ready\n"
+
+
+def test_app_flow_delete_does_not_depend_on_vpn_route_health(
+    tmp_path: Path,
+) -> None:
+    result = _run_scenario(
+        tmp_path,
+        r"""
+cat > "$APP_FLOWS" <<'EOF'
+first	192.168.1.240	tcp	1024:65535	vpn
+second	192.168.1.241	udp	443	vpn
+EOF
+ensure_routes() {
+    printf 'called\n' > "$BASE/ensure-routes-called"
+    return 1
+}
+build_app_chain() {
+    cp "$1" "$BASE/built-app-chain"
+}
+ensure_app_jump() {
+    return 0
+}
+cleanup_app_chain() {
+    return 0
+}
+transform_app_flow delete first || exit 8
+[ ! -f "$BASE/ensure-routes-called" ] || exit 9
+grep -q '^second' "$APP_FLOWS" || exit 10
+grep -q '^first' "$APP_FLOWS" && exit 11
+printf 'delete-ready\n'
+""",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "delete-ready\n"
+
+
 def test_unmanaged_native_undercut_sets_marker_without_priority_walk(
     tmp_path: Path,
 ) -> None:

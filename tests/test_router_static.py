@@ -439,7 +439,7 @@ def test_policy_controller_never_evaluates_rule_content() -> None:
     assert "VPN_PREF=" not in controller
     assert "WATCHDOG_INTERVAL=60" in controller
     assert "WATCHDOG_REFRESH_CYCLES=30" in controller
-    assert "ASTRILL_CONNECT_ATTEMPTS=60" in controller
+    assert "ASTRILL_CONNECT_ATTEMPTS=90" in controller
     assert "MAX_RULE_BYTES=6144" in controller
     assert "MIN_NVRAM_FREE_BYTES=2048" in controller
     assert "CURRENT_RULES_GZ_KEY=astrill_lazy_rules_gz" in controller
@@ -820,3 +820,30 @@ def test_router_clients_merge_lan_sources_and_exclude_wan(tmp_path: Path) -> Non
     assert by_mac["aa:bb:cc:dd:ee:02"]["active"] is False
     assert by_mac["aa:bb:cc:dd:ee:03"]["source"] == "arp"
     assert by_mac["aa:bb:cc:dd:ee:03"]["active"] is True
+
+
+def test_namespace_helper_executes_as_the_desktop_user_and_kills_stale_tasks() -> None:
+    helper = (ROOT / "helpers" / "astrill-lazy-netns").read_text(encoding="ascii")
+    assert "execute_profile()" in helper
+    assert 'runuser -u "$username" -- env -i' in helper
+    assert "case $working_dir in /*)" in helper
+    assert "case $executable in /*)" in helper
+    assert "command user does not match the invoking desktop user" in helper
+    assert 'ip netns pids "$namespace"' in helper
+    assert "for profile_pid in $profile_pids" in helper
+    assert 'is_uint "$profile_pid"' in helper
+    assert 'kill -KILL "$profile_pid"' in helper
+    assert "application network profile could not be removed" in helper
+
+
+def test_transient_flow_deletion_remains_available_while_vpn_is_degraded() -> None:
+    controller = (ROOT / "router" / "alctl").read_text(encoding="ascii")
+    delete_branch = re.search(
+        r"delete\)\n(?P<body>.*?)\n\s*\;\;",
+        controller[controller.index("    app-flow)") :],
+        re.DOTALL,
+    )
+    assert delete_branch is not None
+    assert "transform_app_flow delete" in delete_branch["body"]
+    assert "ensure_runtime" not in delete_branch["body"]
+    assert 'if [ "$operation" = set ]; then' in controller

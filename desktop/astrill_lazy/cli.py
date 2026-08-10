@@ -24,6 +24,7 @@ from .device_policy import (
 )
 from .host_key import inspect_host_key
 from .installer import RouterInstaller
+from .isolated_run import IsolatedRunError, run_isolated_command
 from .policy_bundle import (
     PolicyBundleDownload,
     apply_policy_bundle,
@@ -96,6 +97,31 @@ def build_parser() -> argparse.ArgumentParser:
         "delete", help="delete a source-port route"
     )
     delete_app_flow.add_argument("flow_id")
+
+    isolated_run = subparsers.add_parser(
+        "isolated-run",
+        help="run one command through a disposable Astrill network identity",
+    )
+    isolated_run.add_argument("--profile", default="taskvpn")
+    isolated_run.add_argument("--interface", default=None)
+    isolated_run.add_argument(
+        "--allow-domain",
+        action="append",
+        required=True,
+        help="allow one destination domain; repeat for additional domains",
+    )
+    isolated_run.add_argument(
+        "--allow-port",
+        action="append",
+        type=int,
+        default=None,
+        help="allow one destination TCP port; defaults to 443",
+    )
+    isolated_run.add_argument(
+        "command_args",
+        nargs=argparse.REMAINDER,
+        metavar="-- COMMAND [ARG ...]",
+    )
 
     device_policy = subparsers.add_parser(
         "device-policy",
@@ -447,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         "install-router",
         "uninstall-router",
         "switch",
+        "isolated-run",
     }
     mutating_app_flow = (
         arguments.command == "app-flow" and arguments.app_flow_command != "list"
@@ -553,6 +580,17 @@ def main(argv: list[str] | None = None) -> int:
                 )
             elif arguments.app_flow_command == "delete":
                 _print_json(router.delete_app_flow(arguments.flow_id))
+        elif arguments.command == "isolated-run":
+            if not store.companion_enabled:
+                raise RouterError("isolated-run requires the router companion")
+            return run_isolated_command(
+                router,
+                arguments.command_args,
+                profile=arguments.profile,
+                parent_interface=arguments.interface,
+                allowed_domains=arguments.allow_domain,
+                allowed_ports=arguments.allow_port or (443,),
+            )
         elif arguments.command == "install-router":
             result = RouterInstaller(router).install()
             store.companion_enabled = True
@@ -606,7 +644,7 @@ def main(argv: list[str] | None = None) -> int:
                 vpn_mode=endpoint.vpn_mode_for(protocol),
             )
             _print_json(result)
-    except (RouterError, OSError, ValueError) as exc:
+    except (IsolatedRunError, RouterError, OSError, ValueError) as exc:
         print(f"astrill-lazy: {exc}", file=sys.stderr)
         return 1
     return 0

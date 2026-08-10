@@ -42,6 +42,17 @@ valid_ipv4() {
     '
 }
 
+valid_port_list() {
+    printf '%s\n' "${1:-}" | awk -F, '
+        NF < 1 || NF > 8 { exit 1 }
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i !~ /^[0-9]+$/ || $i < 1 || $i > 65535) exit 1
+            }
+        }
+    '
+}
+
 profile_mac() {
     profile=$1
     checksum=$(printf '%s' "$profile" | cksum | awk '{ print $1 }')
@@ -147,10 +158,114 @@ cleanup_profile() {
     if [ "$pid" -gt 1 ]; then
         kill "$pid" 2>/dev/null || true
     fi
+    if ip netns list | awk '{print $1}' | grep -Fxq "$namespace"; then
+        profile_pids=$(ip netns pids "$namespace" 2>/dev/null || true)
+        if [ -n "$profile_pids" ]; then
+            for profile_pid in $profile_pids; do
+                if is_uint "$profile_pid"; then
+                    kill "$profile_pid" 2>/dev/null || true
+                fi
+            done
+            sleep 1
+            profile_pids=$(ip netns pids "$namespace" 2>/dev/null || true)
+            for profile_pid in $profile_pids; do
+                if is_uint "$profile_pid"; then
+                    kill -KILL "$profile_pid" 2>/dev/null || true
+                fi
+            done
+        fi
+    fi
     ip netns delete "$namespace" 2>/dev/null || true
     rm -f "$(state_file_for "$profile")" "$pid_file"
     rm -f "/etc/netns/$namespace/resolv.conf"
     rmdir "/etc/netns/$namespace" 2>/dev/null || true
+    if ip netns list | awk '{print $1}' | grep -Fxq "$namespace"; then
+        fail "application network profile could not be removed"
+    fi
+}
+
+restrict_profile() {
+    profile=${1:-}
+    ports=${2:-}
+    shift 2
+    valid_profile "$profile" || fail "invalid profile"
+    valid_port_list "$ports" || fail "invalid allowed TCP ports"
+    if [ "$#" -lt 1 ] || [ "$#" -gt 64 ]; then
+        fail "one to 64 allowed IPv4 destinations are required"
+    fi
+    namespace=$(namespace_for "$profile")
+    ip netns list | awk '{print $1}' | grep -Fxq "$namespace" ||
+        fail "application network profile is not prepared"
+    command -v iptables >/dev/null 2>&1 || fail "iptables is unavailable"
+
+    for address in "$@"; do
+        valid_ipv4 "$address" || fail "invalid allowed IPv4 destination"
+    done
+    dns_servers=$(awk '$1 == "nameserver" { print $2 }' \
+        "/etc/netns/$namespace/resolv.conf" 2>/dev/null || true)
+    [ -n "$dns_servers" ] || fail "profile DNS is unavailable"
+    for server in $dns_servers; do
+        valid_ipv4 "$server" || fail "profile DNS contains an invalid IPv4 address"
+    done
+
+    ip netns exec "$namespace" iptables -w 5 -P OUTPUT ACCEPT
+    ip netns exec "$namespace" iptables -w 5 -F OUTPUT
+    ip netns exec "$namespace" iptables -w 5 -A OUTPUT -o lo -j ACCEPT
+    ip netns exec "$namespace" iptables -w 5 -A OUTPUT \
+        -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    ip netns exec "$namespace" iptables -w 5 -A OUTPUT \
+        -p udp --sport 68 --dport 67 -j ACCEPT
+    for server in $dns_servers; do
+        ip netns exec "$namespace" iptables -w 5 -A OUTPUT \
+            -d "$server" -p udp --dport 53 -j ACCEPT
+        ip netns exec "$namespace" iptables -w 5 -A OUTPUT \
+            -d "$server" -p tcp --dport 53 -j ACCEPT
+    done
+    old_ifs=$IFS
+    IFS=,
+    for address in "$@"; do
+        for port in $ports; do
+            ip netns exec "$namespace" iptables -w 5 -A OUTPUT \
+                -d "$address" -p tcp --dport "$port" -j ACCEPT
+        done
+    done
+    IFS=$old_ifs
+    ip netns exec "$namespace" iptables -w 5 -P OUTPUT DROP
+    ip netns exec "$namespace" iptables -w 5 -S OUTPUT |
+        grep -Fxq -- '-P OUTPUT DROP' || fail "could not restrict profile egress"
+}
+
+execute_profile() {
+    profile=${1:-}
+    user_id=${2:-}
+    working_dir=${3:-}
+    executable=${4:-}
+    shift 4
+    valid_profile "$profile" || fail "invalid profile"
+    if ! is_uint "$user_id" || [ "$user_id" -lt 1000 ]; then
+        fail "invalid desktop user"
+    fi
+    if ! is_uint "${SUDO_UID:-}" || [ "$SUDO_UID" -lt 1000 ] ||
+        [ "$user_id" -ne "$SUDO_UID" ]; then
+        fail "command user does not match the invoking desktop user"
+    fi
+    case $working_dir in /*) ;; *) fail "working directory must be absolute" ;; esac
+    [ -d "$working_dir" ] || fail "working directory does not exist"
+    case $executable in /*) ;; *) fail "executable path must be absolute" ;; esac
+    [ -x "$executable" ] || fail "application is not executable: $executable"
+    namespace=$(namespace_for "$profile")
+    ip netns list | awk '{print $1}' | grep -Fxq "$namespace" ||
+        fail "application network profile is not prepared"
+
+    account=$(getent passwd "$user_id" | head -n 1)
+    [ -n "$account" ] || fail "desktop user was not found"
+    username=$(printf '%s\n' "$account" | cut -d: -f1)
+    home=$(printf '%s\n' "$account" | cut -d: -f6)
+    cd "$working_dir"
+    exec ip netns exec "$namespace" runuser -u "$username" -- env -i \
+        "HOME=$home" "USER=$username" "LOGNAME=$username" \
+        "PATH=/usr/local/bin:/usr/bin:/bin" "LANG=C.UTF-8" \
+        "$executable" "$@"
 }
 
 dhcp_hook() {
@@ -311,11 +426,13 @@ fi
 case $command in
     prepare) prepare_profile "$@" ;;
     launch) launch_profile "$@" ;;
+    restrict) restrict_profile "$@" ;;
+    execute) execute_profile "$@" ;;
     cleanup)
         valid_profile "${1:-}" || fail "invalid profile"
         cleanup_profile "$1"
         ;;
     dhcp-hook) dhcp_hook "$@" ;;
     deconfig|bound|renew) dhcp_hook "$command" ;;
-    *) fail "usage: astrill-lazy-netns identity|prepare|launch|cleanup ..." ;;
+    *) fail "usage: astrill-lazy-netns identity|prepare|launch|restrict|execute|cleanup ..." ;;
 esac

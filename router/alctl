@@ -44,7 +44,7 @@ ASTRILL_NATIVE_STABLE_ATTEMPTS=12
 ASTRILL_NATIVE_STABLE_SAMPLES=2
 WATCHDOG_INTERVAL=60
 WATCHDOG_REFRESH_CYCLES=30
-ASTRILL_CONNECT_ATTEMPTS=60
+ASTRILL_CONNECT_ATTEMPTS=90
 MAX_RULE_BYTES=6144
 MAX_APP_FLOW_BYTES=1024
 MAX_APP_FLOWS=16
@@ -836,8 +836,11 @@ ensure_app_runtime() {
 
 apply_app_flow_file() {
     candidate=$1
+    operation=${2:-set}
     validate_app_flows "$candidate" || return 1
-    ensure_routes || return 1
+    if [ "$operation" = set ]; then
+        ensure_routes || return 1
+    fi
     previous=$BASE/app-flows.previous.tsv
     cp "$APP_FLOWS" "$previous" || return 1
     if [ -s "$candidate" ]; then
@@ -894,7 +897,7 @@ transform_app_flow() {
         *) fail "unknown application flow operation" ;;
     esac
 
-    apply_app_flow_file "$candidate" ||
+    apply_app_flow_file "$candidate" "$operation" ||
         fail "could not activate application flow"
     rm -f "$candidate"
 }
@@ -1141,8 +1144,15 @@ normalize_route_output() {
 }
 
 vpn_gateway_for_tun() {
-    ip route show table main | awk '
-        $1 == "0.0.0.0/1" && $0 ~ / dev tun0/ { print $3; exit }
+    {
+        ip route show table main 2>/dev/null
+        for table in 110 111 112 113 114; do
+            ip route show table "$table" 2>/dev/null
+        done
+    } | awk '
+        ($1 == "0.0.0.0/1" || $1 == "default") && $0 ~ / dev tun0/ {
+            for (i = 1; i <= NF; i++) if ($i == "via") { print $(i + 1); exit }
+        }
     '
 }
 
@@ -2644,7 +2654,6 @@ case $command in
                 ;;
             delete)
                 acquire_lock
-                ensure_runtime || fail "could not repair policy runtime"
                 transform_app_flow delete "${3:-}"
                 log_message INFO "deleted transient application flow ${3:-}"
                 app_flows_json

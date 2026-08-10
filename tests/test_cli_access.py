@@ -43,3 +43,17 @@ def test_fresh_read_only_config_blocks_mutating_cli_before_ssh(
         == 2
     )
     assert "read-only access blocks this command" in capsys.readouterr().err
+
+    assert (
+        main(
+            [
+                "isolated-run",
+                "--allow-domain",
+                "example.com",
+                "--",
+                "/bin/true",
+            ]
+        )
+        == 2
+    )
+    assert "read-only access blocks this command" in capsys.readouterr().err

@@ -233,6 +233,33 @@ reload conflict is shown instead of silently replacing them.
 The companion merges DHCP leases, static reservations, and active LAN
 neighbors. Ubuntu application profiles use a validated Polkit helper and a
 macvlan network namespace to obtain an independent router-visible identity.
+For a bounded download, provider API call, or other terminal task, use the
+same isolation without changing the host-wide route:
+
+```bash
+astrill-lazy access read-write
+astrill-lazy isolated-run \
+  --allow-domain example.com \
+  -- curl -fLO https://example.com/file
+```
+
+`isolated-run` resolves every explicitly allowed domain before changing the
+router, allocates a disposable namespace, and permits only those IPv4
+destinations on the selected TCP ports (`443` by default). It verifies that the
+ordinary host is Direct in native Astrill policy and installs temporary TCP and
+UDP Direct guards for that host before the task receives its source-scoped TCP
+VPN flow. It preserves an already connected Astrill tunnel and removes the
+namespace, firewall, and flows when the command exits. When it connected
+Astrill itself, it disconnects only after cleanup succeeds. Repeat
+`--allow-domain` or `--allow-port` only for destinations the task actually
+needs. Domain limits are enforced by resolved IPv4 destination, so shared CDN
+addresses remain an IP-layer boundary rather than an HTTP hostname boundary.
+Companion `0.2.14` derives its VPN route from either Astrill's legacy split
+default or its active native policy table, and transient flow deletion remains
+available while a tunnel is degraded so cleanup cannot be trapped behind the
+failure it is trying to remove. Its managed connection window is 90 seconds,
+covering the measured favorite failover without allowing an unowned late
+tunnel.
 The optional macOS UU reporter registers only the signed app's persistent UDP
 media source port in a bounded transient companion chain; it does not exclude
 the Mac or route all of its UDP traffic directly.

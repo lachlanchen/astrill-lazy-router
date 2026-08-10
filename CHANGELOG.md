@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add `isolated-run` for one bounded command in a disposable Linux network
+  namespace. It requires an explicit destination-domain allowlist, restricts
+  namespace TCP egress to resolved IPv4 destinations and ports, verifies the
+  native host route is Direct, pins ordinary host TCP/UDP Direct while active,
+  and restores the prior Astrill connection state.
+- Upgrade the router companion to `0.2.14`. It recognizes both legacy split
+  defaults and Astrill native policy tables, keeps VPN traffic fail-closed, and
+  permits transient-flow deletion during degraded tunnel cleanup. A bounded
+  90-second connect window covers the observed favorite failover latency.
+
 ## 0.3.0 - 2026-07-31
 
 - Preserve the known stable `0.2.13` application state as immutable tag
