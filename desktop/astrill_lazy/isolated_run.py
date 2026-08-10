@@ -24,8 +24,11 @@ DEFAULT_HELPER = Path("/usr/local/libexec/astrill-lazy-netns")
 SOURCE_PORTS = "1024:65535"
 MAX_ALLOWED_DOMAINS = 16
 MAX_ALLOWED_PORTS = 8
+MAX_ALLOWED_ADDRESSES = 64
+MAX_DNS_SERVERS = 3
 CLEANUP_RETRY_ATTEMPTS = 6
 CLEANUP_RETRY_DELAY_SECONDS = 2.0
+DIG = Path("/usr/bin/dig")
 
 
 class IsolatedRunError(RuntimeError):
@@ -64,6 +67,7 @@ def run_isolated_command(
     helper: Path = DEFAULT_HELPER,
     allowed_domains: Sequence[str] = (),
     allowed_ports: Sequence[int] = (443,),
+    dns_servers: Sequence[str] = (),
 ) -> int:
     """Run one destination-limited TCP command behind Astrill.
 
@@ -93,9 +97,18 @@ def run_isolated_command(
     if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,15}", interface):
         raise IsolatedRunError("parent interface is invalid")
     host_address, host_mac = _interface_identity(interface)
-    normalized_domains, allowed_addresses = _resolve_allowed_domains(
-        allowed_domains
-    )
+    normalized_dns_servers = _normalize_dns_servers(dns_servers)
+    pinned_hosts: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    if normalized_dns_servers:
+        normalized_domains, pinned_hosts = _resolve_allowed_domain_map(
+            allowed_domains,
+            dns_servers=normalized_dns_servers,
+        )
+        allowed_addresses = _flatten_domain_addresses(pinned_hosts)
+    else:
+        normalized_domains, allowed_addresses = _resolve_allowed_domains(
+            allowed_domains
+        )
     normalized_ports = _normalize_allowed_ports(allowed_ports)
 
     host_flow_ids = [
@@ -115,8 +128,15 @@ def run_isolated_command(
         command_returncode: int | None = None
         try:
             namespace_prepared = True
-            namespace = _prepare_namespace(helper, normalized_profile, interface)
+            namespace = _prepare_namespace(
+                helper,
+                normalized_profile,
+                interface,
+                normalized_dns_servers,
+            )
             source = namespace["address"]
+            if pinned_hosts:
+                _pin_namespace_hosts(helper, normalized_profile, pinned_hosts)
 
             installed_flows.append(host_flow_ids[0])
             _set_flow_verified(
@@ -311,7 +331,21 @@ def _interface_identity(interface: str) -> tuple[str, str]:
 
 def _resolve_allowed_domains(
     domains: Sequence[str],
+    *,
+    dns_servers: Sequence[str] = (),
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    normalized, domain_addresses = _resolve_allowed_domain_map(
+        domains,
+        dns_servers=dns_servers,
+    )
+    return normalized, _flatten_domain_addresses(domain_addresses)
+
+
+def _resolve_allowed_domain_map(
+    domains: Sequence[str],
+    *,
+    dns_servers: Sequence[str] = (),
+) -> tuple[tuple[str, ...], tuple[tuple[str, tuple[str, ...]], ...]]:
     normalized: list[str] = []
     for value in domains:
         candidate = value.strip().rstrip(".")
@@ -330,29 +364,124 @@ def _resolve_allowed_domains(
             f"isolated-run supports at most {MAX_ALLOWED_DOMAINS} allowed domains"
         )
 
-    addresses: set[str] = set()
+    normalized_dns_servers = _normalize_dns_servers(dns_servers)
+    resolved: list[tuple[str, tuple[str, ...]]] = []
     for domain in normalized:
-        try:
-            records = socket.getaddrinfo(
+        if normalized_dns_servers:
+            domain_addresses = _resolve_domain_with_dns(
                 domain,
-                443,
-                family=socket.AF_INET,
-                type=socket.SOCK_STREAM,
-                proto=socket.IPPROTO_TCP,
+                normalized_dns_servers,
             )
-        except socket.gaierror as exc:
-            raise IsolatedRunError(
-                f"could not resolve allowed domain before routing: {domain}"
-            ) from exc
-        domain_addresses = {
-            str(ipaddress.ip_address(record[4][0]))
-            for record in records
-            if record[0] == socket.AF_INET
-        }
+        else:
+            try:
+                records = socket.getaddrinfo(
+                    domain,
+                    443,
+                    family=socket.AF_INET,
+                    type=socket.SOCK_STREAM,
+                    proto=socket.IPPROTO_TCP,
+                )
+            except socket.gaierror as exc:
+                raise IsolatedRunError(
+                    f"could not resolve allowed domain before routing: {domain}"
+                ) from exc
+            domain_addresses = {
+                str(ipaddress.ip_address(record[4][0]))
+                for record in records
+                if record[0] == socket.AF_INET
+            }
         if not domain_addresses:
             raise IsolatedRunError(f"allowed domain has no IPv4 address: {domain}")
-        addresses.update(domain_addresses)
-    return tuple(normalized), tuple(sorted(addresses, key=ipaddress.ip_address))
+        resolved.append(
+            (
+                domain,
+                tuple(sorted(domain_addresses, key=ipaddress.ip_address)),
+            )
+        )
+    return tuple(normalized), tuple(resolved)
+
+
+def _flatten_domain_addresses(
+    domain_addresses: Sequence[tuple[str, Sequence[str]]],
+) -> tuple[str, ...]:
+    addresses = {
+        address
+        for _domain, resolved_addresses in domain_addresses
+        for address in resolved_addresses
+    }
+    if len(addresses) > MAX_ALLOWED_ADDRESSES:
+        raise IsolatedRunError(
+            f"isolated-run supports at most {MAX_ALLOWED_ADDRESSES} allowed addresses"
+        )
+    return tuple(sorted(addresses, key=ipaddress.ip_address))
+
+
+def _normalize_dns_servers(servers: Sequence[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for value in servers:
+        try:
+            address = ipaddress.ip_address(value.strip())
+        except ValueError as exc:
+            raise IsolatedRunError(f"DNS server is not a valid IPv4 address: {value!r}") from exc
+        if (
+            address.version != 4
+            or address.is_unspecified
+            or address.is_multicast
+            or address.is_loopback
+            or address.is_link_local
+        ):
+            raise IsolatedRunError(f"DNS server is not a usable IPv4 address: {value!r}")
+        rendered = str(address)
+        if rendered not in normalized:
+            normalized.append(rendered)
+    if len(normalized) > MAX_DNS_SERVERS:
+        raise IsolatedRunError(
+            f"isolated-run supports at most {MAX_DNS_SERVERS} DNS servers"
+        )
+    return tuple(normalized)
+
+
+def _resolve_domain_with_dns(
+    domain: str,
+    dns_servers: Sequence[str],
+) -> set[str]:
+    if not DIG.is_file() or not os.access(DIG, os.X_OK):
+        raise IsolatedRunError("explicit DNS resolution requires /usr/bin/dig")
+    addresses: set[str] = set()
+    for server in dns_servers:
+        try:
+            completed = subprocess.run(
+                [
+                    str(DIG),
+                    "+time=3",
+                    "+tries=1",
+                    "+short",
+                    "A",
+                    domain,
+                    f"@{server}",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+            )
+        except subprocess.TimeoutExpired:
+            continue
+        if completed.returncode != 0:
+            continue
+        for line in completed.stdout.splitlines():
+            try:
+                address = ipaddress.ip_address(line.strip())
+            except ValueError:
+                continue
+            if address.version == 4:
+                addresses.add(str(address))
+    if not addresses:
+        raise IsolatedRunError(
+            f"could not resolve allowed domain through explicit DNS: {domain}"
+        )
+    return addresses
 
 
 def _normalize_allowed_ports(ports: Sequence[int]) -> tuple[int, ...]:
@@ -389,8 +518,19 @@ def _verify_native_host_is_direct(
         )
 
 
-def _prepare_namespace(helper: Path, profile: str, interface: str) -> dict[str, str]:
-    completed = _run_helper(helper, "prepare", profile, interface)
+def _prepare_namespace(
+    helper: Path,
+    profile: str,
+    interface: str,
+    dns_servers: Sequence[str] = (),
+) -> dict[str, str]:
+    completed = _run_helper(
+        helper,
+        "prepare",
+        profile,
+        interface,
+        profile_dns=" ".join(dns_servers),
+    )
     try:
         document = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
@@ -428,14 +568,38 @@ def _restrict_namespace(
     )
 
 
-def _run_helper(helper: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def _pin_namespace_hosts(
+    helper: Path,
+    profile: str,
+    domain_addresses: Sequence[tuple[str, Sequence[str]]],
+) -> None:
+    arguments: list[str] = []
+    for domain, addresses in domain_addresses:
+        for address in addresses:
+            arguments.extend((domain, address))
+    _run_helper(helper, "pin-hosts", profile, *arguments)
+
+
+def _run_helper(
+    helper: Path,
+    *arguments: str,
+    profile_dns: str = "",
+) -> subprocess.CompletedProcess[str]:
+    command = ["/usr/bin/sudo", "-n"]
+    environment = None
+    if profile_dns:
+        command.append("--preserve-env=ASTRILL_LAZY_PROFILE_DNS")
+        environment = os.environ.copy()
+        environment["ASTRILL_LAZY_PROFILE_DNS"] = profile_dns
+    command.extend((str(helper), *arguments))
     try:
         completed = subprocess.run(
-            ["/usr/bin/sudo", "-n", str(helper), *arguments],
+            command,
             check=False,
             capture_output=True,
             text=True,
             timeout=35,
+            env=environment,
         )
     except subprocess.TimeoutExpired as exc:
         raise IsolatedRunError("network namespace helper timed out") from exc

@@ -152,6 +152,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="allow one destination TCP port; defaults to 443",
     )
     isolated_run.add_argument(
+        "--dns-server",
+        action="append",
+        default=None,
+        help=(
+            "resolve and use one explicit IPv4 DNS server inside the namespace; "
+            "repeat for up to three servers"
+        ),
+    )
+    isolated_run.add_argument(
         "command_args",
         nargs=argparse.REMAINDER,
         metavar="-- COMMAND [ARG ...]",
@@ -682,6 +691,7 @@ def main(argv: list[str] | None = None) -> int:
                 parent_interface=arguments.interface,
                 allowed_domains=arguments.allow_domain,
                 allowed_ports=arguments.allow_port or (443,),
+                dns_servers=arguments.dns_server or (),
             )
         elif arguments.command == "install-router":
             result = RouterInstaller(router).install()

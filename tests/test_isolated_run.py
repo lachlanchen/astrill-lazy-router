@@ -9,6 +9,9 @@ import pytest
 from astrill_lazy.isolated_run import (
     IsolatedRunError,
     _interface_identity,
+    _normalize_dns_servers,
+    _resolve_allowed_domain_map,
+    _resolve_allowed_domains,
     run_isolated_command,
 )
 from astrill_lazy.native_settings import NativeAstrillSettings
@@ -150,6 +153,128 @@ def test_interface_identity_rejects_missing_link_identity(
 
     with pytest.raises(IsolatedRunError, match="Ethernet identity"):
         _interface_identity("enp0s31f6")
+
+
+def test_explicit_dns_resolution_unions_valid_ipv4_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(arguments)
+        output = (
+            "example.com.\n93.184.216.34\n"
+            if "@1.1.1.1" in arguments
+            else "93.184.216.35\n"
+        )
+        return subprocess.CompletedProcess(arguments, 0, output, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert _resolve_allowed_domains(
+        ("Example.COM",),
+        dns_servers=("1.1.1.1", "8.8.8.8"),
+    ) == (
+        ("example.com",),
+        ("93.184.216.34", "93.184.216.35"),
+    )
+    assert calls == [
+        [
+            "/usr/bin/dig",
+            "+time=3",
+            "+tries=1",
+            "+short",
+            "A",
+            "example.com",
+            "@1.1.1.1",
+        ],
+        [
+            "/usr/bin/dig",
+            "+time=3",
+            "+tries=1",
+            "+short",
+            "A",
+            "example.com",
+            "@8.8.8.8",
+        ],
+    ]
+    assert _resolve_allowed_domain_map(
+        ("Example.COM",),
+        dns_servers=("1.1.1.1", "8.8.8.8"),
+    ) == (
+        ("example.com",),
+        (("example.com", ("93.184.216.34", "93.184.216.35")),),
+    )
+
+
+def test_explicit_dns_servers_are_bounded_and_safe() -> None:
+    assert _normalize_dns_servers(("1.1.1.1", "1.1.1.1", "8.8.8.8")) == (
+        "1.1.1.1",
+        "8.8.8.8",
+    )
+    with pytest.raises(IsolatedRunError, match="usable IPv4"):
+        _normalize_dns_servers(("127.0.0.1",))
+    with pytest.raises(IsolatedRunError, match="at most 3"):
+        _normalize_dns_servers(("1.1.1.1", "8.8.8.8", "9.9.9.9", "208.67.222.222"))
+
+
+def test_explicit_dns_is_preserved_only_for_namespace_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    helper = tmp_path / "astrill-lazy-netns"
+    helper.write_text("#!/bin/sh\n", encoding="ascii")
+    helper.chmod(0o755)
+    router = FakeRouter(connected=True)
+    prepare_seen = False
+    pin_seen = False
+
+    def run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal pin_seen, prepare_seen
+        if "prepare" in arguments:
+            prepare_seen = True
+            assert "--preserve-env=ASTRILL_LAZY_PROFILE_DNS" in arguments
+            assert kwargs["env"]["ASTRILL_LAZY_PROFILE_DNS"] == "1.1.1.1 8.8.8.8"
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                '{"profile":"taskvpn","namespace":"al-taskvpn",'
+                '"address":"192.168.1.244"}',
+                "",
+            )
+        if "pin-hosts" in arguments:
+            pin_seen = True
+            assert arguments[-2:] == ["example.com", "93.184.216.34"]
+        if "execute" in arguments:
+            assert "--preserve-env=ASTRILL_LAZY_PROFILE_DNS" not in arguments
+            assert kwargs.get("env") is None
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(os, "getuid", lambda: 1000)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "astrill_lazy.isolated_run._interface_identity",
+        lambda _interface: ("192.168.1.100", "d0:8e:79:0d:26:99"),
+    )
+    monkeypatch.setattr(
+        "astrill_lazy.isolated_run._resolve_allowed_domain_map",
+        lambda _domains, *, dns_servers: (
+            ("example.com",),
+            (("example.com", ("93.184.216.34",)),),
+        ),
+    )
+
+    assert run_isolated_command(
+        router,
+        ["/bin/true"],
+        helper=helper,
+        parent_interface="eth0",
+        allowed_domains=("example.com",),
+        dns_servers=("1.1.1.1", "8.8.8.8"),
+    ) == 0
+    assert prepare_seen is True
+    assert pin_seen is True
+    assert router.flows == []
 
 
 def test_isolated_run_scopes_flows_and_restores_disconnected_state(

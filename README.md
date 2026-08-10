@@ -261,6 +261,25 @@ failure it is trying to remove. Its managed connection window is 90 seconds,
 covering the measured favorite failover without allowing an unowned late
 tunnel.
 
+If the LAN resolver returns a blocked or poisoned answer, pin one or more
+explicit IPv4 resolvers for that task. The same resolver list is installed only
+inside the disposable namespace, and the destination allowlist is built from
+the union of those exact A records. Those records are also pinned in the
+namespace's private hosts file so the application and firewall use one
+deterministic mapping:
+
+```bash
+astrill-lazy isolated-run \
+  --dns-server 1.1.1.1 \
+  --dns-server 8.8.8.8 \
+  --allow-domain oauth2.googleapis.com \
+  -- command-that-needs-google-oauth
+```
+
+DNS itself stays limited to port 53 for those resolver addresses. The task's
+application traffic remains limited to the requested domains' resolved IPv4
+addresses and requested TCP ports.
+
 For a phone or another external LAN device, `device-flow` creates a separate
 RAM-only route bound to one exact IPv4 address and verified MAC address. It
 accepts explicit domains and TCP/UDP ports, rejects wildcard domains and broad
