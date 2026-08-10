@@ -9,7 +9,8 @@ import shutil
 import socket
 import subprocess
 import sys
-from collections.abc import Iterator, Sequence
+import time
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
@@ -23,6 +24,8 @@ DEFAULT_HELPER = Path("/usr/local/libexec/astrill-lazy-netns")
 SOURCE_PORTS = "1024:65535"
 MAX_ALLOWED_DOMAINS = 16
 MAX_ALLOWED_PORTS = 8
+CLEANUP_RETRY_ATTEMPTS = 6
+CLEANUP_RETRY_DELAY_SECONDS = 2.0
 
 
 class IsolatedRunError(RuntimeError):
@@ -159,27 +162,27 @@ def run_isolated_command(
             command_returncode = completed.returncode
         finally:
             active_exception = sys.exc_info()[0] is not None
-            namespace_removed = True
             if namespace_prepared:
                 try:
                     _run_helper(helper, "cleanup", normalized_profile)
                 except IsolatedRunError as exc:
-                    namespace_removed = False
                     cleanup_errors.append(str(exc))
 
-            flows_removed = True
+            if connection_attempted:
+                cleanup_error = _retry_cleanup(
+                    lambda: _disconnect_after_attempt_verified(router),
+                    "Astrill disconnect",
+                )
+                if cleanup_error is not None:
+                    cleanup_errors.append(cleanup_error)
+
             for flow_id in reversed(installed_flows):
-                try:
-                    _delete_flow_verified(router, flow_id)
-                except (RouterError, IsolatedRunError) as exc:
-                    flows_removed = False
-                    cleanup_errors.append(str(exc))
-
-            if connection_attempted and namespace_removed and flows_removed:
-                try:
-                    _set_connection_verified(router, False)
-                except (RouterError, IsolatedRunError) as exc:
-                    cleanup_errors.append(str(exc))
+                cleanup_error = _retry_cleanup(
+                    lambda flow_id=flow_id: _delete_flow_verified(router, flow_id),
+                    f"flow cleanup {flow_id}",
+                )
+                if cleanup_error is not None:
+                    cleanup_errors.append(cleanup_error)
 
             if cleanup_errors:
                 cleanup_message = "; ".join(cleanup_errors)
@@ -252,22 +255,22 @@ def _default_interface() -> str:
 
 
 def _interface_identity(interface: str) -> tuple[str, str]:
-    completed = subprocess.run(
+    address_completed = subprocess.run(
         ["/usr/sbin/ip", "-json", "-4", "address", "show", "dev", interface],
         check=False,
         capture_output=True,
         text=True,
         timeout=10,
     )
-    if completed.returncode != 0:
-        raise IsolatedRunError("could not inspect the parent interface identity")
+    if address_completed.returncode != 0:
+        raise IsolatedRunError("could not inspect the parent interface IPv4 identity")
     try:
-        records = json.loads(completed.stdout)
+        address_records = json.loads(address_completed.stdout)
     except json.JSONDecodeError as exc:
-        raise IsolatedRunError("parent interface output is invalid") from exc
+        raise IsolatedRunError("parent interface IPv4 output is invalid") from exc
     addresses = {
         str(item.get("local"))
-        for record in records
+        for record in address_records
         if isinstance(record, dict)
         for item in record.get("addr_info", [])
         if isinstance(item, dict)
@@ -275,9 +278,23 @@ def _interface_identity(interface: str) -> tuple[str, str]:
         and item.get("scope") == "global"
         and isinstance(item.get("local"), str)
     }
+
+    link_completed = subprocess.run(
+        ["/usr/sbin/ip", "-json", "link", "show", "dev", interface],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if link_completed.returncode != 0:
+        raise IsolatedRunError("could not inspect the parent interface Ethernet identity")
+    try:
+        link_records = json.loads(link_completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise IsolatedRunError("parent interface link output is invalid") from exc
     macs = {
         str(record.get("address")).casefold()
-        for record in records
+        for record in link_records
         if isinstance(record, dict)
         and isinstance(record.get("address"), str)
         and re.fullmatch(
@@ -501,6 +518,32 @@ def _set_connection_verified(router: IsolatedRouter, connected: bool) -> None:
             raise IsolatedRunError(
                 f"Astrill connection did not reach the {expected} state"
             )
+
+
+def _disconnect_after_attempt_verified(router: IsolatedRouter) -> None:
+    """Acquire the controller after a possibly late connect, then force it down."""
+
+    result = router.set_astrill_connection(False, companion_enabled=True)
+    if result.get("vpn_state") != "down":
+        observed = router.status()
+        if observed.get("vpn_state") != "down":
+            raise IsolatedRunError("Astrill cleanup did not reach the down state")
+
+
+def _retry_cleanup(
+    action: Callable[[], None],
+    label: str,
+) -> str | None:
+    last_error: RouterError | IsolatedRunError | None = None
+    for attempt in range(CLEANUP_RETRY_ATTEMPTS):
+        try:
+            action()
+            return None
+        except (RouterError, IsolatedRunError) as exc:
+            last_error = exc
+            if attempt + 1 < CLEANUP_RETRY_ATTEMPTS:
+                time.sleep(CLEANUP_RETRY_DELAY_SECONDS)
+    return f"{label}: {last_error}"
 
 
 @contextmanager

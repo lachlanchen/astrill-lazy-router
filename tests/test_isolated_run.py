@@ -6,7 +6,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from astrill_lazy.isolated_run import IsolatedRunError, run_isolated_command
+from astrill_lazy.isolated_run import (
+    IsolatedRunError,
+    _interface_identity,
+    run_isolated_command,
+)
 from astrill_lazy.native_settings import NativeAstrillSettings
 from astrill_lazy.router import RouterError
 
@@ -69,6 +73,83 @@ class FakeRouter:
         self.connection_changes.append(connected)
         self.connected = connected
         return self.status()
+
+
+def test_interface_identity_reads_ipv4_and_mac_from_separate_ip_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(arguments)
+        if "address" in arguments:
+            output = json.dumps(
+                [
+                    {
+                        "ifname": "enp0s31f6",
+                        "addr_info": [
+                            {
+                                "family": "inet",
+                                "local": "192.168.1.100",
+                                "scope": "global",
+                            }
+                        ],
+                    }
+                ]
+            )
+        else:
+            output = json.dumps(
+                [
+                    {
+                        "ifname": "enp0s31f6",
+                        "link_type": "ether",
+                        "address": "D0:8E:79:0D:26:99",
+                    }
+                ]
+            )
+        return subprocess.CompletedProcess(arguments, 0, output, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert _interface_identity("enp0s31f6") == (
+        "192.168.1.100",
+        "d0:8e:79:0d:26:99",
+    )
+    assert calls == [
+        [
+            "/usr/sbin/ip",
+            "-json",
+            "-4",
+            "address",
+            "show",
+            "dev",
+            "enp0s31f6",
+        ],
+        [
+            "/usr/sbin/ip",
+            "-json",
+            "link",
+            "show",
+            "dev",
+            "enp0s31f6",
+        ],
+    ]
+
+
+def test_interface_identity_rejects_missing_link_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "address" in arguments:
+            output = '[{"addr_info":[{"family":"inet","local":"192.168.1.100","scope":"global"}]}]'
+        else:
+            output = '[{"ifname":"enp0s31f6","link_type":"ether"}]'
+        return subprocess.CompletedProcess(arguments, 0, output, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    with pytest.raises(IsolatedRunError, match="Ethernet identity"):
+        _interface_identity("enp0s31f6")
 
 
 def test_isolated_run_scopes_flows_and_restores_disconnected_state(
@@ -258,6 +339,69 @@ def test_isolated_run_disconnects_after_a_failed_connection_attempt(
 
     assert router.connected is False
     assert router.connection_changes == [True, False]
+    assert router.flows == []
+
+
+def test_isolated_run_cleans_a_late_tunnel_after_interrupted_connect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    helper = tmp_path / "astrill-lazy-netns"
+    helper.write_text("#!/bin/sh\n", encoding="ascii")
+    helper.chmod(0o755)
+    router = FakeRouter()
+    disconnect_attempts = 0
+
+    def run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "prepare" in arguments:
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                '{"profile":"taskvpn","namespace":"al-taskvpn",'
+                '"address":"192.168.1.243"}',
+                "",
+            )
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    def interrupted_connection(
+        connected: bool, *, companion_enabled: bool
+    ) -> dict[str, object]:
+        nonlocal disconnect_attempts
+        assert companion_enabled is True
+        router.connection_changes.append(connected)
+        if connected:
+            raise KeyboardInterrupt
+        disconnect_attempts += 1
+        if disconnect_attempts == 1:
+            router.connected = True
+            raise RouterError("controller is busy")
+        router.connected = False
+        return router.status()
+
+    router.set_astrill_connection = interrupted_connection  # type: ignore[method-assign]
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr("astrill_lazy.isolated_run.time.sleep", lambda _delay: None)
+    monkeypatch.setattr(os, "getuid", lambda: 1000)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "astrill_lazy.isolated_run._interface_identity",
+        lambda _interface: ("192.168.1.100", "d0:8e:79:0d:26:99"),
+    )
+    monkeypatch.setattr(
+        "astrill_lazy.isolated_run._resolve_allowed_domains",
+        lambda _domains: (("example.com",), ("93.184.216.34",)),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        run_isolated_command(
+            router,
+            ["/bin/true"],
+            helper=helper,
+            parent_interface="eth0",
+            allowed_domains=("example.com",),
+        )
+
+    assert disconnect_attempts == 2
+    assert router.connected is False
     assert router.flows == []
 
 
