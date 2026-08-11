@@ -30,13 +30,13 @@ def test_router_release_archive_matches_the_documented_identity() -> None:
     router_root = find_router_root()
     archive = build_router_package(router_root)
 
-    assert (router_root / "VERSION").read_text(encoding="ascii").strip() == "0.2.14"
-    assert len(archive) == 18_442
+    assert (router_root / "VERSION").read_text(encoding="ascii").strip() == "0.2.15"
+    assert len(archive) == 18_567
     assert (
         hashlib.md5(archive, usedforsecurity=False).hexdigest()
-        == "43b0002521faee5b8a44db929d477929"
+        == "942ca9ddc71a5c066a802a88166f20e8"
     )
     assert (
         hashlib.sha256(archive).hexdigest()
-        == "30cb10e9960f25d66752a926532fd8be0c8d75c82ddcfec8cf5a65e583206aac"
+        == "053f6b1b6c6dab26b26bb8e2e0a61791b297606a42fd242a33591ecd5a2a0f44"
     )

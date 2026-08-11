@@ -254,8 +254,9 @@ Astrill itself, it disconnects only after cleanup succeeds. Repeat
 `--allow-domain` or `--allow-port` only for destinations the task actually
 needs. Domain limits are enforced by resolved IPv4 destination, so shared CDN
 addresses remain an IP-layer boundary rather than an HTTP hostname boundary.
-Companion `0.2.14` derives its VPN route from either Astrill's legacy split
-default or its active native policy table, and transient flow deletion remains
+Companion `0.2.15` derives its VPN route from Astrill's legacy split default or
+active native policy table, and falls back to a device route for point-to-point
+`tun0` sessions that expose no gateway. Transient flow deletion remains
 available while a tunnel is degraded so cleanup cannot be trapped behind the
 failure it is trying to remove. Its managed connection window is 90 seconds,
 covering the measured favorite failover without allowing an unowned late

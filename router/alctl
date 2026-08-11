@@ -1156,6 +1156,22 @@ vpn_gateway_for_tun() {
     '
 }
 
+vpn_route_matches_tun() {
+    expected_gateway=$1
+    awk -v expected_gateway="$expected_gateway" '
+        $1 == "default" {
+            gateway = ""
+            device = ""
+            for (i = 1; i <= NF; i++) {
+                if ($i == "via") gateway = $(i + 1)
+                if ($i == "dev") device = $(i + 1)
+            }
+            if (device == "tun0" && gateway == expected_gateway) found = 1
+        }
+        END { exit !found }
+    '
+}
+
 vpn_fallback_route() {
     printf 'blackhole default metric %s\n' "$VPN_BLACKHOLE_METRIC"
 }
@@ -1189,10 +1205,9 @@ vpn_table_is_ready() {
     ready_vpn_fallback=$(vpn_fallback_route)
     if tunnel_is_up; then
         ready_vpn_gateway=$(vpn_gateway_for_tun)
-        [ -n "$ready_vpn_gateway" ] &&
-            [ "$ready_vpn_route_count" -eq 2 ] &&
+        [ "$ready_vpn_route_count" -eq 2 ] &&
             printf '%s\n' "$ready_vpn_routes" |
-                grep -Fxq "default via $ready_vpn_gateway dev tun0" &&
+                vpn_route_matches_tun "$ready_vpn_gateway" &&
             printf '%s\n' "$ready_vpn_routes" |
                 grep -Fxq "$ready_vpn_fallback"
     else
@@ -1317,12 +1332,15 @@ ensure_policy_tables() {
 
     if tunnel_is_up; then
         vpn_gateway=$(vpn_gateway_for_tun)
-        [ -n "$vpn_gateway" ] || return 1
         if ! vpn_table_is_ready; then
             policy_routes_changed=true
             ip route flush table "$VPN_TABLE"
-            ip route add table "$VPN_TABLE" default via "$vpn_gateway" dev tun0 ||
-                return 1
+            if [ -n "$vpn_gateway" ]; then
+                ip route add table "$VPN_TABLE" \
+                    default via "$vpn_gateway" dev tun0 || return 1
+            else
+                ip route add table "$VPN_TABLE" default dev tun0 || return 1
+            fi
             ip route add blackhole default metric "$VPN_BLACKHOLE_METRIC" \
                 table "$VPN_TABLE" || return 1
         fi

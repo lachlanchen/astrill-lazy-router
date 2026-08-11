@@ -7,10 +7,11 @@
   namespace TCP egress to resolved IPv4 destinations and ports, verifies the
   native host route is Direct, pins ordinary host TCP/UDP Direct while active,
   and restores the prior Astrill connection state.
-- Upgrade the router companion to `0.2.14`. It recognizes both legacy split
-  defaults and Astrill native policy tables, keeps VPN traffic fail-closed, and
-  permits transient-flow deletion during degraded tunnel cleanup. A bounded
-  90-second connect window covers the observed favorite failover latency.
+- Upgrade the router companion to `0.2.15`. It recognizes legacy split
+  defaults, Astrill native policy tables, and point-to-point `tun0` sessions
+  without a route gateway. It keeps VPN traffic fail-closed and permits
+  transient-flow deletion during degraded tunnel cleanup. A bounded 90-second
+  connect window covers the observed favorite failover latency.
 
 ## 0.3.0 - 2026-07-31
 

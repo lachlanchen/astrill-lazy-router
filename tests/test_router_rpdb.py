@@ -208,6 +208,97 @@ printf 'ready\n'
     assert result.stdout == "ready\n"
 
 
+def test_route_readiness_accepts_point_to_point_tunnel_without_gateway(
+    tmp_path: Path,
+) -> None:
+    result = _run_scenario(
+        tmp_path,
+        r"""
+nvram() {
+    case "$2" in
+        wan_iface) printf vlan2 ;;
+        wan_gateway) printf 192.168.2.1 ;;
+    esac
+}
+tunnel_is_up() {
+    return 0
+}
+ip() {
+    if [ "$1" = route ] && [ "$2" = show ] && [ "$3" = table ]; then
+        case "$4" in
+            212)
+                printf 'default dev tun0 scope link  \n'
+                printf 'blackhole default  metric 32767   \n'
+                ;;
+            main) printf '198.18.64.0/20 dev tun0 scope link\n' ;;
+        esac
+        return 0
+    fi
+    return 1
+}
+vpn_table_is_ready || exit 8
+printf 'point-to-point-ready\n'
+""",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "point-to-point-ready\n"
+
+
+def test_policy_table_uses_tunnel_device_when_gateway_is_absent(
+    tmp_path: Path,
+) -> None:
+    result = _run_scenario(
+        tmp_path,
+        r"""
+ROUTES=$BASE/routes
+mkdir -p "$BASE"
+: > "$ROUTES"
+nvram() {
+    case "$2" in
+        wan_iface) printf vlan2 ;;
+        wan_gateway) printf 192.168.2.1 ;;
+    esac
+}
+tunnel_is_up() {
+    return 0
+}
+direct_table_is_ready() {
+    return 0
+}
+vpn_table_is_ready() {
+    grep -q '^route add blackhole default metric 32767 table 212$' "$ROUTES"
+}
+ip() {
+    if [ "$1" = route ] && [ "$2" = show ] && [ "$3" = table ]; then
+        case "$4" in
+            main) printf '198.18.64.0/20 dev tun0 scope link\n' ;;
+        esac
+        return 0
+    fi
+    if [ "$1" = route ] && [ "$2" = flush ]; then
+        printf '%s\n' "$*" >> "$ROUTES"
+        return 0
+    fi
+    if [ "$1" = route ] && [ "$2" = add ]; then
+        printf '%s\n' "$*" >> "$ROUTES"
+        return 0
+    fi
+    return 1
+}
+ensure_policy_tables || exit 8
+cat "$ROUTES"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "route flush table 212\n"
+        "route add table 212 default dev tun0\n"
+        "route add blackhole default metric 32767 table 212\n"
+    )
+
+
 def test_vpn_gateway_uses_current_astrill_native_policy_table(
     tmp_path: Path,
 ) -> None:
