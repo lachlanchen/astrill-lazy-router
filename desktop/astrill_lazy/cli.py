@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     device_flow = subparsers.add_parser(
         "device-flow",
-        help="manage a volatile domain route for one external LAN device",
+        help="manage a volatile destination route for one external LAN device",
     )
     device_flow_commands = device_flow.add_subparsers(
         dest="device_flow_command", required=True
@@ -116,12 +116,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     list_device_flows.add_argument("--owner")
     set_device_flow = device_flow_commands.add_parser(
-        "set", help="set an exact-device, exact-domain volatile route"
+        "set", help="set an exact-device, exact-destination volatile route"
     )
     set_device_flow.add_argument("--owner", required=True)
     set_device_flow.add_argument("--source", required=True)
     set_device_flow.add_argument("--mac", required=True)
-    set_device_flow.add_argument("--domain", action="append", required=True)
+    set_device_flow.add_argument("--domain", action="append")
+    set_device_flow.add_argument(
+        "--destination-ip",
+        action="append",
+        help="allow one exact destination IPv4 address; repeat as needed",
+    )
     set_device_flow.add_argument(
         "--protocol", action="append", choices=("tcp", "udp")
     )
@@ -652,6 +657,7 @@ def main(argv: list[str] | None = None) -> int:
                     source=arguments.source,
                     mac=arguments.mac,
                     domains=arguments.domain,
+                    destination_ips=arguments.destination_ip,
                     target=arguments.target,
                     protocols=arguments.protocol,
                     port=arguments.port,
@@ -662,6 +668,7 @@ def main(argv: list[str] | None = None) -> int:
                         "ok": True,
                         "temporary": True,
                         "domains": list(spec.domains),
+                        "destination_ips": list(spec.destination_ips),
                         "protocols": [item.value for item in spec.protocols],
                         "port": spec.port,
                         "target": spec.target.value,

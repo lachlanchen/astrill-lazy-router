@@ -41,6 +41,7 @@ class DeviceFlowSpec:
     source: str
     mac: str
     domains: tuple[str, ...]
+    destination_ips: tuple[str, ...]
     target: RouteTarget
     protocols: tuple[Protocol, ...]
     port: int
@@ -52,7 +53,8 @@ class DeviceFlowSpec:
         owner: str,
         source: str,
         mac: str,
-        domains: list[str],
+        domains: list[str] | None,
+        destination_ips: list[str] | None = None,
         target: str,
         protocols: list[str] | None = None,
         port: int = 443,
@@ -75,12 +77,37 @@ class DeviceFlowSpec:
             raise ValueError("device-flow MAC address is invalid")
 
         normalized_domains = tuple(
-            dict.fromkeys(domain.strip().rstrip(".").casefold() for domain in domains)
+            dict.fromkeys(
+                domain.strip().rstrip(".").casefold() for domain in (domains or [])
+            )
         )
-        if not normalized_domains or any(not domain for domain in normalized_domains):
-            raise ValueError("device-flow requires at least one non-empty domain")
+        if any(not domain for domain in normalized_domains):
+            raise ValueError("device-flow domains must be non-empty")
         for domain in normalized_domains:
             validate_domain(domain)
+
+        normalized_destination_ips: list[str] = []
+        for raw_destination in destination_ips or []:
+            try:
+                destination = ipaddress.ip_address(raw_destination.strip())
+            except ValueError as exc:
+                raise ValueError(
+                    "device-flow destination IPs must be exact IPv4 addresses"
+                ) from exc
+            if (
+                destination.version != 4
+                or destination.is_multicast
+                or destination.is_unspecified
+            ):
+                raise ValueError(
+                    "device-flow destination IPs must be exact unicast IPv4 addresses"
+                )
+            normalized_destination_ips.append(str(destination))
+        normalized_destinations = tuple(dict.fromkeys(normalized_destination_ips))
+        if not normalized_domains and not normalized_destinations:
+            raise ValueError(
+                "device-flow requires at least one domain or exact destination IP"
+            )
 
         if not 1 <= port <= 65535:
             raise ValueError("device-flow port must be between 1 and 65535")
@@ -96,6 +123,7 @@ class DeviceFlowSpec:
             source=f"{address}/32",
             mac=normalized_mac,
             domains=normalized_domains,
+            destination_ips=normalized_destinations,
             target=RouteTarget(target.casefold()),
             protocols=normalized_protocols,
             port=port,
@@ -116,6 +144,26 @@ def compile_device_flow(spec: DeviceFlowSpec, catalog: Catalog) -> str:
                     name=f"Temporary {domain} {protocol.value}/{spec.port}",
                     match_kind=MatchKind.DOMAIN,
                     selector=domain,
+                    target=spec.target,
+                    region=region,
+                    priority=100,
+                    protocol=protocol,
+                    ports=str(spec.port),
+                )
+            )
+    for destination in spec.destination_ips:
+        for protocol in spec.protocols:
+            identity = hashlib.sha256(
+                f"{spec.owner}\0{destination}\0{protocol.value}\0{spec.port}".encode(
+                    "ascii"
+                )
+            ).hexdigest()[:20]
+            rules.append(
+                Rule(
+                    id=f"deviceflow-{identity}",
+                    name=f"Temporary {destination} {protocol.value}/{spec.port}",
+                    match_kind=MatchKind.CIDR,
+                    selector=f"{destination}/32",
                     target=spec.target,
                     region=region,
                     priority=100,

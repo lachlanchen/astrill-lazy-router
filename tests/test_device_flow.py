@@ -70,6 +70,7 @@ def play_spec() -> DeviceFlowSpec:
         source="192.168.1.132",
         mac="A2-04-FE-76-F4-17",
         domains=["play.googleapis.com", "PLAY.GOOGLEAPIS.COM."],
+        destination_ips=["58.63.233.69", "58.63.233.69"],
         target="vpn",
     )
 
@@ -80,29 +81,35 @@ def test_device_flow_is_exact_host_mac_domain_and_https_protocols() -> None:
     assert spec.source == "192.168.1.132/32"
     assert spec.mac == "a2:04:fe:76:f4:17"
     assert spec.domains == ("play.googleapis.com",)
+    assert spec.destination_ips == ("58.63.233.69",)
     assert tuple(item.value for item in spec.protocols) == ("tcp", "udp")
 
     payload = compile_device_flow(spec, load_catalog())
     rows = [line.split("\t") for line in payload.splitlines() if not line.startswith("#")]
-    assert len(rows) == 2
-    assert {row[3] for row in rows} == {"domain"}
-    assert {row[4] for row in rows} == {"play.googleapis.com"}
+    assert len(rows) == 4
+    assert {row[3] for row in rows} == {"domain", "cidr"}
+    assert {row[4] for row in rows} == {
+        "play.googleapis.com",
+        "58.63.233.69/32",
+    }
     assert {row[5] for row in rows} == {"vpn"}
     assert {row[6] for row in rows} == {"tcp", "udp"}
     assert {row[7] for row in rows} == {"443"}
 
 
 @pytest.mark.parametrize(
-    ("source", "domains"),
+    ("source", "domains", "destination_ips"),
     [
-        ("192.168.1.0/24", ["play.googleapis.com"]),
-        ("0.0.0.0", ["play.googleapis.com"]),
-        ("192.168.1.132", ["*.googleapis.com"]),
-        ("192.168.1.132", []),
+        ("192.168.1.0/24", ["play.googleapis.com"], []),
+        ("0.0.0.0", ["play.googleapis.com"], []),
+        ("192.168.1.132", ["*.googleapis.com"], []),
+        ("192.168.1.132", [], []),
+        ("192.168.1.132", [], ["58.63.233.0/24"]),
+        ("192.168.1.132", [], ["224.0.0.1"]),
     ],
 )
 def test_device_flow_rejects_broad_or_empty_scope(
-    source: str, domains: list[str]
+    source: str, domains: list[str], destination_ips: list[str]
 ) -> None:
     with pytest.raises(ValueError):
         DeviceFlowSpec.create(
@@ -110,6 +117,7 @@ def test_device_flow_rejects_broad_or_empty_scope(
             source=source,
             mac="a2:04:fe:76:f4:17",
             domains=domains,
+            destination_ips=destination_ips,
             target="vpn",
         )
 
