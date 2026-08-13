@@ -25,6 +25,7 @@ windows = [
 [project.scripts]
 astrill-lazy = "astrill_lazy.cli:main"
 astrill-lazy-gui = "astrill_lazy.application:main"
+astrill-lazy-direct-proxy = "astrill_lazy.direct_device_proxy:main"
 
 [project.gui-scripts]
 astrill-lazy-windows = "astrill_lazy.windows_app:main"

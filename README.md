@@ -42,6 +42,11 @@ after write access and companion deployment are deliberately enabled.
 | Router safety | Validated input, separate marks/tables, transactional A/B activation, rollback, and watchdog recovery |
 | Recovery | One action removes every companion-owned object and restores native Astrill-only operation |
 
+A separate manual [direct device CONNECT proxy](docs/DIRECT_DEVICE_PROXY.md)
+can temporarily steer one exact LAN device around an unreachable DNS-selected
+provider edge while preserving end-to-end TLS. It uses the host's normal direct
+route and never starts or traverses Astrill.
+
 > [!IMPORTANT]
 > The router has one Astrill tunnel and therefore one active VPN endpoint.
 > Policy countries are preferences for that shared tunnel, not simultaneous
